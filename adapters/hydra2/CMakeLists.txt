@@ -88,6 +88,16 @@ if(TOON_BUILD_TESTS)
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
   add_dependencies(toon-hydra2-probe hdToon)
 
+  # A measurement tool, not a CTest: what it shows depends on which schema
+  # and imaging plugins the session registers (MAT-Q1, renderer report 02).
+  add_executable(toon-hydra2-material-probe tests/material_probe.cpp)
+  target_link_libraries(toon-hydra2-material-probe
+    PRIVATE usdImaging hd usd)
+  target_compile_features(toon-hydra2-material-probe PRIVATE cxx_std_20)
+  target_compile_definitions(toon-hydra2-material-probe PRIVATE
+    NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+
   add_executable(toon-hydra2-render-buffer-test
     tests/render_buffer_test.cpp)
   target_link_libraries(toon-hydra2-render-buffer-test

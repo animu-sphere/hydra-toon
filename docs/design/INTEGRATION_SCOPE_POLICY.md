@@ -50,8 +50,10 @@ Each subject is linked to its owner and never restated here
 | Subject | Owner | Canonical document |
 | --- | --- | --- |
 | `VrmMaterialAPI`, `VrmMToonAPI`, `VrmTextureInfoAPI` — VRM / MToon material semantics as `inputs:vrm:*` Material interface inputs | `usd-vrm-plugins` | [material policy §6](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/MATERIAL_ARCHITECTURE_POLICY.md#6-canonical-vrm-material-semantics) · [schema contract](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/plugins/vrmSchema/docs/SCHEMA_CONTRACT.md) |
+| `vrmImaging` — the Hydra view of those semantics: the `vrm/<group>/<field>` data sources on the Hydra material prim, and what dirties them | `usd-vrm-plugins` | [imaging policy §28](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/VRM_IMAGING_POLICY.md#28-frozen-in-step-i1) |
 | The VRM stage: humanoid, expressions, look-at, the `/Asset` layout | `usd-vrm-plugins` | [design policy](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/DESIGN_POLICY.md) · [VRM motion policy](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/VRM_MOTION_POLICY.md) |
 | `MmdMaterialAPI` — MMD material semantics as `inputs:mmd:material:*`; draw order (`mmd:sourceIndex`); edge scale and sub-texture UV primvars | `usd-mmd-plugins` | [material policy §4](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#4-canonical-material-semantics) · [stage contract](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/STAGE_CONTRACT.md) |
+| `mmdImaging` — the Hydra view of `MmdMaterialAPI` (planned, does not exist yet) | `usd-mmd-plugins` | [package contract](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/architecture/PACKAGE_CONTRACT.md) |
 | `MotionPose`, `MotionStream`, the joint vocabulary, coordinates and time | `usd-motion-plugins` | [motion contract](https://github.com/animu-sphere/usd-motion-plugins/blob/main/docs/design/MOTION_CONTRACT.md) |
 | Device and protocol input (MediaPipe, mocap, OSC, XR) | `motion-connectors` | [docs](https://github.com/animu-sphere/motion-connectors/tree/main/docs) — reached only through `usd-motion-plugins`' types, never directly |
 | Per-frame composition of the avatar stack, and when rendering happens in it | `usd-avatar-runtime` | its own documentation |
@@ -99,4 +101,4 @@ owner, not resolved here.
 
 | Observed | Where | Owner |
 | --- | --- | --- |
-| The two format repositories describe different read paths: VRM says `hydra-toon` "reads `VrmMToonAPI` directly"; MMD fixes a UsdImaging adapter (planned `mmdImaging`, in `usd-mmd-plugins`) that exposes `MmdMaterialAPI` to Hydra | VRM material policy §5.3; MMD material policy §12, §14 step 5 | both; `hydra-toon`'s side is [MATERIAL_POLICY.md](MATERIAL_POLICY.md) §6 MAT-Q1 |
+| The imaging policy records the Hydra path `hydra-toon` reads as not measured, and the Step I3 handshake as the place to measure it. [Renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md) measured it: the `vrm` container reaches a classic `HdMaterial` through the terminal scene index, and a value-only change (§28.3's path for high-frequency values) produces no `Sync` under emulation | `usd-vrm-plugins` imaging policy §27, §28.3 | `usd-vrm-plugins` |

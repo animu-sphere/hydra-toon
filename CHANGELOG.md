@@ -31,6 +31,9 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   `UsdSkel`'s ext computations, whose CPU kernels the delegate runs.
 - The CTest `toon-render-world` for the core's dirty routing, and the first
   renderer report.
+- `toon-hydra2-material-probe`, which records what of a Material's canonical
+  semantics reaches a classic `HdMaterial`, and renderer report 02, which
+  answers MAT-Q1 for MToon with it.
 
 ### Changed
 

@@ -1,0 +1,31 @@
+#usda 1.0
+(
+    doc = """MAT-Q1 probe stage: a Material carrying VRM canonical semantics
+    as interface inputs no realization reads, one of them time-sampled.
+    Hand-authored; the names are usd-vrm-plugins' schema contract."""
+    startTimeCode = 1
+    endTimeCode = 2
+)
+
+def Scope "Looks"
+{
+    def Material "Toon" (
+        prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI"]
+    )
+    {
+        color3f inputs:vrm:material:baseColorFactor = (0.8, 0.7, 0.6)
+        color3f inputs:vrm:mtoon:shadeColorFactor = (0.5, 0.4, 0.3)
+        float inputs:vrm:mtoon:shadingShiftFactor.timeSamples = {
+            1: -0.1,
+            2: 0.2,
+        }
+        token outputs:surface.connect = </Looks/Toon/surface.outputs:surface>
+
+        def Shader "surface"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor = (0.8, 0.7, 0.6)
+            token outputs:surface
+        }
+    }
+}
