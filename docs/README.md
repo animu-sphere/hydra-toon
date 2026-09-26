@@ -15,7 +15,7 @@ and the document is a bug. When a summary disagrees with
 | [design/](design/) | What the renderer is meant to be, and why. | [DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | [architecture/](architecture/) | Which targets exist, where code goes, and how they depend on each other. | [PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | [reference/](reference/) | What is implemented now, and on what. | [CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) · [SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
-| [roadmap/](roadmap/) | What incomplete work remains. | [README.md](roadmap/README.md) · [current.md](roadmap/current.md) |
+| [roadmap/](roadmap/) | What incomplete work remains. | [README.md](roadmap/README.md) · [current.md](roadmap/current.md) · [vrm-host-session.md](roadmap/vrm-host-session.md) |
 | [guides/](guides/) | How to perform a task. | [BUILDING.md](guides/BUILDING.md) |
 | [releases/](releases/) | What shipped in a released version. | [README.md](releases/README.md) |
 | [reports/](reports/) | What was measured or observed. | [README.md](reports/README.md) |

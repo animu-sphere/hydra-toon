@@ -46,6 +46,7 @@ Configurations each row was measured on are
 | Render delegate creation | ✅ | `renderer.delegate.creation`; measured against OpenUSD 26.08 (`HD_API_VERSION` 98); the pre-98 branch compiles only in principle |
 | CPU colour / depth / primId `HdRenderBuffer`s | ✅ | `renderer.render_buffer.cpu` |
 | First frame and a stable update in `testusdview` | ✅ | `renderer.host.first_frame`, `.host.stable_update`: the smoke scene's mesh through its camera at the AOV's resolution; a points edit re-uploads points only, asserted from the frame evidence |
+| Per-frame host evidence (`TOON_HYDRA_EVIDENCE`) | ✅ | one line per frame: completion, revision, extent, buffers written, pipelines, target allocations, uploads, and how many materials selected PreviewSurface and MToon; [renderer report 05](../reports/renderer/05-2026-09-26-vrm-usdview-session.md) |
 | `mesh` | ✅ | points, topology (triangulated by `HdMeshUtil`), transform, visibility and constant `displayColor`, each synced only when its dirty bit is set |
 | `camera` | ✅ | view and projection read through `HdRenderPassState` |
 | Skinned points (`UsdSkel` ext computations) | ⚠️ | the computations' CPU kernels run during mesh sync, as HdEmbree does; GPU skinning is Renderer Phase 1 |
@@ -64,4 +65,4 @@ Configurations each row was measured on are
 | --- | --- | --- |
 | Headless runner (`toon-headless`) | ✅ | runs during `ost build`; writes `renderer-report.json` |
 | Standalone viewport (`toon-viewport`) | 🧪 | `ost renderer viewport`; shows the bootstrap triangle scene only |
-| `usdview` | ✅ | `testusdview` in CTest; `ost renderer view` has not been run |
+| `usdview` | ✅ | `testusdview` in CTest; with `vrmImaging` in the session, composed by hand from packages, VRM materials select MToon ([renderer report 05](../reports/renderer/05-2026-09-26-vrm-usdview-session.md)); `ost renderer view` and `ost formation run` have not been run |

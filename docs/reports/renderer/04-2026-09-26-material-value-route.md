@@ -1,5 +1,7 @@
 # `hdToon` takes value-only material changes from the terminal scene index: a time move across a canonical value reaches `ToonMaterial` without a Sync
 
+> Followed by [report 05](05-2026-09-26-vrm-usdview-session.md): `testusdview` run with the VRM plugins in the session, composed from packages.
+
 - Date: 2026-09-26
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.10`; runtimes `cy2026-windows-x86_64-py313-core` and

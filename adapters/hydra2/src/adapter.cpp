@@ -80,10 +80,22 @@ void AppendHostEvidence(std::uint64_t frame_index,
     const Toon::OffscreenStatistics& statistics,
     std::uint32_t width, std::uint32_t height,
     std::size_t buffers_written,
-    std::uint64_t scene_revision) {
+    const Toon::FrameSnapshot& snapshot) {
   const char* path = std::getenv("TOON_HYDRA_EVIDENCE");
   if (path == nullptr || *path == '\0') {
     return;
+  }
+  // Which model each material selected, so a host session shows whether a
+  // VRM material reached MToon or fell back to PreviewSurface (material
+  // policy §3) without a probe of its own.
+  std::size_t preview_materials{};
+  std::size_t mtoon_materials{};
+  for (const Toon::MaterialSnapshot& material : snapshot.materials) {
+    if (material.material.model == Toon::ToonShadingModel::PreviewSurface) {
+      ++preview_materials;
+    } else if (material.material.model == Toon::ToonShadingModel::MToon) {
+      ++mtoon_materials;
+    }
   }
   std::ofstream output(path, std::ios::binary | std::ios::app);
   if (!output) {
@@ -92,14 +104,16 @@ void AppendHostEvidence(std::uint64_t frame_index,
   }
   output << "frame=" << frame_index
          << " completion=" << statistics.completion
-         << " scene_revision=" << scene_revision
+         << " scene_revision=" << snapshot.revision
          << " width=" << width
          << " height=" << height
          << " buffers_written=" << buffers_written
          << " pipelines=" << statistics.pipelines_created
          << " target_allocations=" << statistics.target_allocations
          << " topology_uploads=" << statistics.topology_uploads
-         << " point_uploads=" << statistics.point_uploads << '\n';
+         << " point_uploads=" << statistics.point_uploads
+         << " materials_preview=" << preview_materials
+         << " materials_mtoon=" << mtoon_materials << '\n';
 }
 
 // GfMatrix4d is row-major for row vectors, so its storage order is already
@@ -224,7 +238,7 @@ public:
     }
     ++frame_index_;
     AppendHostEvidence(frame_index_, renderer_->statistics(), width, height,
-        buffers_written, snapshot_.revision);
+        buffers_written, snapshot_);
   }
 
 private:
