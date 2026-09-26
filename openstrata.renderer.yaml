@@ -1,0 +1,36 @@
+schema: openstrata.renderer/v1alpha1
+renderer:
+  name: toon
+composition:
+  backend: vulkan
+  scene_inputs: [headless, hydra2]
+  units:
+    core: toon-render-core
+    extraction: toon-render-extraction
+    backend: toon-render-vulkan
+  adapters:
+    headless: toon-headless
+    hydra2: hdToon
+    viewport: toon-viewport
+render_products:
+  required: [color, depth]
+frame:
+  contexts: 1
+  completion: explicit
+validation:
+  gpu_smoke: true
+  validation_messages_are_errors: true
+  assertions:
+    - renderer.core.boundary
+    - renderer.backend.capability
+    - renderer.gpu.frame
+    - renderer.validation.messages
+    - renderer.render_product.color
+    - renderer.render_product.depth
+    - renderer.frame.persistence
+    - renderer.install_tree
+    - renderer.plugin.discovery
+    - renderer.delegate.creation
+    - renderer.render_buffer.cpu
+    - renderer.host.first_frame
+    - renderer.host.stable_update

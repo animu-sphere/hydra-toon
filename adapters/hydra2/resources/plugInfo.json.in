@@ -1,0 +1,20 @@
+{
+  "Plugins": [
+    {
+      "Info": {
+        "Types": {
+          "HdToonRendererPlugin": {
+            "bases": ["HdRendererPlugin"],
+            "displayName": "Toon",
+            "priority": 0
+          }
+        }
+      },
+      "LibraryPath": "@TOON_HYDRA_LIBRARY_NAME@",
+      "Name": "hdToon",
+      "ResourcePath": ".",
+      "Root": "..",
+      "Type": "library"
+    }
+  ]
+}

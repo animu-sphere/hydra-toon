@@ -1,0 +1,12 @@
+[project]
+name = "toon"
+version = "0.1.0"
+
+[requires]
+platform = "cy2026"
+profile = "core"
+
+# The Hydra adapter needs a real OpenUSD imaging runtime (`--profile lookdev`
+# or `usd`); the default `core` build stays OpenUSD-free.
+[build.intents.hydra]
+cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true } }

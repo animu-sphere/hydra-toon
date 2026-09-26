@@ -1,0 +1,9 @@
+schema: openstrata.scaffold/v1alpha1
+template:
+  id: renderer
+  version: 0.5.1
+generator:
+  name: ost
+  version: 0.23.6
+inputs:
+  name: toon
