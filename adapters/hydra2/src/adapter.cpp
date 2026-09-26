@@ -17,6 +17,7 @@
 #include <pxr/imaging/hd/renderPassState.h>
 #include <pxr/imaging/hd/resourceRegistry.h>
 #include <pxr/imaging/hd/sceneIndex.h>
+#include <pxr/imaging/hd/sceneIndexObserver.h>
 #include <pxr/imaging/hd/tokens.h>
 
 #include <toon/extraction.hpp>
@@ -39,6 +40,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -630,8 +632,7 @@ void HdToonMaterial::Sync(HdSceneDelegate* delegate,
                 "PreviewSurface");
       });
     }
-    values_ = HdToonReadMaterial(prim);
-    state_->SetMaterial(material_, values_);
+    Read(prim);
   }
   *dirty_bits = Clean;
 }
@@ -640,14 +641,107 @@ HdDirtyBits HdToonMaterial::GetInitialDirtyBitsMask() const {
   return AllDirty;
 }
 
+// Read as Sync reads, so a value lands in the same slot; the render world
+// finds that only values changed and advances the parameters revision alone.
+void HdToonMaterial::SyncValues(const HdSceneIndexBase& terminal) {
+  Read(terminal.GetPrim(GetId()).dataSource);
+}
+
+void HdToonMaterial::Read(const HdContainerDataSourceHandle& prim) {
+  values_ = HdToonReadMaterial(prim);
+  state_->SetMaterial(material_, values_);
+}
+
 const Toon::ToonMaterial& HdToonMaterial::GetToonMaterial() const {
   return values_;
 }
 
-class HdToonRenderDelegate::Impl {
+// Scene index emulation turns only locators under `material` into a
+// material's dirty bits, so a `vrm/<group>/<field>` dirtied alone — a time
+// move across a sample — leaves the Sprim clean (renderer report 02). The
+// delegate observes the terminal scene index for those and syncs the values
+// itself in Update(), before any Sprim sync (material policy §8).
+class HdToonRenderDelegate::Impl final : public HdSceneIndexObserver {
 public:
+  ~Impl() override {
+    Observe(nullptr);
+  }
+
+  void Observe(const HdSceneIndexBaseRefPtr& terminal) {
+    if (terminal_) {
+      terminal_->RemoveObserver(HdSceneIndexObserverPtr(this));
+    }
+    terminal_ = terminal;
+    if (terminal_) {
+      terminal_->AddObserver(HdSceneIndexObserverPtr(this));
+    }
+  }
+
+  void AddMaterial(HdToonMaterial* material) {
+    std::scoped_lock lock(mutex_);
+    materials_[material->GetId()] = material;
+  }
+
+  void RemoveMaterial(HdToonMaterial* material) {
+    std::scoped_lock lock(mutex_);
+    const auto found = materials_.find(material->GetId());
+    if (found != materials_.end() && found->second == material) {
+      materials_.erase(found);
+    }
+  }
+
+  void SyncValueChanges() {
+    std::scoped_lock lock(mutex_);
+    if (terminal_) {
+      for (const SdfPath& id : pending_) {
+        const auto found = materials_.find(id);
+        if (found != materials_.end()) {
+          found->second->SyncValues(*terminal_);
+        }
+      }
+    }
+    pending_.clear();
+  }
+
+  void PrimsAdded(const HdSceneIndexBase& sender,
+      const AddedPrimEntries& entries) override {
+    (void)sender;
+    (void)entries;
+  }
+
+  void PrimsRemoved(const HdSceneIndexBase& sender,
+      const RemovedPrimEntries& entries) override {
+    (void)sender;
+    (void)entries;
+  }
+
+  // A dirtied `material` locator reaches Sync, which reads everything.
+  void PrimsDirtied(const HdSceneIndexBase& sender,
+      const DirtiedPrimEntries& entries) override {
+    (void)sender;
+    std::scoped_lock lock(mutex_);
+    for (const DirtiedPrimEntry& entry : entries) {
+      if (HdToonIsValueOnlyChange(entry.dirtyLocators)) {
+        pending_.insert(entry.primPath);
+      }
+    }
+  }
+
+  void PrimsRenamed(const HdSceneIndexBase& sender,
+      const RenamedPrimEntries& entries) override {
+    (void)sender;
+    (void)entries;
+  }
+
   std::shared_ptr<HdToonAdapterState> state =
       std::make_shared<HdToonAdapterState>();
+
+private:
+  // Weak, so the delegate never keeps the scene index graph alive.
+  HdSceneIndexBasePtr terminal_;
+  std::mutex mutex_;
+  std::unordered_map<SdfPath, HdToonMaterial*, SdfPath::Hash> materials_;
+  SdfPathSet pending_;
 };
 
 HdToonRenderDelegate::HdToonRenderDelegate(
@@ -717,7 +811,9 @@ HdSprim* HdToonRenderDelegate::CreateSprim(const TfToken& type_id,
     return new HdExtComputation(sprim_id);
   }
   if (type_id == HdPrimTypeTokens->material) {
-    return new HdToonMaterial(sprim_id, impl_->state);
+    auto* material = new HdToonMaterial(sprim_id, impl_->state);
+    impl_->AddMaterial(material);
+    return material;
   }
   return nullptr;
 }
@@ -738,6 +834,9 @@ HdSprim* HdToonRenderDelegate::CreateFallbackSprim(
 }
 
 void HdToonRenderDelegate::DestroySprim(HdSprim* sprim) {
+  if (auto* material = dynamic_cast<HdToonMaterial*>(sprim)) {
+    impl_->RemoveMaterial(material);
+  }
   delete sprim;
 }
 
@@ -779,6 +878,15 @@ HdAovDescriptor HdToonRenderDelegate::GetDefaultAovDescriptor(
     return {HdFormatInt32, false, VtValue(-1)};
   }
   return {};
+}
+
+void HdToonRenderDelegate::SetTerminalSceneIndex(
+    const HdSceneIndexBaseRefPtr& terminal_scene_index) {
+  impl_->Observe(terminal_scene_index);
+}
+
+void HdToonRenderDelegate::Update() {
+  impl_->SyncValueChanges();
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

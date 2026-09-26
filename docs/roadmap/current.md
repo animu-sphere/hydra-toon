@@ -35,16 +35,13 @@ Left out of Phase 0 and not yet placed in a phase:
 MAT-Q1 is answered for MToon
 ([material policy §2, §9](../design/MATERIAL_POLICY.md#9-open-questions);
 [renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)),
-and `hdToon`'s material Sprim reads and selects MToon by it
+`hdToon`'s material Sprim reads and selects MToon by it, and value-only
+changes reach it from the terminal scene index
 ([capability matrix](../reference/CAPABILITY_MATRIX.md#hydra-adapter-hdtoon);
-[renderer report 03](../reports/renderer/03-2026-09-26-material-sprim.md)).
+renderer reports [03](../reports/renderer/03-2026-09-26-material-sprim.md),
+[04](../reports/renderer/04-2026-09-26-material-value-route.md)).
 What is left for Renderer Phase 1's MToon path:
 
-- ⬜ **Value-only material changes from the terminal scene index.** A
-  `vrm/<group>/<field>` change without `material` never reaches `Sync`; the
-  delegate observes the terminal scene index and routes it to the material's
-  parameter slot. Needed for a time-sampled value in Renderer Phase 1, and
-  for `usd-vrm-plugins`' Step I4 values in Renderer Phase 3 at the latest.
 - ⬜ **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
   either, a VRM material silently draws as PreviewSurface. The session
   composes them as bundles; nothing links them.

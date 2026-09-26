@@ -45,6 +45,10 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   not bind materials yet.
 - The CTest `toon-renderer-hydra-material`, whose binary also reports what a
   real stage's materials select with `--stage`, and renderer report 03.
+- `hdToon` observes the terminal scene index and takes value-only material
+  changes from it: a material whose `vrm` locators alone were dirtied, which
+  emulation never syncs, is re-read in `Update()`. `--stage` now also moves
+  to the stage's end time code; renderer report 04.
 
 ### Changed
 

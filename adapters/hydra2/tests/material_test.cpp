@@ -5,14 +5,16 @@
 // Without arguments: a retained scene index stands in for vrmImaging and
 // spells its locators literally (its imaging policy §28.1), so the check
 // needs no format plugin and no GPU. With --stage, a stage runs through
-// UsdImaging instead and each material's selection is printed; what it shows
-// depends on the schema and imaging plugins the session registers.
+// UsdImaging instead and each material's selection is printed at the start
+// and end time codes; what it shows depends on the schema and imaging
+// plugins the session registers.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
 
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/token.h>
+#include <pxr/imaging/hd/changeTracker.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/retainedDataSource.h>
 #include <pxr/imaging/hd/retainedSceneIndex.h>
@@ -57,11 +59,43 @@ HdDataSourceBaseHandle Value(const T& value) {
   return HdRetainedTypedSampledDataSource<T>::New(value);
 }
 
+// A leaf whose value the test changes without replacing the prim, as a time
+// move changes what a time-sampled attribute's data source returns.
+class SharedFloatDataSource final : public HdTypedSampledDataSource<float> {
+public:
+  HD_DECLARE_DATASOURCE(SharedFloatDataSource);
+
+  VtValue GetValue(Time shutter_offset) override {
+    return VtValue(GetTypedValue(shutter_offset));
+  }
+
+  float GetTypedValue(Time shutter_offset) override {
+    (void)shutter_offset;
+    return *value_;
+  }
+
+  bool GetContributingSampleTimesForInterval(Time start_time, Time end_time,
+      std::vector<Time>* sample_times) override {
+    (void)start_time;
+    (void)end_time;
+    (void)sample_times;
+    return false;
+  }
+
+private:
+  explicit SharedFloatDataSource(std::shared_ptr<const float> value)
+      : value_(std::move(value)) {
+  }
+
+  std::shared_ptr<const float> value_;
+};
+
 HdContainerDataSourceHandle Prim(const std::vector<Field>& vrm_groups) {
   return Container({{"vrm", Container(vrm_groups)}});
 }
 
-HdContainerDataSourceHandle ToonPrim(float shading_shift) {
+HdContainerDataSourceHandle ToonPrim(
+    const HdDataSourceBaseHandle& shading_shift) {
   return Prim({
       {"material", Container({
           {"baseColorFactor", Value(GfVec3f(0.8F, 0.6F, 0.4F))},
@@ -74,7 +108,7 @@ HdContainerDataSourceHandle ToonPrim(float shading_shift) {
       })},
       {"mtoon", Container({
           {"shadeColorFactor", Value(GfVec3f(0.5F, 0.4F, 0.3F))},
-          {"shadingShiftFactor", Value(shading_shift)},
+          {"shadingShiftFactor", shading_shift},
           {"outlineWidthMode", Value(TfToken("screenCoordinates"))},
           {"outlineWidthFactor", Value(0.02F)},
           {"outlineColorFactor", Value(GfVec3f(0.1F, 0.1F, 0.2F))},
@@ -99,9 +133,11 @@ int RunRetained() {
   const SdfPath mtoon_only_id("/Looks/MToonOnly");
   const SdfPath gltf_only_id("/Looks/GltfOnly");
   const SdfPath plain_id("/Looks/Plain");
+  const auto shading_shift = std::make_shared<float>(-0.1F);
   const HdRetainedSceneIndexRefPtr scene = HdRetainedSceneIndex::New();
   scene->AddPrims({
-      {toon_id, HdPrimTypeTokens->material, ToonPrim(-0.1F)},
+      {toon_id, HdPrimTypeTokens->material,
+          ToonPrim(SharedFloatDataSource::New(shading_shift))},
       // A leaf of the wrong type keeps the default.
       {mtoon_only_id, HdPrimTypeTokens->material,
           Prim({{"mtoon", Container({
@@ -169,9 +205,30 @@ int RunRetained() {
     return 1;
   }
 
+  // A value-only change dirties its `vrm` locator alone, as a time move
+  // across a sample does (renderer report 02). Emulation leaves the Sprim
+  // clean; the delegate's observer carries the value.
+  *shading_shift = 0.3F;
+  scene->DirtyPrims({{toon_id,
+      HdDataSourceLocatorSet{HdDataSourceLocator(TfToken("vrm"),
+          TfToken("mtoon"), TfToken("shadingShiftFactor"))}}});
+  if (!Check(index->GetChangeTracker().GetSprimDirtyBits(toon_id) ==
+                 HdChangeTracker::Clean,
+          "emulation must leave a value-only change's material clean")) {
+    return 1;
+  }
+  index->SyncAll(&tasks, &context);
+  toon = FindMaterial(*index, toon_id);
+  expected.mtoon.shading_shift = 0.3F;
+  if (!Check(toon != nullptr && toon->GetToonMaterial() == expected,
+          "a value-only change must reach the material's values")) {
+    return 1;
+  }
+
   // Re-adding a prim of the same type dirties all of it, as an authored
   // edit dirties the whole `material` locator.
-  scene->AddPrims({{toon_id, HdPrimTypeTokens->material, ToonPrim(0.2F)}});
+  scene->AddPrims(
+      {{toon_id, HdPrimTypeTokens->material, ToonPrim(Value(0.2F))}});
   index->SyncAll(&tasks, &context);
   toon = FindMaterial(*index, toon_id);
   expected.mtoon.shading_shift = 0.2F;
@@ -213,6 +270,34 @@ const char* AlphaModeName(Toon::ToonAlphaMode mode) {
   return "opaque";
 }
 
+void PrintMaterials(HdRenderIndex& index, double time) {
+  std::size_t mtoon = 0;
+  const SdfPathVector ids = index.GetSprimSubtree(HdPrimTypeTokens->material,
+      SdfPath::AbsoluteRootPath());
+  for (const SdfPath& id : ids) {
+    const HdToonMaterial* material = FindMaterial(index, id);
+    if (material == nullptr) {
+      continue;
+    }
+    const Toon::ToonMaterial& values = material->GetToonMaterial();
+    mtoon += values.model == Toon::ToonShadingModel::MToon ? 1U : 0U;
+    std::cout << "time=" << time << ' ' << id
+              << " model=" << ModelName(values.model)
+              << " base=(" << values.base_color.x << ", "
+              << values.base_color.y << ", " << values.base_color.z << ")"
+              << " alpha=" << values.alpha
+              << " alphaMode=" << AlphaModeName(values.alpha_mode)
+              << " doubleSided=" << values.double_sided
+              << " outline=" << values.outline
+              << " shadingShift=" << values.mtoon.shading_shift
+              << " shadingToony=" << values.mtoon.shading_toony << '\n';
+  }
+  std::cout << "time=" << time << " materials=" << ids.size()
+            << " mtoon=" << mtoon << '\n';
+}
+
+// Populates at the start time code, then moves to the end one: a
+// time-sampled canonical value changes by the value-only route alone.
 int RunStage(const char* path) {
   const UsdStageRefPtr stage = UsdStage::Open(path);
   if (!stage) {
@@ -227,32 +312,14 @@ int RunStage(const char* path) {
   std::unique_ptr<HdRenderIndex> index(HdRenderIndex::New(&delegate, {}));
   index->InsertSceneIndex(indices.finalSceneIndex,
       SdfPath::AbsoluteRootPath());
-  indices.stageSceneIndex->SetTime(stage->GetStartTimeCode());
   HdTaskSharedPtrVector tasks;
   HdTaskContext context;
-  index->SyncAll(&tasks, &context);
-
-  std::size_t mtoon = 0;
-  const SdfPathVector ids = index->GetSprimSubtree(HdPrimTypeTokens->material,
-      SdfPath::AbsoluteRootPath());
-  for (const SdfPath& id : ids) {
-    const HdToonMaterial* material = FindMaterial(*index, id);
-    if (material == nullptr) {
-      continue;
-    }
-    const Toon::ToonMaterial& values = material->GetToonMaterial();
-    mtoon += values.model == Toon::ToonShadingModel::MToon ? 1U : 0U;
-    std::cout << id << " model=" << ModelName(values.model)
-              << " base=(" << values.base_color.x << ", "
-              << values.base_color.y << ", " << values.base_color.z << ")"
-              << " alpha=" << values.alpha
-              << " alphaMode=" << AlphaModeName(values.alpha_mode)
-              << " doubleSided=" << values.double_sided
-              << " outline=" << values.outline
-              << " shadingShift=" << values.mtoon.shading_shift
-              << " shadingToony=" << values.mtoon.shading_toony << '\n';
+  for (const double time :
+      {stage->GetStartTimeCode(), stage->GetEndTimeCode()}) {
+    indices.stageSceneIndex->SetTime(UsdTimeCode(time));
+    index->SyncAll(&tasks, &context);
+    PrintMaterials(*index, time);
   }
-  std::cout << "materials=" << ids.size() << " mtoon=" << mtoon << '\n';
   index.reset();
   return 0;
 }

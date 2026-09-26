@@ -1,5 +1,7 @@
 # `hdToon` gains a material Sprim: MToon is selected from `vrmImaging`'s container and normalized into `ToonMaterial`
 
+> Followed by [report 04](04-2026-09-26-material-value-route.md): value-only changes now reach the material through the delegate's terminal-scene-index observer.
+
 - Date: 2026-09-26
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.10`; runtimes `cy2026-windows-x86_64-py313-core` and
