@@ -30,16 +30,14 @@ CY2026 names (2022.x) is what a managed build pins.
   and `toon`: resolved, locked and run by `ost formation`, every VRM material
   selecting MToon in `testusdview`
   ([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md);
-  [ost report 05](../reports/ost/05-2026-09-27-v0.23.11-report-04-reverified.md)).
-- ⚠️ **The run supplies the host's Python.** `ost formation run` puts no
-  interpreter on the command's `PATH` and the runtime ships none, so the
-  Formation's `testusdview` command is overridden with the host's
-  `python.exe` (ost report 05 Q1,
-  [open-strata#259](https://github.com/animu-sphere/open-strata/issues/259)). Replace when `ost` composes the platform
-  interpreter.
-- ⚠️ **The Formation must live in a short directory.** Under a deep one, Qt
-  cannot load its platform plugin from the materialized runtime (ost report
-  05 Q2, [open-strata#260](https://github.com/animu-sphere/open-strata/issues/260)).
+  [ost report 05](../reports/ost/05-2026-09-27-v0.23.11-report-04-reverified.md),
+  [06](../reports/ost/06-2026-09-27-v0.23.13-report-05-reverified.md)).
+- ✅ **The Formation's own command runs.** `ost formation run` starts the
+  declared `testusdview` through the host Python the runtime was validated
+  with, and a deep manifest directory no longer breaks Qt
+  ([ost report 06](../reports/ost/06-2026-09-27-v0.23.13-report-05-reverified.md);
+  `ost` 0.23.13). The host Python 3.13 stays a prerequisite: the runtime
+  ships none.
 - ⬜ **A Formation in the repository** and its `testusdview` check. It pins
   published digests only, so it waits on the next item.
 - ⬜ **Publish the renderer package** as
@@ -71,8 +69,7 @@ CY2026 names (2022.x) is what a managed build pins.
   ost artifact import dist/toon/<version>/cy2026-linux-x86_64-py313-lookdev--hydra
   ```
 
-  Then the Formation, as on Windows. Ost report 05 Q1 applies to Linux too:
-  `testusdview`'s `#!/usr/bin/env python3` meets the same `PATH`.
+  Then the Formation, as on Windows, with a host Python 3.13 installed.
 
 ## macOS arm64
 
