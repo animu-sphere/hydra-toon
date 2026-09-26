@@ -11,6 +11,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️
 | Document | Contents |
 | --- | --- |
 | [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1, and project infrastructure. |
+| [vrm-host-session.md](vrm-host-session.md) | The VRM `usdview` session as a Formation: its members, package names, and the state and plan on Windows, Linux and macOS. |
 
 ## Sequence
 

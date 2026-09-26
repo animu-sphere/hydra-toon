@@ -42,9 +42,14 @@ renderer reports [03](../reports/renderer/03-2026-09-26-material-sprim.md),
 [04](../reports/renderer/04-2026-09-26-material-value-route.md)).
 What is left for Renderer Phase 1's MToon path:
 
-- ⬜ **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
+- ⛔ **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
   either, a VRM material silently draws as PreviewSurface. The session
-  composes them as bundles; nothing links them.
+  composes them as bundles; nothing links them. Composed by hand from the
+  packages it selects MToon in `testusdview`
+  ([renderer report 05](../reports/renderer/05-2026-09-26-vrm-usdview-session.md));
+  as a Formation it is blocked on `ost`
+  ([ost report 04](../reports/ost/04-2026-09-26-v0.23.10-a-renderer-formation.md)).
+  Per platform: [vrm-host-session.md](vrm-host-session.md).
 
 Before Renderer Phase 4:
 

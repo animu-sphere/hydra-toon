@@ -49,6 +49,11 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   changes from it: a material whose `vrm` locators alone were dirtied, which
   emulation never syncs, is re-read in `Update()`. `--stage` now also moves
   to the stage's end time code; renderer report 04.
+- The host frame evidence (`TOON_HYDRA_EVIDENCE`) counts the materials that
+  selected PreviewSurface and MToon, so a `usdview` session shows whether VRM
+  materials reached MToon; renderer report 05 and `ost` report 04, on
+  composing that session from packages.
+- The roadmap page for the VRM host session on Windows, Linux and macOS.
 
 ### Changed
 
