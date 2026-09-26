@@ -91,6 +91,44 @@ void RenderWorld::SetView(const ToonView& view) {
   }
 }
 
+bool IsStructuralChange(const ToonMaterial& before,
+    const ToonMaterial& after) {
+  return before.model != after.model ||
+         before.alpha_mode != after.alpha_mode ||
+         before.double_sided != after.double_sided;
+}
+
+MaterialId RenderWorld::CreateMaterial() {
+  const MaterialId id = next_material_++;
+  MaterialSnapshot& material = materials_[id];
+  material.id = id;
+  material.parameters_revision = Stamp();
+  material.structure_revision = material.parameters_revision;
+  dirty_ = true;
+  return id;
+}
+
+void RenderWorld::RemoveMaterial(MaterialId material) {
+  if (materials_.erase(material) != 0) {
+    dirty_ = true;
+  }
+}
+
+void RenderWorld::SetMaterial(MaterialId material, const ToonMaterial& values) {
+  const auto found = materials_.find(material);
+  if (found == materials_.end() || found->second.material == values) {
+    return;
+  }
+  MaterialSnapshot& record = found->second;
+  const bool structural = IsStructuralChange(record.material, values);
+  record.material = values;
+  record.parameters_revision = Stamp();
+  if (structural) {
+    record.structure_revision = record.parameters_revision;
+  }
+  dirty_ = true;
+}
+
 void RenderWorld::SetBootstrapTriangle() {
   // z = -0.5 in OpenGL clip space is depth 0.25 once a backend maps it.
   const MeshId mesh = CreateMesh();
@@ -113,6 +151,10 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   snapshot.meshes.clear();
   for (const auto& entry : meshes_) {
     snapshot.meshes.push_back(entry.second);
+  }
+  snapshot.materials.clear();
+  for (const auto& entry : materials_) {
+    snapshot.materials.push_back(entry.second);
   }
 }
 

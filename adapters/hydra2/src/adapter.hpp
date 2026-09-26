@@ -3,8 +3,12 @@
 
 #include <pxr/pxr.h>
 
+#include <pxr/imaging/hd/dataSource.h>
+#include <pxr/imaging/hd/material.h>
 #include <pxr/imaging/hd/renderBuffer.h>
 #include <pxr/imaging/hd/renderDelegate.h>
+
+#include <toon/render_world.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +59,32 @@ private:
   bool converged_{};
   std::size_t map_count_{};
   std::vector<std::uint8_t> data_;
+};
+
+class HdToonAdapterState;
+
+// Selects a material's model and normalizes its values from its Hydra prim's
+// own data sources (material policy §2–§4): a `vrm/mtoon` container is
+// MToon, read in the locator hierarchy `vrmImaging` froze; anything else is
+// PreviewSurface. A null container is the fallback material.
+Toon::ToonMaterial HdToonReadMaterial(const HdContainerDataSourceHandle& prim);
+
+class HdToonMaterial final : public HdMaterial {
+public:
+  HdToonMaterial(const SdfPath& id, std::shared_ptr<HdToonAdapterState> state);
+  ~HdToonMaterial() override;
+
+  void Sync(HdSceneDelegate* delegate, HdRenderParam* render_param,
+      HdDirtyBits* dirty_bits) override;
+  HdDirtyBits GetInitialDirtyBitsMask() const override;
+
+  // What the last Sync read.
+  const Toon::ToonMaterial& GetToonMaterial() const;
+
+private:
+  std::shared_ptr<HdToonAdapterState> state_;
+  Toon::MaterialId material_;
+  Toon::ToonMaterial values_;
 };
 
 class HdToonRenderDelegate final : public HdRenderDelegate {

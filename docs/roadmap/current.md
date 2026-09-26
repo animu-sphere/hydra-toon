@@ -34,12 +34,12 @@ Left out of Phase 0 and not yet placed in a phase:
 
 MAT-Q1 is answered for MToon
 ([material policy §2, §9](../design/MATERIAL_POLICY.md#9-open-questions);
-[renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)).
-What it leaves for Renderer Phase 1's MToon path:
+[renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)),
+and `hdToon`'s material Sprim reads and selects MToon by it
+([capability matrix](../reference/CAPABILITY_MATRIX.md#hydra-adapter-hdtoon);
+[renderer report 03](../reports/renderer/03-2026-09-26-material-sprim.md)).
+What is left for Renderer Phase 1's MToon path:
 
-- ⬜ **A material Sprim in `hdToon`** that reads the Hydra material prim's
-  `vrm` container from the terminal scene index in `Sync` and selects the
-  model by §3 of the material policy.
 - ⬜ **Value-only material changes from the terminal scene index.** A
   `vrm/<group>/<field>` change without `material` never reaches `Sync`; the
   delegate observes the terminal scene index and routes it to the material's
