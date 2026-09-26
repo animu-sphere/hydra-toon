@@ -48,9 +48,6 @@ What it leaves for Renderer Phase 1's MToon path:
 - ⬜ **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
   either, a VRM material silently draws as PreviewSurface. The session
   composes them as bundles; nothing links them.
-- ⬜ **Raise the cross-repository observation** in
-  [integration scope §6](../design/INTEGRATION_SCOPE_POLICY.md#6-cross-repository-observations)
-  with `usd-vrm-plugins`.
 
 Before Renderer Phase 4:
 

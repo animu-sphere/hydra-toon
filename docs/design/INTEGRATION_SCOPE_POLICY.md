@@ -101,4 +101,4 @@ owner, not resolved here.
 
 | Observed | Where | Owner |
 | --- | --- | --- |
-| The imaging policy records the Hydra path `hydra-toon` reads as not measured, and the Step I3 handshake as the place to measure it. [Renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md) measured it: the `vrm` container reaches a classic `HdMaterial` through the terminal scene index, and a value-only change (§28.3's path for high-frequency values) produces no `Sync` under emulation | `usd-vrm-plugins` imaging policy §27, §28.3 | `usd-vrm-plugins` |
+| The imaging policy records the Hydra path `hydra-toon` reads as not measured, and the Step I3 handshake as the place to measure it. [Renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md) measured it: the `vrm` container reaches a classic `HdMaterial` through the terminal scene index, and a value-only change (§28.3's path for high-frequency values) produces no `Sync` under emulation | `usd-vrm-plugins` imaging policy §27, §28.3 | `usd-vrm-plugins`; raised as [usd-vrm-plugins#252](https://github.com/animu-sphere/usd-vrm-plugins/issues/252) |
