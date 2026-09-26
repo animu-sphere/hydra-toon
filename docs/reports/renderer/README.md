@@ -7,3 +7,4 @@ finding gets a new report and a one-line forward note on the old one.
 | Report | Subject |
 | --- | --- |
 | [01](01-2026-09-26-phase0-mesh-camera.md) | Renderer Phase 0 lands: scene meshes through the Hydra camera at the AOV's resolution, one pipeline, uploads only on change; a skinned avatar draws once ext computations run |
+| [02](02-2026-09-26-mat-q1-material-inputs.md) | MAT-Q1 measured: canonical material values reach a classic delegate only through `vrmImaging`'s `vrm` container; a value-only change produces no Sync, and the delegate's terminal-scene-index hooks see it |

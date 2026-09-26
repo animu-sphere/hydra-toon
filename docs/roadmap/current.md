@@ -32,12 +32,28 @@ Left out of Phase 0 and not yet placed in a phase:
 
 ## Before Renderer Phase 1
 
-- ⬜ **MAT-Q1: how Material interface inputs reach the delegate.** Measure on
-  OpenUSD 26.08 and agree the adapter's home with `usd-vrm-plugins` and
-  `usd-mmd-plugins` ([material policy §9](../design/MATERIAL_POLICY.md#9-open-questions)).
-- ⬜ **Raise the cross-repository observations** in
-  [integration scope §6](../design/INTEGRATION_SCOPE_POLICY.md#6-cross-repository-observations)
-  with their owners.
+MAT-Q1 is answered for MToon
+([material policy §2, §9](../design/MATERIAL_POLICY.md#9-open-questions);
+[renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)).
+What it leaves for Renderer Phase 1's MToon path:
+
+- ⬜ **A material Sprim in `hdToon`** that reads the Hydra material prim's
+  `vrm` container from the terminal scene index in `Sync` and selects the
+  model by §3 of the material policy.
+- ⬜ **Value-only material changes from the terminal scene index.** A
+  `vrm/<group>/<field>` change without `material` never reaches `Sync`; the
+  delegate observes the terminal scene index and routes it to the material's
+  parameter slot. Needed for a time-sampled value in Renderer Phase 1, and
+  for `usd-vrm-plugins`' Step I4 values in Renderer Phase 3 at the latest.
+- ⬜ **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
+  either, a VRM material silently draws as PreviewSurface. The session
+  composes them as bundles; nothing links them.
+
+Before Renderer Phase 4:
+
+- ⬜ **MAT-Q1 for MMD.** Propose to `usd-mmd-plugins` that `mmdImaging`
+  expose `MmdMaterialAPI` in the shape `vrmImaging` froze, so one read path
+  serves both models.
 
 ## Project infrastructure
 

@@ -21,12 +21,23 @@ it into, and what stays specific to one model.
 
 | Model | Recognized by | Read from | Owner |
 | --- | --- | --- | --- |
-| MToon | `VrmMToonAPI` applied to the `UsdShadeMaterial` | `inputs:vrm:material:*`, `inputs:vrm:mtoon:*`, `inputs:vrm:textureInfo:<slot>:*` | [`usd-vrm-plugins` material policy §6](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/MATERIAL_ARCHITECTURE_POLICY.md#6-canonical-vrm-material-semantics) |
-| MMD | `MmdMaterialAPI` applied to the `UsdShadeMaterial` | `inputs:mmd:material:*`; `mmd:sourceIndex`; `primvars:mmd:edgeScale`, `primvars:mmd:uv1` | [`usd-mmd-plugins` material policy §4](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#4-canonical-material-semantics) |
+| MToon | `VrmMToonAPI` applied to the `UsdShadeMaterial`; in Hydra, a `vrm/mtoon` container on the material prim | `inputs:vrm:material:*`, `inputs:vrm:mtoon:*`, `inputs:vrm:textureInfo:<slot>:*`, as `vrmImaging` exposes them on the Hydra material prim: `vrm/material`, `vrm/mtoon`, `vrm/textureInfo/<role>` | [`usd-vrm-plugins` material policy §6](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/MATERIAL_ARCHITECTURE_POLICY.md#6-canonical-vrm-material-semantics); the Hydra view, [imaging policy §28.1](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/VRM_IMAGING_POLICY.md#281-the-vrm-locator-hierarchy) |
+| MMD | `MmdMaterialAPI` applied to the `UsdShadeMaterial` | `inputs:mmd:material:*`; `mmd:sourceIndex`; `primvars:mmd:edgeScale`, `primvars:mmd:uv1`; the Hydra view is `mmdImaging`'s, which does not exist yet (MAT-Q1) | [`usd-mmd-plugins` material policy §4](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#4-canonical-material-semantics) |
 | PreviewSurface | neither API applied; a `UsdPreviewSurface` reached from the material's surface output | the ordinary Hydra material network | OpenUSD |
 
 The attribute names and their meaning belong to the owners and are not
-restated here. MMD's stage-contract version 1 (schema-less `mmd:material:*`)
+restated here.
+
+The canonical values reach the renderer only through the format repository's
+UsdImaging adapter, never through the material network: a realization does
+not connect to them, so the network never carries them
+([renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)).
+`hdToon` therefore reads the Hydra material prim's own data sources, from the
+render index's terminal scene index, in the locator hierarchy the adapter's
+owner froze. It links neither the schema nor the adapter. A session that
+registers either without the other, or neither, carries no `vrm` container,
+and the material is PreviewSurface by §3 — a silent fall-back that the
+session's composition, not this renderer, has to prevent. MMD's stage-contract version 1 (schema-less `mmd:material:*`)
 is not read: MMD rendering is Renderer Phase 4, after that repository's
 version 2 became what its importer authors.
 
@@ -34,7 +45,7 @@ version 2 became what its importer authors.
 
 For each material, exactly one model applies, in this order:
 
-1. `VrmMToonAPI` applied → **MToon**.
+1. `VrmMToonAPI` applied — in Hydra, `vrm/mtoon` present → **MToon**.
 2. `MmdMaterialAPI` applied → **MMD**.
 3. Otherwise → **PreviewSurface**, from the material's surface network.
 4. Nothing readable → the fallback material.
@@ -120,7 +131,12 @@ an MMD material morph
 ([`usd-mmd-plugins` §11](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#11-material-morphs)).
 
 A changed value updates that material's parameter slot and nothing else
-([DESIGN_POLICY.md](DESIGN_POLICY.md) §14). It does not re-select the model,
+([DESIGN_POLICY.md](DESIGN_POLICY.md) §14). A value-only change is a dirtied
+`vrm/<group>/<field>` locator with nothing under `material`, which scene
+index emulation translates to no dirty bit on a classic `HdMaterial`
+([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)):
+`hdToon` takes it from the terminal scene index it observes
+(`HdRenderDelegate::SetTerminalSceneIndex`, `Update`), not from `Sync`. It does not re-select the model,
 rebuild the draw packet or touch the pipeline. Only a change to which API is
 applied, a texture's identity, the alpha mode or double-sidedness is
 structural.
@@ -129,6 +145,6 @@ structural.
 
 | Id | Question | Proposed answer | Resolve by |
 | --- | --- | --- | --- |
-| MAT-Q1 | How the Material interface inputs `inputs:vrm:*` and `inputs:mmd:material:*` reach the render delegate. Hydra's material network is built from what the surface terminals connect to, so an input no realization connects to may never arrive; the format repositories describe different paths ([integration scope §6](INTEGRATION_SCOPE_POLICY.md#6-cross-repository-observations)) | Measure on OpenUSD 26.08 before choosing. Candidates: what already arrives through the material network; a UsdImaging API-schema adapter per API, registered by schema name so no link to the format repository is needed; a `hydra-toon` scene index reading the prim's data sources. One path for both models is preferred. Where an adapter lives (here, or `mmdImaging` in `usd-mmd-plugins`) is agreed with its owner | Renderer Phase 1 |
+| MAT-Q1 | How the Material interface inputs `inputs:vrm:*` and `inputs:mmd:material:*` reach the render delegate | **MToon: answered** on OpenUSD 26.08 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)). Not through the material network or `Get`; through `vrmImaging`'s `vrm` container on the Hydra material prim, read from the terminal scene index — structural changes in `Sync`, value-only changes from the observed terminal scene index (§2, §8). **MMD:** the same shape is proposed for `mmdImaging`, whose Hydra view is `usd-mmd-plugins`' to define, so that one read path serves both | MToon: Renderer Phase 1. MMD: agreed with `usd-mmd-plugins` before Renderer Phase 4 |
 | MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | `hydra-toon` ships its own ramp set whose terms allow redistribution, mapped by index | Renderer Phase 4 |
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | Decide, and record, how the MMD path interprets them, against reference renders from MMD itself | Renderer Phase 4 |
