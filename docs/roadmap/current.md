@@ -9,7 +9,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️
 
 The OpenStrata renderer scaffold was generated on 2026-09-26 and passes its
 own contract on Windows
-([report](../reports/ost/01-2026-09-26-v0.23.6-renderer-template-bootstrap.md)).
+([latest report](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md)).
 What is left of [design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)
 Phase 0:
 

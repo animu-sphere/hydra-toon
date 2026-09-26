@@ -21,3 +21,4 @@ The newest report carries the current asks.
 | --- | --- | --- |
 | [01](01-2026-09-26-v0.23.6-renderer-template-bootstrap.md) | 0.23.6 | The renderer template bootstraps; its Hydra adapter needs a fix for OpenUSD 26.08; a no-op build and the viewport launch record each fail `ost validate` |
 | [02](02-2026-09-26-v0.23.7-report-01-reverified.md) | 0.23.7 | Report 01's asks are resolved; on `core`, `renderer.install_tree` stays SKIP after its CTest passes; a `lookdev` build rewrites `strata.lock` |
+| [03](03-2026-09-26-v0.23.8-report-02-reverified.md) | 0.23.8 | Report 02's asks are resolved; `core` passes `renderer.install_tree` after `ost test`; `ost lock` restores the default pin; `ost build` rewrites `strata.lock` line endings |

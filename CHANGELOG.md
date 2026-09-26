@@ -33,3 +33,7 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   no-op build and after `ost renderer viewport`, so the documented
   workarounds for both are gone, and `ost validate --intent renderer-viewport`
   validates the viewport build.
+- The install-tree CTest merges the installed runner's `renderer.install_tree`
+  verdict into `renderer-report.json`, as renderer template 0.5.3 does, so
+  `ost validate` on the default build passes the check after `ost test`.
+  `ost` 0.23.8 or newer is required.

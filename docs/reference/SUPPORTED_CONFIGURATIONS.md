@@ -8,15 +8,15 @@ local run, and the report named in the row holds its detail.
 
 | OS | Compiler | Build | Runtime | GPU | Result | Report |
 | --- | --- | --- | --- | --- | --- | --- |
-| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `core`, Release | OpenStrata `cy2026` `core` (no OpenUSD) | NVIDIA RTX A5000 | `ost build`, `ost test` 3/3, `ost validate` passed, and still passed after a no-op build | [ost 02](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md) |
-| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `hydra` intent, Release | OpenStrata `cy2026` `lookdev`, OpenUSD 26.08, Python 3.13 | NVIDIA RTX A5000 | `ost build`, `ost test` 7/7 including `testusdview`, `ost validate` passed with 13 of 13 renderer assertions | [ost 02](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md) |
-| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | standalone viewport | OpenStrata `cy2026` `core` | NVIDIA RTX A5000 | `ost renderer viewport -- --frames 8 --hidden` presented 8 frames; `ost validate --intent renderer-viewport` passed | [ost 02](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md) |
+| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `core`, Release | OpenStrata `cy2026` `core` (no OpenUSD) | NVIDIA RTX A5000 | `ost build`, `ost test` 3/3, `ost validate` passed with `renderer.install_tree` PASS, and still passed after a no-op build | [ost 03](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md) |
+| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `hydra` intent, Release | OpenStrata `cy2026` `lookdev`, OpenUSD 26.08, Python 3.13 | NVIDIA RTX A5000 | `ost build`, `ost test` 7/7 including `testusdview`, `ost validate` passed with 13 of 13 renderer assertions | [ost 03](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md) |
+| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | standalone viewport | OpenStrata `cy2026` `core` | NVIDIA RTX A5000 | `ost renderer viewport -- --frames 8 --hidden` presented 8 frames; `ost validate --intent renderer-viewport` passed | [ost 03](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md) |
 
 ## Requirements
 
 | Requirement | Version | Notes |
 | --- | --- | --- |
-| `ost` | 0.23.7 or newer | generated with 0.23.6; 0.23.7 keeps `ost validate` passing across a no-op build and a viewport launch |
+| `ost` | 0.23.8 or newer | generated with 0.23.6; install smoke ported from renderer template 0.5.3, which lets `core` pass `renderer.install_tree` |
 | CMake | 3.24 or newer | measured with 4.4 |
 | C++ | C++20 | |
 | Vulkan | 1.3 device, loader and headers | without them the GPU checks report an explained `SKIP`, not a failure |
