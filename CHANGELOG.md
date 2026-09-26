@@ -42,6 +42,9 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   and tracks its frame on a timeline semaphore instead of a fence.
 - The device must be Vulkan 1.3 with `dynamicRendering`, `synchronization2`
   and `timelineSemaphore`; `shaderDrawParameters` is no longer required.
+- `strata.lock` is no longer tracked. `ost` rewrites it on every build with
+  the runtime that built last, so it recorded the workstation, not the
+  project.
 - The Hydra colour and depth AOVs are written bottom row first, as Hydra
   lays them out; the template's copy was upside down, and its triangle,
   itself flipped in Vulkan clip space, hid that.

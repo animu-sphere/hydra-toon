@@ -52,8 +52,9 @@ on the installed smoke scene for a few seconds and keeps
 `usdview-first-frame.png` and `usdview-stable-update.png` under
 `build/<target>--hydra/adapters/hydra2/usdview-install/`.
 
-The `lookdev` build rewrites `strata.lock` to pin the `lookdev` runtime. Run
-`ost lock` to restore the `core` pin before committing.
+`ost` writes `strata.lock` on every build, pinning the runtime that built
+last. The file is local and ignored by Git; `ost lock` restores the `core`
+pin.
 
 `ost renderer view` opens `usdview` interactively on the same install. It has
 not been run in this repository yet.
