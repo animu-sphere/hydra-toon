@@ -1,4 +1,5 @@
 add_library(toon-render-world STATIC render_world.cpp)
+toon_configure_warnings(toon-render-world)
 add_library(Toon::RenderWorld ALIAS toon-render-world)
 set_target_properties(toon-render-world PROPERTIES EXPORT_NAME RenderWorld)
 target_include_directories(toon-render-world PUBLIC

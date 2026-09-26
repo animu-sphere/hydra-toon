@@ -7,7 +7,10 @@ project(Toon
   LANGUAGES CXX)
 
 include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(ToonDependencies)
+include(ToonInstall)
+include(ToonWarnings)
 
 option(TOON_ENABLE_VULKAN "Probe and link the Vulkan backend capability" ON)
 
@@ -51,32 +54,7 @@ if(TOON_BUILD_TESTS)
   include(CTest)
 endif()
 
-if(MSVC)
-  # /utf-8: sources are UTF-8; without it a CP932 (Japanese) host warns C4819.
-  add_compile_options(/W4 /permissive- /EHsc /utf-8)
-else()
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-set(TOON_WITH_VULKAN OFF)
-if(TOON_ENABLE_VULKAN)
-  find_package(Vulkan 1.3 QUIET)
-  # Slang is the shader source of truth. The Vulkan SDK bundles slangc since
-  # 1.3.296, so one SDK install provides both the loader and the compiler.
-  find_program(TOON_SLANGC_EXECUTABLE
-    NAMES slangc
-    HINTS ENV VULKAN_SDK
-    PATH_SUFFIXES bin Bin)
-  if(Vulkan_FOUND AND TOON_SLANGC_EXECUTABLE)
-    set(TOON_WITH_VULKAN ON)
-  elseif(NOT Vulkan_FOUND)
-    message(STATUS "Vulkan 1.3 was not found; GPU assertions will report SKIP")
-  else()
-    message(STATUS
-      "slangc was not found (the Vulkan SDK bundles it since 1.3.296); "
-      "GPU assertions will report SKIP")
-  endif()
-endif()
+toon_configure_dependencies()
 
 add_subdirectory(core/render-world)
 add_subdirectory(core/render-extraction)
@@ -94,40 +72,4 @@ if(TOON_BUILD_TESTS)
   add_subdirectory(validation)
 endif()
 
-# One project-level install graph. Internal source packs are CMake targets, not
-# independently versioned packages.
-install(TARGETS
-    toon-render-world
-    toon-render-extraction
-    toon-render-vulkan
-  EXPORT ToonTargets
-  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(TARGETS toon-headless
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-if(TOON_WITH_VULKAN)
-  install(FILES "${TOON_VERTEX_SPV}" "${TOON_FRAGMENT_SPV}"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders")
-endif()
-install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-
-set(Toon_CONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/Toon")
-configure_package_config_file(
-  cmake/ToonConfig.cmake.in
-  "${CMAKE_CURRENT_BINARY_DIR}/ToonConfig.cmake"
-  INSTALL_DESTINATION "${Toon_CONFIG_INSTALL_DIR}")
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/ToonConfigVersion.cmake"
-  VERSION "${PROJECT_VERSION}"
-  COMPATIBILITY SameMajorVersion)
-install(EXPORT ToonTargets
-  FILE ToonTargets.cmake
-  NAMESPACE Toon::
-  DESTINATION "${Toon_CONFIG_INSTALL_DIR}")
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/ToonConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/ToonConfigVersion.cmake"
-  DESTINATION "${Toon_CONFIG_INSTALL_DIR}")
-install(FILES openstrata.renderer.yaml openstrata.scaffold.yaml
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/toon")
+toon_install_renderer()
