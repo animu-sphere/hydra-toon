@@ -99,5 +99,4 @@ owner, not resolved here.
 
 | Observed | Where | Owner |
 | --- | --- | --- |
-| `usd-mmd-plugins` calls the VRM material API `VrmMtoonMaterialAPI`; the shipped schema is `VrmMToonAPI` | `usd-mmd-plugins` material policy §12, roadmap/current.md | `usd-mmd-plugins` |
 | The two format repositories describe different read paths: VRM says `hydra-toon` "reads `VrmMToonAPI` directly"; MMD fixes a UsdImaging adapter (planned `mmdImaging`, in `usd-mmd-plugins`) that exposes `MmdMaterialAPI` to Hydra | VRM material policy §5.3; MMD material policy §12, §14 step 5 | both; `hydra-toon`'s side is [MATERIAL_POLICY.md](MATERIAL_POLICY.md) §6 MAT-Q1 |
