@@ -1,7 +1,7 @@
 # Building and testing
 
-Every command on this page has been run in this repository; the run is
-[ost report 01](../reports/ost/01-2026-09-26-v0.23.6-renderer-template-bootstrap.md).
+Every command on this page has been run in this repository; the latest run is
+[ost report 02](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md).
 What each build contains is
 [PROJECT_LAYOUT.md §5](../architecture/PROJECT_LAYOUT.md#5-build-intents-and-runtime-profiles),
 and what it was measured on is
@@ -9,7 +9,7 @@ and what it was measured on is
 
 ## Prerequisites
 
-- `ost` 0.23.6 or newer (`ost --version`).
+- `ost` 0.23.7 or newer (`ost --version`).
 - A Vulkan SDK that provides Vulkan 1.3 and `slangc` (bundled from 1.3.296).
   Without it the build still succeeds, and the GPU checks report `SKIP`.
 - CMake 3.24 or newer, Ninja, and a C++20 compiler. On Windows, `ost` loads
@@ -26,12 +26,9 @@ ost validate
 
 `ost build` runs `toon-headless`, which renders the bootstrap frame 1,000
 times and writes `build/<target>/renderer-report.json`. `ost validate` reads
-it; the Hydra assertions are `SKIP` in this build by design.
-
-> ⚠️ An `ost build` with nothing to rebuild makes the next `ost validate`
-> fail with "managed producer … does not bind renderer report". Touch
-> `adapters/headless/main.cpp` and build again
-> ([roadmap](../roadmap/current.md#project-infrastructure)).
+it; the Hydra assertions are `SKIP` in this build by design, and so is
+`renderer.install_tree`, even after its CTest passes
+([report 02 §3](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md#3-p3--rendererinstall_tree-on-core)).
 
 ## The Hydra adapter
 
@@ -53,6 +50,11 @@ on the installed smoke scene for a few seconds and keeps
 `usdview-first-frame.png` and `usdview-stable-update.png` under
 `build/<target>--hydra/adapters/hydra2/usdview-install/`.
 
+The `lookdev` build rewrites `strata.lock` to pin the `lookdev` runtime, and
+the next plain `ost build` restores the `core` pin. Do not commit the
+`lookdev` rewrite
+([report 02 §4](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md#4-observation--stratalock-follows-the-last-profile-built)).
+
 `ost renderer view` opens `usdview` interactively on the same install. It has
 not been run in this repository yet.
 
@@ -60,15 +62,13 @@ not been run in this repository yet.
 
 ```sh
 ost renderer viewport -- --frames 8 --hidden
+ost validate --intent renderer-viewport
 ```
 
 The first run fetches GLFW. Omit the arguments after `--` for an interactive
-window.
-
-> ⚠️ After this command, `ost validate` on the default target fails with
-> "viewport launch describes a different build directory". Move
-> `.strata/renderer-viewport/<target>/launch.json` aside to validate
-> ([roadmap](../roadmap/current.md#project-infrastructure)).
+window. The viewport builds its own tree, `build/<target>--renderer-viewport`,
+and `ost validate --intent renderer-viewport` validates that tree and its
+launch record.
 
 ## Plain CMake
 
