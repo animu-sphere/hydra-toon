@@ -7,6 +7,7 @@
 #include <pxr/imaging/hd/rendererCreateArgs.h>
 #include <pxr/imaging/hd/rendererPlugin.h>
 #include <pxr/imaging/hd/rendererPluginRegistry.h>
+#include <pxr/imaging/hd/version.h>
 
 #include <string>
 

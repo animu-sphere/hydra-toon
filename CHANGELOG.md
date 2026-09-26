@@ -27,3 +27,9 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   sources.
 - `openstrata.renderer.yaml` declares one frame context, matching the
   one-frame-in-flight policy and the generated swapchain path.
+- The Hydra renderer plugin includes `hd/version.h` itself instead of relying
+  on another header for `HD_API_VERSION`, as renderer template 0.5.2 does.
+- `ost` 0.23.7 or newer is required. It keeps `ost validate` passing across a
+  no-op build and after `ost renderer viewport`, so the documented
+  workarounds for both are gone, and `ost validate --intent renderer-viewport`
+  validates the viewport build.

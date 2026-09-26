@@ -58,13 +58,3 @@ Phase 0:
 - ⬜ **Core boundary check by glob.** The check lists its headers by name
   ([PROJECT_LAYOUT.md §4](../architecture/PROJECT_LAYOUT.md#4-dependency-directions));
   it should find every public core header itself.
-- ⚠️ **A no-op `ost build` leaves `ost validate` failing** ("managed producer
-  … does not bind renderer report"). Until OpenStrata fixes it, make the
-  headless runner rebuild (for example `touch adapters/headless/main.cpp`)
-  and run `ost build` again before validating
-  ([report](../reports/ost/01-2026-09-26-v0.23.6-renderer-template-bootstrap.md) §4.1).
-- ⚠️ **`ost renderer viewport` leaves `ost validate` failing** on the default
-  target ("viewport launch describes a different build directory"). Until
-  OpenStrata fixes it, move
-  `.strata/renderer-viewport/<target>/launch.json` aside before validating
-  ([report](../reports/ost/01-2026-09-26-v0.23.6-renderer-template-bootstrap.md) §4.2).
