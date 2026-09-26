@@ -34,11 +34,12 @@ CY2026 names (2022.x) is what a managed build pins.
 - ⚠️ **The run supplies the host's Python.** `ost formation run` puts no
   interpreter on the command's `PATH` and the runtime ships none, so the
   Formation's `testusdview` command is overridden with the host's
-  `python.exe` (ost report 05 Q1). Replace when `ost` composes the platform
+  `python.exe` (ost report 05 Q1,
+  [open-strata#259](https://github.com/animu-sphere/open-strata/issues/259)). Replace when `ost` composes the platform
   interpreter.
 - ⚠️ **The Formation must live in a short directory.** Under a deep one, Qt
   cannot load its platform plugin from the materialized runtime (ost report
-  05 Q2).
+  05 Q2, [open-strata#260](https://github.com/animu-sphere/open-strata/issues/260)).
 - ⬜ **A Formation in the repository** and its `testusdview` check. It pins
   published digests only, so it waits on the next item.
 - ⬜ **Publish the renderer package** as
