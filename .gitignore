@@ -8,9 +8,14 @@
 /out/
 /CMakeUserPresets.json
 /compile_commands.json
-# `ost` rewrites the lock on every build, pinning whichever runtime profile
-# built last; it records this workstation, not the project.
+# `ost` pins each profile's runtime in its own lock (`strata.lock` for the
+# default, `strata.<runtime-id>.lock` for the rest); they record this
+# workstation, not the project.
 /strata.lock
+/strata.*.lock
+# Local Formations for the VRM usdview session; they pin this workstation's
+# unpublished packages (renderer report 06).
+/formations/
 
 # Accidental in-source CMake and Ninja products.
 /CMakeCache.txt

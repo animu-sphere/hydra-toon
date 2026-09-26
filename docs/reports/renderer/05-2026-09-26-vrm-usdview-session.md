@@ -1,5 +1,7 @@
 # The VRM `usdview` session, composed from packages: `hdToon` selects MToon in `testusdview`, and the Formation that should compose it does not resolve
 
+> Followed by [report 06](06-2026-09-27-vrm-formation.md): the same session composed and run by `ost formation`, with the same counts.
+
 - Date: 2026-09-26
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.10`; runtime `cy2026-windows-x86_64-py313-lookdev`

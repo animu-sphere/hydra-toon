@@ -54,6 +54,9 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   materials reached MToon; renderer report 05 and `ost` report 04, on
   composing that session from packages.
 - The roadmap page for the VRM host session on Windows, Linux and macOS.
+- The VRM `usdview` session runs as an OpenStrata Formation of the canonical
+  `lookdev` runtime, `vrmImaging` and the `toon` package; renderer report 06
+  and `ost` report 05, which re-verifies report 04 against `ost` 0.23.11.
 
 ### Changed
 
@@ -68,6 +71,11 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - `strata.lock` is no longer tracked. `ost` rewrites it on every build with
   the runtime that built last, so it recorded the workstation, not the
   project.
+- The `lookdev` build is measured on OpenStrata's canonical
+  `26.08-gl-windows-x86_64` runtime instead of an adopted local build, and
+  the renderer package comes from the `hydra` intent (`ost package --intent`,
+  `ost` 0.23.11). The per-profile `strata.<runtime-id>.lock` files are not
+  tracked either.
 - The Hydra colour and depth AOVs are written bottom row first, as Hydra
   lays them out; the template's copy was upside down, and its triangle,
   itself flipped in Vulkan clip space, hid that.
