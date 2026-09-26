@@ -1,4 +1,5 @@
 add_executable(toon-headless main.cpp)
+toon_configure_warnings(toon-headless)
 target_link_libraries(toon-headless PRIVATE
   Toon::RenderWorld
   Toon::RenderExtraction

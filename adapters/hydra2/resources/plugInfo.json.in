@@ -10,7 +10,7 @@
           }
         }
       },
-      "LibraryPath": "@TOON_HYDRA_LIBRARY_NAME@",
+      "LibraryPath": "@TOON_PLUGIN_LIBRARY_NAME@",
       "Name": "hdToon",
       "ResourcePath": ".",
       "Root": "..",
