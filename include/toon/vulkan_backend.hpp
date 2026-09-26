@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -39,11 +40,16 @@ struct DepthProduct {
   std::vector<float> payload;
 };
 
-struct GpuFrameEvidence {
-  FrameStatus status = FrameStatus::Skip;
-  std::string detail;
+// What an offscreen renderer has done over its lifetime. The creation and
+// upload counters are the evidence that a steady frame rebuilds nothing.
+struct OffscreenStatistics {
+  std::uint64_t frames_rendered = 0;
+  // The last completed frame's timeline value.
   std::uint64_t completion = 0;
-  std::uint32_t frames_rendered = 0;
+  std::uint32_t pipelines_created = 0;
+  std::uint32_t target_allocations = 0;
+  std::uint64_t topology_uploads = 0;
+  std::uint64_t point_uploads = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;
@@ -52,21 +58,49 @@ struct GpuFrameEvidence {
   std::string driver_version;
   std::uint32_t vendor_id = 0;
   std::uint32_t device_id = 0;
+};
+
+struct GpuFrameEvidence {
+  FrameStatus status = FrameStatus::Skip;
+  std::string detail;
+  OffscreenStatistics statistics;
   ColorProduct color;
   DepthProduct depth;
 };
 
-// This is a capability probe, not a renderer implementation. Generated source
-// never reports a GPU frame until the project implements and validates one.
+// A persistent offscreen renderer: the device, pipeline and render targets
+// outlive a frame, mesh geometry is uploaded only when its revision changes,
+// and the targets are reallocated only when the extent does. One frame is in
+// flight, and `Render` returns once that frame's colour and depth are read
+// back.
+class OffscreenRenderer {
+public:
+  virtual ~OffscreenRenderer() = default;
+
+  // Render `draws` at `width` x `height` into `color` and `depth`, reusing
+  // their storage. Both products have their origin at the top left.
+  [[nodiscard]] virtual bool Render(const DrawList& draws, std::uint32_t width,
+      std::uint32_t height, ColorProduct& color, DepthProduct& depth,
+      std::string& error) = 0;
+
+  [[nodiscard]] virtual const OffscreenStatistics& statistics() const = 0;
+};
+
 [[nodiscard]] BackendCapability ProbeVulkanBackend();
 
-// Render a deterministic bootstrap draw through the project extraction output.
-// Shader paths are explicit so build-tree and install-tree layouts exercise the
-// same backend code without source-tree fallbacks.
-[[nodiscard]] GpuFrameEvidence RenderOffscreen(
-    const DrawSummary& draw,
-    const std::string& vertex_shader,
-    const std::string& fragment_shader,
+// Returns nullptr with `status` Skip when this environment cannot render (no
+// Vulkan build, loader, or a 1.3 device with the features the renderer
+// needs) and Fail on a real error; `detail` says which. Shader paths are
+// explicit so build-tree and install-tree layouts exercise the same backend
+// code without source-tree fallbacks.
+[[nodiscard]] std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
+    const std::string& vertex_shader, const std::string& fragment_shader,
+    FrameStatus& status, std::string& detail);
+
+// Render `frame_count` frames of `draws` at 64 x 64 on one persistent
+// renderer and return the last frame's products: the headless evidence run.
+[[nodiscard]] GpuFrameEvidence RenderOffscreen(const DrawList& draws,
+    const std::string& vertex_shader, const std::string& fragment_shader,
     std::uint32_t frame_count);
 
 } // namespace Toon

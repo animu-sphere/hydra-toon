@@ -41,10 +41,10 @@ add_custom_command(TARGET toon-viewport POST_BUILD
     "$<TARGET_FILE_DIR:toon-viewport>/shaders"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${TOON_VERTEX_SPV}"
-    "$<TARGET_FILE_DIR:toon-viewport>/shaders/triangle.vert.spv"
+    "$<TARGET_FILE_DIR:toon-viewport>/shaders/mesh.vert.spv"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${TOON_FRAGMENT_SPV}"
-    "$<TARGET_FILE_DIR:toon-viewport>/shaders/triangle.frag.spv"
+    "$<TARGET_FILE_DIR:toon-viewport>/shaders/mesh.frag.spv"
   VERBATIM)
 
 # The installed tree reuses bin/shaders written by the project install rules.

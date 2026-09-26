@@ -7,8 +7,11 @@
 #include <pxr/imaging/hd/aov.h>
 #include <pxr/imaging/hd/camera.h>
 #include <pxr/imaging/hd/changeTracker.h>
+#include <pxr/imaging/hd/extComputation.h>
+#include <pxr/imaging/hd/extComputationUtils.h>
 #include <pxr/imaging/hd/instancer.h>
 #include <pxr/imaging/hd/mesh.h>
+#include <pxr/imaging/hd/meshUtil.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/renderPass.h>
 #include <pxr/imaging/hd/renderPassState.h>
@@ -35,8 +38,8 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
+#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -71,7 +74,7 @@ std::filesystem::path PluginDirectory() {
 }
 
 void AppendHostEvidence(std::uint64_t frame_index,
-    const Toon::GpuFrameEvidence& frame,
+    const Toon::OffscreenStatistics& statistics,
     std::uint32_t width, std::uint32_t height,
     std::size_t buffers_written,
     std::uint64_t scene_revision) {
@@ -85,69 +88,109 @@ void AppendHostEvidence(std::uint64_t frame_index,
     return;
   }
   output << "frame=" << frame_index
-         << " completion=" << frame.completion
+         << " completion=" << statistics.completion
          << " scene_revision=" << scene_revision
          << " width=" << width
          << " height=" << height
-         << " buffers_written=" << buffers_written << '\n';
+         << " buffers_written=" << buffers_written
+         << " pipelines=" << statistics.pipelines_created
+         << " target_allocations=" << statistics.target_allocations
+         << " topology_uploads=" << statistics.topology_uploads
+         << " point_uploads=" << statistics.point_uploads << '\n';
+}
+
+// GfMatrix4d is row-major for row vectors, so its storage order is already
+// the column-major, column-vector order of Toon::Matrix4.
+Toon::Matrix4 ToToon(const GfMatrix4d& matrix) {
+  Toon::Matrix4 result;
+  const double* data = matrix.data();
+  for (std::size_t index = 0; index < result.m.size(); ++index) {
+    result.m[index] = static_cast<float>(data[index]);
+  }
+  return result;
 }
 
 class AdapterState {
 public:
-  void SyncMesh(const SdfPath& id, bool renderable) {
+  Toon::MeshId CreateMesh() {
     std::scoped_lock lock(mutex_);
-    meshes_[id.GetString()] = renderable;
-    world_.MarkChanged();
-    UpdateWorldLocked();
+    return world_.CreateMesh();
   }
 
-  void RemoveMesh(const SdfPath& id) {
+  void RemoveMesh(Toon::MeshId mesh) {
     std::scoped_lock lock(mutex_);
-    meshes_.erase(id.GetString());
-    UpdateWorldLocked();
+    world_.RemoveMesh(mesh);
   }
 
-  void Render(const HdRenderPassAovBindingVector& bindings) {
+  void SetMeshTopology(Toon::MeshId mesh,
+      std::vector<std::uint32_t> triangles) {
     std::scoped_lock lock(mutex_);
-    const Toon::FrameSnapshot snapshot = world_.Commit();
-    const Toon::DrawSummary draw = Toon::ExtractDrawSummary(snapshot);
-    if (draw.triangle_count == 0) {
-      for (const HdRenderPassAovBinding& binding : bindings) {
-        if (auto* buffer =
-                dynamic_cast<HdToonRenderBuffer*>(binding.renderBuffer)) {
-          buffer->SetConverged(false);
-        }
+    world_.SetMeshTopology(mesh, std::move(triangles));
+  }
+
+  void SetMeshPoints(Toon::MeshId mesh, std::vector<Toon::Float3> points) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshPoints(mesh, std::move(points));
+  }
+
+  void SetMeshTransform(Toon::MeshId mesh, const Toon::Matrix4& transform) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshTransform(mesh, transform);
+  }
+
+  void SetMeshColor(Toon::MeshId mesh, Toon::Float3 color) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshColor(mesh, color);
+  }
+
+  void SetMeshVisible(Toon::MeshId mesh, bool visible) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshVisible(mesh, visible);
+  }
+
+  void Render(const HdRenderPassStateSharedPtr& pass_state) {
+    std::scoped_lock lock(mutex_);
+    const HdRenderPassAovBindingVector& bindings =
+        pass_state->GetAovBindings();
+    // Every AOV is rendered at the colour AOV's resolution; a buffer of
+    // another size is resampled when it is written.
+    std::uint32_t width{};
+    std::uint32_t height{};
+    for (const HdRenderPassAovBinding& binding : bindings) {
+      auto* buffer = dynamic_cast<HdToonRenderBuffer*>(binding.renderBuffer);
+      if (buffer != nullptr &&
+          (binding.aovName == HdAovTokens->color || width == 0)) {
+        width = buffer->GetWidth();
+        height = buffer->GetHeight();
       }
+    }
+    if (width == 0 || height == 0 || !EnsureRendererLocked()) {
+      SetConvergedLocked(bindings, false);
       return;
     }
 
-    const std::filesystem::path shaders = PluginDirectory() / "shaders";
-    const Toon::GpuFrameEvidence frame = Toon::RenderOffscreen(
-        draw, (shaders / "triangle.vert.spv").string(),
-        (shaders / "triangle.frag.spv").string(), 1);
-    if (frame.status != Toon::FrameStatus::Pass) {
-      TF_RUNTIME_ERROR("Toon Hydra frame failed: %s", frame.detail.c_str());
+    world_.SetView({ToToon(pass_state->GetWorldToViewMatrix()),
+        ToToon(pass_state->GetProjectionMatrix())});
+    world_.Commit(snapshot_);
+    Toon::ExtractDrawList(snapshot_, draws_);
+    std::string error;
+    if (!renderer_->Render(draws_, width, height, color_, depth_, error)) {
+      TF_RUNTIME_ERROR("Toon Hydra frame failed: %s", error.c_str());
+      SetConvergedLocked(bindings, false);
       return;
     }
 
     std::size_t buffers_written{};
-    std::uint32_t width{};
-    std::uint32_t height{};
     for (const HdRenderPassAovBinding& binding : bindings) {
-      auto* buffer =
-          dynamic_cast<HdToonRenderBuffer*>(binding.renderBuffer);
+      auto* buffer = dynamic_cast<HdToonRenderBuffer*>(binding.renderBuffer);
       if (buffer == nullptr) {
         continue;
       }
-      width = std::max(width, buffer->GetWidth());
-      height = std::max(height, buffer->GetHeight());
       bool wrote = false;
       if (binding.aovName == HdAovTokens->color) {
-        wrote = buffer->WriteColor(frame.color.payload, frame.color.width,
-            frame.color.height);
+        wrote = buffer->WriteColor(color_.payload, color_.width, color_.height);
       } else if (binding.aovName == HdAovTokens->depth) {
-        wrote = buffer->WriteDepth(frame.depth.payload, frame.depth.width,
-            frame.depth.height);
+        wrote = buffer->WriteDepth(depth_.payload, depth_.width, depth_.height);
       } else if (binding.aovName == HdAovTokens->primId ||
                  binding.aovName == HdAovTokens->instanceId ||
                  binding.aovName == HdAovTokens->elementId) {
@@ -159,53 +202,101 @@ public:
       }
     }
     ++frame_index_;
-    AppendHostEvidence(frame_index_, frame, width, height, buffers_written,
-        snapshot.revision);
+    AppendHostEvidence(frame_index_, renderer_->statistics(), width, height,
+        buffers_written, snapshot_.revision);
   }
 
 private:
-  void UpdateWorldLocked() {
-    const bool any_renderable =
-        std::any_of(meshes_.begin(), meshes_.end(),
-            [](const auto& entry) { return entry.second; });
-    world_.SetTriangleCount(any_renderable ? 1U : 0U);
+  // The renderer is created on the first frame, not with the delegate, so a
+  // delegate that never renders (discovery, probing) never creates a device.
+  bool EnsureRendererLocked() {
+    if (renderer_ != nullptr) {
+      return true;
+    }
+    if (renderer_failed_) {
+      return false;
+    }
+    const std::filesystem::path shaders = PluginDirectory() / "shaders";
+    Toon::FrameStatus status = Toon::FrameStatus::Fail;
+    std::string detail;
+    renderer_ = Toon::CreateOffscreenRenderer(
+        (shaders / "mesh.vert.spv").string(),
+        (shaders / "mesh.frag.spv").string(), status, detail);
+    if (renderer_ == nullptr) {
+      renderer_failed_ = true;
+      TF_RUNTIME_ERROR("Toon could not create its Vulkan renderer: %s",
+          detail.c_str());
+      return false;
+    }
+    return true;
+  }
+
+  static void SetConvergedLocked(const HdRenderPassAovBindingVector& bindings,
+      bool converged) {
+    for (const HdRenderPassAovBinding& binding : bindings) {
+      if (auto* buffer =
+              dynamic_cast<HdToonRenderBuffer*>(binding.renderBuffer)) {
+        buffer->SetConverged(converged);
+      }
+    }
   }
 
   std::mutex mutex_;
-  std::unordered_map<std::string, bool> meshes_;
   Toon::RenderWorld world_;
+  // Reused every frame, so a steady frame allocates nothing.
+  Toon::FrameSnapshot snapshot_;
+  Toon::DrawList draws_;
+  Toon::ColorProduct color_;
+  Toon::DepthProduct depth_;
+  std::unique_ptr<Toon::OffscreenRenderer> renderer_;
+  bool renderer_failed_{};
   std::uint64_t frame_index_{};
 };
 
 class HdToonMesh final : public HdMesh {
 public:
   HdToonMesh(const SdfPath& id, std::shared_ptr<AdapterState> state)
-      : HdMesh(id), state_(std::move(state)) {
+      : HdMesh(id), state_(std::move(state)), mesh_(state_->CreateMesh()) {
   }
 
   ~HdToonMesh() override {
-    state_->RemoveMesh(GetId());
+    state_->RemoveMesh(mesh_);
   }
 
   HdDirtyBits GetInitialDirtyBitsMask() const override {
     return HdChangeTracker::DirtyPoints | HdChangeTracker::DirtyTopology |
            HdChangeTracker::DirtyTransform | HdChangeTracker::DirtyVisibility |
-           HdChangeTracker::DirtyRenderTag;
+           HdChangeTracker::DirtyPrimvar | HdChangeTracker::DirtyRenderTag;
   }
 
+  // Each kind of change updates only its own data (design policy §14):
+  // points never re-triangulate, and a transform or colour change uploads no
+  // geometry. Triangulation runs before the shared state is locked, so
+  // meshes still sync in parallel.
   void Sync(HdSceneDelegate* delegate, HdRenderParam* render_param,
       HdDirtyBits* dirty_bits, const TfToken& repr_token) override {
     (void)render_param;
     (void)repr_token;
-    const bool visible = delegate->GetVisible(GetId());
-    const HdMeshTopology topology = GetMeshTopology(delegate);
-    const bool has_face =
-        std::any_of(topology.GetFaceVertexCounts().begin(),
-            topology.GetFaceVertexCounts().end(),
-            [](int count) { return count >= 3; });
-    const bool has_points = !GetPoints(delegate).IsEmpty();
-    state_->SyncMesh(GetId(), visible && has_face && has_points);
-    *dirty_bits = HdChangeTracker::Clean;
+    const SdfPath& id = GetId();
+    if (HdChangeTracker::IsTopologyDirty(*dirty_bits, id)) {
+      state_->SetMeshTopology(mesh_, Triangulate(GetMeshTopology(delegate)));
+    }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, HdTokens->points)) {
+      state_->SetMeshPoints(mesh_, ReadPoints(PointsValue(delegate)));
+    }
+    if (HdChangeTracker::IsTransformDirty(*dirty_bits, id)) {
+      state_->SetMeshTransform(mesh_, ToToon(delegate->GetTransform(id)));
+    }
+    if (HdChangeTracker::IsVisibilityDirty(*dirty_bits, id)) {
+      _UpdateVisibility(delegate, dirty_bits);
+      state_->SetMeshVisible(mesh_, IsVisible());
+    }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id,
+            HdTokens->displayColor)) {
+      state_->SetMeshColor(mesh_,
+          ReadDisplayColor(GetPrimvar(delegate, HdTokens->displayColor)));
+    }
+    *dirty_bits &= ~HdChangeTracker::AllSceneDirtyBits;
   }
 
 protected:
@@ -219,9 +310,81 @@ protected:
   }
 
 private:
+  std::vector<std::uint32_t> Triangulate(const HdMeshTopology& topology) const {
+    HdMeshUtil util(&topology, GetId());
+    VtVec3iArray triangles;
+    VtIntArray primitive_params;
+    util.ComputeTriangleIndices(&triangles, &primitive_params);
+    std::vector<std::uint32_t> indices;
+    indices.reserve(triangles.size() * 3U);
+    for (const GfVec3i& triangle : triangles) {
+      if (triangle[0] < 0 || triangle[1] < 0 || triangle[2] < 0) {
+        continue;
+      }
+      indices.push_back(static_cast<std::uint32_t>(triangle[0]));
+      indices.push_back(static_cast<std::uint32_t>(triangle[1]));
+      indices.push_back(static_cast<std::uint32_t>(triangle[2]));
+    }
+    return indices;
+  }
+
+  // A skinned mesh's points are the output of UsdSkel's ext computations.
+  // Their CPU kernels run here, as HdEmbree runs them, until Renderer
+  // Phase 1 skins on the GPU.
+  VtValue PointsValue(HdSceneDelegate* delegate) const {
+    HdExtComputationPrimvarDescriptorVector computed;
+    for (const HdExtComputationPrimvarDescriptor& descriptor :
+        delegate->GetExtComputationPrimvarDescriptors(GetId(),
+            HdInterpolationVertex)) {
+      if (descriptor.name == HdTokens->points) {
+        computed.push_back(descriptor);
+      }
+    }
+    if (!computed.empty()) {
+      const HdExtComputationUtils::ValueStore values =
+          HdExtComputationUtils::GetComputedPrimvarValues(computed, delegate);
+      const auto found = values.find(HdTokens->points);
+      if (found != values.end()) {
+        return found->second;
+      }
+    }
+    return GetPoints(delegate);
+  }
+
+  static std::vector<Toon::Float3> ReadPoints(const VtValue& value) {
+    std::vector<Toon::Float3> points;
+    if (value.IsHolding<VtVec3fArray>()) {
+      const VtVec3fArray& source = value.UncheckedGet<VtVec3fArray>();
+      points.reserve(source.size());
+      for (const GfVec3f& point : source) {
+        points.push_back({point[0], point[1], point[2]});
+      }
+    }
+    return points;
+  }
+
+  // Constant display colour only, until materials arrive; anything else
+  // falls back to grey.
+  static Toon::Float3 ReadDisplayColor(const VtValue& value) {
+    if (value.IsHolding<VtVec3fArray>()) {
+      const VtVec3fArray& colors = value.UncheckedGet<VtVec3fArray>();
+      if (colors.size() == 1) {
+        return {colors[0][0], colors[0][1], colors[0][2]};
+      }
+    } else if (value.IsHolding<GfVec3f>()) {
+      const GfVec3f& color = value.UncheckedGet<GfVec3f>();
+      return {color[0], color[1], color[2]};
+    }
+    return {0.5F, 0.5F, 0.5F};
+  }
+
   std::shared_ptr<AdapterState> state_;
+  Toon::MeshId mesh_;
 };
 
+// HdCamera's own Sync reads the camera; the render pass reads its view and
+// projection through HdRenderPassState, which also applies the viewer's
+// framing and window policy.
 class HdToonCamera final : public HdCamera {
 public:
   explicit HdToonCamera(const SdfPath& id) : HdCamera(id) {
@@ -240,12 +403,11 @@ private:
   void _Execute(const HdRenderPassStateSharedPtr& render_pass_state,
       const TfTokenVector& render_tags) override {
     (void)render_tags;
-    state_->Render(render_pass_state->GetAovBindings());
+    state_->Render(render_pass_state);
   }
 
   std::shared_ptr<AdapterState> state_;
 };
-
 } // namespace
 
 HdToonRenderBuffer::HdToonRenderBuffer(const SdfPath& id)
@@ -348,7 +510,7 @@ bool HdToonRenderBuffer::WriteColor(
     return false;
   }
   for (std::uint32_t y = 0; y < height; ++y) {
-    const std::uint32_t source_y = y * source_height / height;
+    const std::uint32_t source_y = (height - 1U - y) * source_height / height;
     for (std::uint32_t x = 0; x < width; ++x) {
       const std::uint32_t source_x = x * source_width / width;
       const std::size_t source =
@@ -374,7 +536,7 @@ bool HdToonRenderBuffer::WriteDepth(const std::vector<float>& depth,
     return false;
   }
   for (std::uint32_t y = 0; y < height; ++y) {
-    const std::uint32_t source_y = y * source_height / height;
+    const std::uint32_t source_y = (height - 1U - y) * source_height / height;
     for (std::uint32_t x = 0; x < width; ++x) {
       const std::uint32_t source_x = x * source_width / width;
       const float value = depth[static_cast<std::size_t>(source_y) *
@@ -437,7 +599,8 @@ const TfTokenVector& HdToonRenderDelegate::GetSupportedRprimTypes() const {
 }
 
 const TfTokenVector& HdToonRenderDelegate::GetSupportedSprimTypes() const {
-  static const TfTokenVector types{HdPrimTypeTokens->camera};
+  static const TfTokenVector types{HdPrimTypeTokens->camera,
+      HdPrimTypeTokens->extComputation};
   return types;
 }
 
@@ -484,6 +647,9 @@ HdSprim* HdToonRenderDelegate::CreateSprim(const TfToken& type_id,
   if (type_id == HdPrimTypeTokens->camera) {
     return new HdToonCamera(sprim_id);
   }
+  if (type_id == HdPrimTypeTokens->extComputation) {
+    return new HdExtComputation(sprim_id);
+  }
   return nullptr;
 }
 
@@ -491,6 +657,9 @@ HdSprim* HdToonRenderDelegate::CreateFallbackSprim(
     const TfToken& type_id) {
   if (type_id == HdPrimTypeTokens->camera) {
     return new HdToonCamera(SdfPath("/__toonFallbackCamera"));
+  }
+  if (type_id == HdPrimTypeTokens->extComputation) {
+    return new HdExtComputation(SdfPath::EmptyPath());
   }
   return nullptr;
 }

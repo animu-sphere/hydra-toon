@@ -1,6 +1,7 @@
 add_library(toon-render-vulkan STATIC
   vulkan_backend.cpp
-  vulkan_present.cpp)
+  vulkan_present.cpp
+  vulkan_scene.cpp)
 add_library(Toon::Vulkan ALIAS toon-render-vulkan)
 set_target_properties(toon-render-vulkan PROPERTIES EXPORT_NAME Vulkan)
 target_include_directories(toon-render-vulkan PUBLIC
@@ -16,10 +17,10 @@ if(TOON_WITH_VULKAN)
   # SPIR-V artifact; slangc names the SPIR-V entry point `main`, which is what
   # the pipeline stage creation expects. The explicit matrix layout keeps
   # host-visible data layouts deterministic once shaders grow parameters.
-  set(_shader_source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/triangle.slang")
+  set(_shader_source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/mesh.slang")
   set(_shader_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
-  set(TOON_VERTEX_SPV "${_shader_dir}/triangle.vert.spv")
-  set(TOON_FRAGMENT_SPV "${_shader_dir}/triangle.frag.spv")
+  set(TOON_VERTEX_SPV "${_shader_dir}/mesh.vert.spv")
+  set(TOON_FRAGMENT_SPV "${_shader_dir}/mesh.frag.spv")
   add_custom_command(
     OUTPUT "${TOON_VERTEX_SPV}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${_shader_dir}"
@@ -27,7 +28,7 @@ if(TOON_WITH_VULKAN)
       -entry vertex_main -stage vertex -target spirv
       -matrix-layout-column-major -warnings-as-errors all
       -o "${TOON_VERTEX_SPV}"
-    DEPENDS shaders/triangle.slang
+    DEPENDS shaders/mesh.slang
     VERBATIM)
   add_custom_command(
     OUTPUT "${TOON_FRAGMENT_SPV}"
@@ -36,7 +37,7 @@ if(TOON_WITH_VULKAN)
       -entry fragment_main -stage fragment -target spirv
       -matrix-layout-column-major -warnings-as-errors all
       -o "${TOON_FRAGMENT_SPV}"
-    DEPENDS shaders/triangle.slang
+    DEPENDS shaders/mesh.slang
     VERBATIM)
   add_custom_target(toon-renderer-shaders
     DEPENDS "${TOON_VERTEX_SPV}" "${TOON_FRAGMENT_SPV}")

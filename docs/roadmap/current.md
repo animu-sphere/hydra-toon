@@ -1,43 +1,34 @@
 # Current
 
-Renderer Phase 0 and the work around it. Which release carries the phase is
-the [status table](README.md#status-at-a-glance).
+The work around Renderer Phase 0 and before Renderer Phase 1. Which release
+carries a phase is the [status table](README.md#status-at-a-glance).
 
 Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️ accepted workaround
 
 ## Renderer Phase 0 — Skeleton
 
-The OpenStrata renderer scaffold was generated on 2026-09-26 and passes its
-own contract on Windows
-([latest report](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md)).
-What is left of [design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)
-Phase 0:
+Every item of [design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)
+Phase 0 is implemented; what now exists is the
+[capability matrix](../reference/CAPABILITY_MATRIX.md), and the run that
+measured it is [renderer report 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md).
+It ships when v0.1.0 is released.
 
-- ✅ **Plugin registration and `HdRenderDelegate`.** `hdToon` is discovered,
-  creates its delegate, and draws a first frame in `testusdview`.
-- 🚧 **Vulkan instance, device and swapchain.** Offscreen rendering and
-  swapchain presentation exist in the backend. The Hydra path renders a fixed
-  64×64 offscreen image and copies it into CPU `HdRenderBuffer`s, which
-  usdview upscales.
-  - ⬜ Render at the AOV's resolution.
-- ⬜ **Camera.** Use the Hydra camera's view and projection; the
-  `camera` Sprim is accepted and ignored today.
-- 🚧 **Triangle and mesh rendering.** The triangle is hard-coded.
-  - ⬜ Upload a mesh's points and triangulated topology into `ToonMesh`
-    through the core, and draw it.
-  - ⬜ Route Hydra dirty bits by kind before Renderer Phase 1 builds on them.
-    `HdToonMesh::Sync` re-reads points and topology on every sync and clears
-    every bit, which is the pattern
-    [§14](../design/DESIGN_POLICY.md#14-dirty-propagation) forbids.
-- ⬜ **Basic synchronization.** Replace the scaffold's binary fences with a
-  timeline semaphore and Synchronization2
-  ([§19](../design/DESIGN_POLICY.md#19-cpu--gpu-synchronization)). The
-  swapchain path already runs one frame in flight; `vkDeviceWaitIdle` remains
-  only at swapchain recreation and teardown.
-- 🚧 **Basic shader system.** One Slang file compiled to SPIR-V at build time.
-  - ⬜ Shader modules and pipelines created once and cached, with no pipeline
-    compile after the first frame
-    ([§23](../design/DESIGN_POLICY.md#23-performance-kpis)).
+Stand-ins Phase 0 accepted, each replaced by the phase named:
+
+- ⚠️ **Geometry is written on the render thread** into host-visible buffers,
+  not staged off-thread ([§20](../design/DESIGN_POLICY.md#20-asset-upload)).
+  Replace before avatar-sized uploads are measured, no later than Renderer
+  Phase 1.
+- ⚠️ **Skinned points come from Hydra's CPU ext computations.** Renderer
+  Phase 1's GPU skinning replaces them.
+- ⚠️ **The Hydra path reads every frame back** into CPU `HdRenderBuffer`s and
+  waits for it. Hgi/Vulkan interop is not planned yet.
+
+Left out of Phase 0 and not yet placed in a phase:
+
+- ⬜ **Picking.** The id AOVs are filled with -1.
+- ⬜ **Render tags, instancers and the framing data window.** Every visible
+  mesh is drawn over the whole AOV.
 
 ## Before Renderer Phase 1
 

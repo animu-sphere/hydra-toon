@@ -176,20 +176,6 @@ inline void DestroyInstance(InstanceState& state) {
   }
 }
 
-// Slang lowers SV_VertexID to VertexIndex minus BaseVertex (D3D semantics),
-// so SPIR-V built from the project shaders declares the DrawParameters
-// capability and every device consuming them must enable the matching
-// shaderDrawParameters feature.
-inline bool SupportsShaderDrawParameters(VkPhysicalDevice device) {
-  VkPhysicalDeviceVulkan11Features vulkan11{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
-  VkPhysicalDeviceFeatures2 features{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-  features.pNext = &vulkan11;
-  vkGetPhysicalDeviceFeatures2(device, &features);
-  return vulkan11.shaderDrawParameters == VK_TRUE;
-}
-
 inline std::uint32_t FindMemoryType(VkPhysicalDevice device,
     std::uint32_t allowed,
     VkMemoryPropertyFlags required,

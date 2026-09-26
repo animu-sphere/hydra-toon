@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Swapchain presentation for the bootstrap draw. The backend owns the
+// Swapchain presentation of a scene's DrawList. The backend owns the
 // VkSurfaceKHR and every swapchain object; the window layer only supplies the
-// surface-creation callback and the platform instance extensions. Skeleton
-// policy: one frame in flight, dynamic viewport/scissor, color-only pass.
+// surface-creation callback and the platform instance extensions. One frame
+// in flight, tracked by a timeline semaphore; the mesh pipeline uses dynamic
+// rendering, so a resize rebuilds only the swapchain and its depth image.
 #include <toon/vulkan_present.hpp>
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <vulkan/vulkan.h>
 
 #include "vulkan_internal.hpp"
+#include "vulkan_scene.hpp"
 #endif
 
 namespace Toon {
@@ -41,16 +43,34 @@ std::unique_ptr<PresentSession> CreatePresentSession(
 
 namespace {
 
+using vulkan_internal::BeginSceneRendering;
+using vulkan_internal::CreateDeviceImage;
 using vulkan_internal::CreateInstanceWithValidation;
-using vulkan_internal::CreateShader;
+using vulkan_internal::CreateScenePipeline;
+using vulkan_internal::DestroyDeviceImage;
 using vulkan_internal::DestroyInstance;
+using vulkan_internal::DestroyScenePipeline;
+using vulkan_internal::DeviceImage;
+using vulkan_internal::ImageBarrier;
 using vulkan_internal::InstanceState;
 using vulkan_internal::LoadSpirv;
-using vulkan_internal::SupportsShaderDrawParameters;
+using vulkan_internal::MeshCache;
+using vulkan_internal::SceneDeviceFeatures;
+using vulkan_internal::ScenePipeline;
+using vulkan_internal::SupportsSceneFeatures;
 using vulkan_internal::ValidationState;
+using vulkan_internal::VulkanClipFromWorld;
 using vulkan_internal::VulkanOk;
 
 constexpr std::uint64_t kFrameTimeoutNs = 10'000'000'000ULL;
+constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+
+bool SupportsDepthAttachment(VkPhysicalDevice device) {
+  VkFormatProperties properties{};
+  vkGetPhysicalDeviceFormatProperties(device, kDepthFormat, &properties);
+  return (properties.optimalTilingFeatures &
+             VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
+}
 
 template <typename Handle>
 std::uintptr_t EncodeHandle(Handle handle) noexcept {
@@ -117,7 +137,7 @@ public:
       const std::string& fragment_shader, bool vsync,
       std::string& error);
 
-  [[nodiscard]] bool RenderFrame(const DrawSummary& draw, std::uint32_t width,
+  [[nodiscard]] bool RenderFrame(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, bool& presented,
       std::string& error) override;
 
@@ -129,6 +149,7 @@ private:
   bool RecreateSwapchain(std::uint32_t width, std::uint32_t height,
       std::string& error);
   void DestroySwapchainObjects();
+  bool WaitForCompletion(std::string& error);
   void Destroy();
 
   InstanceState instance_;
@@ -142,16 +163,17 @@ private:
   VkCommandBuffer command_ = VK_NULL_HANDLE;
   VkSurfaceFormatKHR surface_format_{};
   VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_FIFO_KHR;
-  VkRenderPass render_pass_ = VK_NULL_HANDLE;
-  VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
-  VkPipeline pipeline_ = VK_NULL_HANDLE;
+  ScenePipeline pipeline_;
+  MeshCache meshes_;
   VkSemaphore image_available_ = VK_NULL_HANDLE;
-  VkFence in_flight_ = VK_NULL_HANDLE;
+  // Frame N signals value N; one frame is in flight.
+  VkSemaphore timeline_ = VK_NULL_HANDLE;
+  std::uint64_t submitted_ = 0;
   VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
   VkExtent2D extent_{};
   std::vector<VkImage> images_;
   std::vector<VkImageView> views_;
-  std::vector<VkFramebuffer> framebuffers_;
+  DeviceImage depth_;
   // Present-wait semaphores are per swapchain image: a single semaphore may
   // still be in use by an outstanding present when the next frame needs it.
   std::vector<VkSemaphore> render_finished_;
@@ -208,9 +230,11 @@ PresentSetupStatus VulkanPresentSession::Initialize(
   vkEnumeratePhysicalDevices(instance_.instance, &physical_count,
       physical_devices.data());
   std::optional<std::uint32_t> queue_family;
+  std::string rejection;
   for (VkPhysicalDevice physical : physical_devices) {
     if (!HasDeviceExtension(physical, VK_KHR_SWAPCHAIN_EXTENSION_NAME) ||
-        !SupportsShaderDrawParameters(physical)) {
+        !SupportsSceneFeatures(physical, rejection) ||
+        !SupportsDepthAttachment(physical)) {
       continue;
     }
     const auto candidate = FindGraphicsPresentQueue(physical, surface_);
@@ -221,8 +245,12 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     }
   }
   if (!queue_family) {
-    error = "no Vulkan device offers a graphics+present queue, the swapchain "
-            "extension, and shaderDrawParameters for this surface";
+    error = "no Vulkan 1.3 device offers a graphics+present queue, the "
+            "swapchain extension, a D32 depth attachment, dynamic rendering, "
+            "synchronization2 and timeline semaphores for this surface";
+    if (!rejection.empty()) {
+      error += " (" + rejection + ")";
+    }
     return PresentSetupStatus::Unavailable;
   }
   queue_family_ = *queue_family;
@@ -269,14 +297,10 @@ PresentSetupStatus VulkanPresentSession::Initialize(
   queue_create.queueFamilyIndex = queue_family_;
   queue_create.queueCount = 1;
   queue_create.pQueuePriorities = &priority;
-  // The bootstrap shaders are Slang-built and declare DrawParameters; see
-  // SupportsShaderDrawParameters.
-  VkPhysicalDeviceVulkan11Features enabled_vulkan11{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
-  enabled_vulkan11.shaderDrawParameters = VK_TRUE;
+  SceneDeviceFeatures features;
   const char* swapchain_extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
   VkDeviceCreateInfo device_create{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-  device_create.pNext = &enabled_vulkan11;
+  device_create.pNext = features.EnableRequired();
   device_create.queueCreateInfoCount = 1;
   device_create.pQueueCreateInfos = &queue_create;
   device_create.enabledExtensionCount = 1;
@@ -287,6 +311,7 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
   vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
+  meshes_.Initialize(physical_device_, device_);
 
   VkCommandPoolCreateInfo pool_create{
       VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -308,130 +333,25 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
 
-  VkAttachmentDescription attachment{};
-  attachment.format = surface_format_.format;
-  attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-  VkAttachmentReference color_reference{
-      0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-  VkSubpassDescription subpass{};
-  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-  subpass.colorAttachmentCount = 1;
-  subpass.pColorAttachments = &color_reference;
-  VkSubpassDependency dependency{};
-  dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-  dependency.dstSubpass = 0;
-  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  VkRenderPassCreateInfo render_pass_create{
-      VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-  render_pass_create.attachmentCount = 1;
-  render_pass_create.pAttachments = &attachment;
-  render_pass_create.subpassCount = 1;
-  render_pass_create.pSubpasses = &subpass;
-  render_pass_create.dependencyCount = 1;
-  render_pass_create.pDependencies = &dependency;
-  if (!VulkanOk(vkCreateRenderPass(device_, &render_pass_create, nullptr,
-                    &render_pass_),
-          "vkCreateRenderPass", error)) {
-    return PresentSetupStatus::Error;
-  }
-
-  VkShaderModule vertex_module = CreateShader(device_, vertex_words, error);
-  VkShaderModule fragment_module =
-      CreateShader(device_, fragment_words, error);
-  if (vertex_module == VK_NULL_HANDLE || fragment_module == VK_NULL_HANDLE) {
-    vkDestroyShaderModule(device_, vertex_module, nullptr);
-    vkDestroyShaderModule(device_, fragment_module, nullptr);
-    return PresentSetupStatus::Error;
-  }
-  VkPipelineShaderStageCreateInfo stages[2]{};
-  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-  stages[0].module = vertex_module;
-  stages[0].pName = "main";
-  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-  stages[1].module = fragment_module;
-  stages[1].pName = "main";
-  VkPipelineVertexInputStateCreateInfo vertex_input{
-      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-  VkPipelineInputAssemblyStateCreateInfo input_assembly{
-      VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-  input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-  VkPipelineViewportStateCreateInfo viewport_state{
-      VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-  viewport_state.viewportCount = 1;
-  viewport_state.scissorCount = 1;
-  VkPipelineRasterizationStateCreateInfo raster{
-      VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-  raster.polygonMode = VK_POLYGON_MODE_FILL;
-  raster.cullMode = VK_CULL_MODE_NONE;
-  raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-  raster.lineWidth = 1.0F;
-  VkPipelineMultisampleStateCreateInfo multisample{
-      VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-  VkPipelineColorBlendAttachmentState blend_attachment{};
-  blend_attachment.colorWriteMask =
-      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-  VkPipelineColorBlendStateCreateInfo blend{
-      VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-  blend.attachmentCount = 1;
-  blend.pAttachments = &blend_attachment;
-  const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
-      VK_DYNAMIC_STATE_SCISSOR};
-  VkPipelineDynamicStateCreateInfo dynamic{
-      VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic.dynamicStateCount = 2;
-  dynamic.pDynamicStates = dynamic_states;
-  VkPipelineLayoutCreateInfo layout_create{
-      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-  if (!VulkanOk(vkCreatePipelineLayout(device_, &layout_create, nullptr,
-                    &pipeline_layout_),
-          "vkCreatePipelineLayout", error)) {
-    vkDestroyShaderModule(device_, vertex_module, nullptr);
-    vkDestroyShaderModule(device_, fragment_module, nullptr);
-    return PresentSetupStatus::Error;
-  }
-  VkGraphicsPipelineCreateInfo pipeline_create{
-      VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-  pipeline_create.stageCount = 2;
-  pipeline_create.pStages = stages;
-  pipeline_create.pVertexInputState = &vertex_input;
-  pipeline_create.pInputAssemblyState = &input_assembly;
-  pipeline_create.pViewportState = &viewport_state;
-  pipeline_create.pRasterizationState = &raster;
-  pipeline_create.pMultisampleState = &multisample;
-  pipeline_create.pColorBlendState = &blend;
-  pipeline_create.pDynamicState = &dynamic;
-  pipeline_create.layout = pipeline_layout_;
-  pipeline_create.renderPass = render_pass_;
-  pipeline_create.subpass = 0;
-  const VkResult pipeline_result = vkCreateGraphicsPipelines(
-      device_, VK_NULL_HANDLE, 1, &pipeline_create, nullptr, &pipeline_);
-  vkDestroyShaderModule(device_, vertex_module, nullptr);
-  vkDestroyShaderModule(device_, fragment_module, nullptr);
-  if (!VulkanOk(pipeline_result, "vkCreateGraphicsPipelines", error)) {
+  if (!CreateScenePipeline(device_, vertex_words, fragment_words,
+          surface_format_.format, kDepthFormat, pipeline_, error)) {
     return PresentSetupStatus::Error;
   }
 
   VkSemaphoreCreateInfo semaphore_create{
       VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-  VkFenceCreateInfo fence_create{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-  fence_create.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+  VkSemaphoreTypeCreateInfo timeline_type{
+      VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
+  timeline_type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+  VkSemaphoreCreateInfo timeline_create{
+      VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  timeline_create.pNext = &timeline_type;
   if (!VulkanOk(vkCreateSemaphore(device_, &semaphore_create, nullptr,
                     &image_available_),
           "vkCreateSemaphore", error) ||
-      !VulkanOk(vkCreateFence(device_, &fence_create, nullptr, &in_flight_),
-          "vkCreateFence", error)) {
+      !VulkanOk(vkCreateSemaphore(device_, &timeline_create, nullptr,
+                    &timeline_),
+          "vkCreateSemaphore(timeline)", error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -446,6 +366,8 @@ PresentSetupStatus VulkanPresentSession::Initialize(
 bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
     std::uint32_t height,
     std::string& error) {
+  // Swapchain recreation is not an ordinary frame: waiting for the device
+  // is allowed here (design policy §19).
   vkDeviceWaitIdle(device_);
   DestroySwapchainObjects();
 
@@ -510,7 +432,6 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
   images_.resize(count);
   vkGetSwapchainImagesKHR(device_, swapchain_, &count, images_.data());
   views_.resize(count, VK_NULL_HANDLE);
-  framebuffers_.resize(count, VK_NULL_HANDLE);
   render_finished_.resize(count, VK_NULL_HANDLE);
   for (std::uint32_t index = 0; index < count; ++index) {
     VkImageViewCreateInfo view_create{
@@ -526,19 +447,6 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
             "vkCreateImageView(swapchain)", error)) {
       return false;
     }
-    VkFramebufferCreateInfo framebuffer_create{
-        VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    framebuffer_create.renderPass = render_pass_;
-    framebuffer_create.attachmentCount = 1;
-    framebuffer_create.pAttachments = &views_[index];
-    framebuffer_create.width = extent.width;
-    framebuffer_create.height = extent.height;
-    framebuffer_create.layers = 1;
-    if (!VulkanOk(vkCreateFramebuffer(device_, &framebuffer_create, nullptr,
-                      &framebuffers_[index]),
-            "vkCreateFramebuffer(swapchain)", error)) {
-      return false;
-    }
     VkSemaphoreCreateInfo semaphore_create{
         VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     if (!VulkanOk(vkCreateSemaphore(device_, &semaphore_create, nullptr,
@@ -546,6 +454,12 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
             "vkCreateSemaphore(present)", error)) {
       return false;
     }
+  }
+
+  if (!CreateDeviceImage(physical_device_, device_, kDepthFormat,
+          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
+          extent.width, extent.height, depth_, error)) {
+    return false;
   }
 
   extent_ = extent;
@@ -556,15 +470,11 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
   return true;
 }
 
-bool VulkanPresentSession::RenderFrame(const DrawSummary& draw,
+bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     std::uint32_t width,
     std::uint32_t height, bool& presented,
     std::string& error) {
   presented = false;
-  if (draw.draw_count != 1 || draw.triangle_count != 1) {
-    error = "bootstrap extraction did not produce one triangle draw";
-    return false;
-  }
   if (width == 0 || height == 0) {
     return true;
   }
@@ -578,9 +488,7 @@ bool VulkanPresentSession::RenderFrame(const DrawSummary& draw,
     }
   }
 
-  if (!VulkanOk(vkWaitForFences(device_, 1, &in_flight_, VK_TRUE,
-                    kFrameTimeoutNs),
-          "vkWaitForFences", error)) {
+  if (!WaitForCompletion(error)) {
     return false;
   }
   std::uint32_t image_index = 0;
@@ -593,8 +501,7 @@ bool VulkanPresentSession::RenderFrame(const DrawSummary& draw,
   if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
     return VulkanOk(acquire, "vkAcquireNextImageKHR", error);
   }
-  if (!VulkanOk(vkResetFences(device_, 1, &in_flight_), "vkResetFences",
-          error)) {
+  if (!meshes_.Update(draws, error)) {
     return false;
   }
 
@@ -603,53 +510,73 @@ bool VulkanPresentSession::RenderFrame(const DrawSummary& draw,
     return false;
   }
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   if (!VulkanOk(vkBeginCommandBuffer(command_, &begin), "vkBeginCommandBuffer",
           error)) {
     return false;
   }
-  VkClearValue clear{};
-  clear.color.float32[0] = 0.05F;
-  clear.color.float32[1] = 0.10F;
-  clear.color.float32[2] = 0.15F;
-  clear.color.float32[3] = 1.0F;
-  VkRenderPassBeginInfo render_begin{
-      VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-  render_begin.renderPass = render_pass_;
-  render_begin.framebuffer = framebuffers_[image_index];
-  render_begin.renderArea.extent = extent_;
-  render_begin.clearValueCount = 1;
-  render_begin.pClearValues = &clear;
-  vkCmdBeginRenderPass(command_, &render_begin, VK_SUBPASS_CONTENTS_INLINE);
-  vkCmdBindPipeline(command_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
-  const VkViewport viewport{0.0F,
-      0.0F,
-      static_cast<float>(extent_.width),
-      static_cast<float>(extent_.height),
-      0.0F,
-      1.0F};
-  const VkRect2D scissor{{0, 0}, extent_};
-  vkCmdSetViewport(command_, 0, 1, &viewport);
-  vkCmdSetScissor(command_, 0, 1, &scissor);
-  vkCmdDraw(command_, draw.triangle_count * 3U, 1, 0, 0);
-  vkCmdEndRenderPass(command_);
+  // The colour transition waits at the stage the acquire semaphore gates.
+  const VkImageMemoryBarrier2 to_attachment[] = {
+      ImageBarrier(images_[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
+      ImageBarrier(depth_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+              VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+          VK_IMAGE_LAYOUT_UNDEFINED,
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+  };
+  VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  dependency.imageMemoryBarrierCount = 2;
+  dependency.pImageMemoryBarriers = to_attachment;
+  vkCmdPipelineBarrier2(command_, &dependency);
+  BeginSceneRendering(command_, views_[image_index], depth_.view, extent_);
+  meshes_.Record(command_, pipeline_, draws, VulkanClipFromWorld(draws.view));
+  vkCmdEndRendering(command_);
+  const VkImageMemoryBarrier2 to_present = ImageBarrier(images_[image_index],
+      VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_NONE,
+      VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+  dependency.imageMemoryBarrierCount = 1;
+  dependency.pImageMemoryBarriers = &to_present;
+  vkCmdPipelineBarrier2(command_, &dependency);
   if (!VulkanOk(vkEndCommandBuffer(command_), "vkEndCommandBuffer", error)) {
     return false;
   }
 
-  const VkPipelineStageFlags wait_stage =
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  submit.waitSemaphoreCount = 1;
-  submit.pWaitSemaphores = &image_available_;
-  submit.pWaitDstStageMask = &wait_stage;
-  submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &command_;
-  submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &render_finished_[image_index];
-  if (!VulkanOk(vkQueueSubmit(queue_, 1, &submit, in_flight_),
-          "vkQueueSubmit", error)) {
+  VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  wait.semaphore = image_available_;
+  wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  VkSemaphoreSubmitInfo signals[2]{};
+  signals[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+  signals[0].semaphore = render_finished_[image_index];
+  signals[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  signals[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+  signals[1].semaphore = timeline_;
+  signals[1].value = submitted_ + 1;
+  signals[1].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  VkCommandBufferSubmitInfo command_submit{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+  command_submit.commandBuffer = command_;
+  VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = 1;
+  submit.pWaitSemaphoreInfos = &wait;
+  submit.commandBufferInfoCount = 1;
+  submit.pCommandBufferInfos = &command_submit;
+  submit.signalSemaphoreInfoCount = 2;
+  submit.pSignalSemaphoreInfos = signals;
+  if (!VulkanOk(vkQueueSubmit2(queue_, 1, &submit, VK_NULL_HANDLE),
+          "vkQueueSubmit2", error)) {
     return false;
   }
+  ++submitted_;
 
   VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
   present.waitSemaphoreCount = 1;
@@ -680,15 +607,24 @@ bool VulkanPresentSession::RenderFrame(const DrawSummary& draw,
   return true;
 }
 
+bool VulkanPresentSession::WaitForCompletion(std::string& error) {
+  if (submitted_ == 0) {
+    return true;
+  }
+  VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+  wait.semaphoreCount = 1;
+  wait.pSemaphores = &timeline_;
+  wait.pValues = &submitted_;
+  return VulkanOk(vkWaitSemaphores(device_, &wait, kFrameTimeoutNs),
+      "vkWaitSemaphores", error);
+}
+
 void VulkanPresentSession::DestroySwapchainObjects() {
   for (VkSemaphore semaphore : render_finished_) {
     vkDestroySemaphore(device_, semaphore, nullptr);
   }
   render_finished_.clear();
-  for (VkFramebuffer framebuffer : framebuffers_) {
-    vkDestroyFramebuffer(device_, framebuffer, nullptr);
-  }
-  framebuffers_.clear();
+  DestroyDeviceImage(device_, depth_);
   for (VkImageView view : views_) {
     vkDestroyImageView(device_, view, nullptr);
   }
@@ -705,11 +641,10 @@ void VulkanPresentSession::Destroy() {
   if (device_ != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(device_);
     DestroySwapchainObjects();
-    vkDestroyFence(device_, in_flight_, nullptr);
+    meshes_.Destroy();
+    vkDestroySemaphore(device_, timeline_, nullptr);
     vkDestroySemaphore(device_, image_available_, nullptr);
-    vkDestroyPipeline(device_, pipeline_, nullptr);
-    vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
-    vkDestroyRenderPass(device_, render_pass_, nullptr);
+    DestroyScenePipeline(device_, pipeline_);
     vkDestroyCommandPool(device_, command_pool_, nullptr);
     vkDestroyDevice(device_, nullptr);
     device_ = VK_NULL_HANDLE;

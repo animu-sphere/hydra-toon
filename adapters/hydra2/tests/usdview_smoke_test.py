@@ -48,3 +48,9 @@ def testUsdviewInputFunction(appController):
     updated = _render(appController, "stable-update")
     assert updated["frame"] > first["frame"]
     assert updated["scene_revision"] > first["scene_revision"]
+    # A points edit re-uploads points only: the pipeline, the render targets
+    # and the triangulated topology all survive it.
+    assert first["pipelines"] == 1 and updated["pipelines"] == 1
+    assert updated["target_allocations"] == first["target_allocations"]
+    assert updated["topology_uploads"] == first["topology_uploads"]
+    assert updated["point_uploads"] > first["point_uploads"]

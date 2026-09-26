@@ -40,9 +40,9 @@ struct PresentStatistics {
   std::string device_name;
 };
 
-// One swapchain presentation session over the project bootstrap draw. The
-// skeleton policy is intentionally small: one frame in flight, FIFO present
-// mode when vsync is on, IMMEDIATE (when available) otherwise.
+// One swapchain presentation session drawing a scene's DrawList, through the
+// same mesh pipeline as the offscreen renderer. One frame in flight, FIFO
+// present mode when vsync is on, IMMEDIATE (when available) otherwise.
 class PresentSession {
 public:
   virtual ~PresentSession() = default;
@@ -51,7 +51,7 @@ public:
   // A zero extent (minimized window) is not an error: the frame is skipped
   // and `presented` reports false. Swapchain recreation on resize or
   // out-of-date presentation is handled internally.
-  [[nodiscard]] virtual bool RenderFrame(const DrawSummary& draw,
+  [[nodiscard]] virtual bool RenderFrame(const DrawList& draws,
       std::uint32_t width,
       std::uint32_t height, bool& presented,
       std::string& error) = 0;

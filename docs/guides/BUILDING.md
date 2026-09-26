@@ -1,7 +1,7 @@
 # Building and testing
 
 Every command on this page has been run in this repository; the latest run is
-[ost report 03](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md).
+[renderer report 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md).
 What each build contains is
 [PROJECT_LAYOUT.md §5](../architecture/PROJECT_LAYOUT.md#5-build-intents-and-runtime-profiles),
 and what it was measured on is
@@ -24,8 +24,8 @@ ost test
 ost validate
 ```
 
-`ost build` runs `toon-headless`, which renders the bootstrap frame 1,000
-times and writes `build/<target>/renderer-report.json`. `ost validate` reads
+`ost build` runs `toon-headless`, which renders the bootstrap triangle scene
+1,000 times on one persistent renderer and writes `build/<target>/renderer-report.json`. `ost validate` reads
 it; the Hydra assertions are `SKIP` in this build by design.
 `renderer.install_tree` is `SKIP` after `ost build` and passes once `ost test`
 has run `toon-renderer-install-tree`, which installs the project, runs the

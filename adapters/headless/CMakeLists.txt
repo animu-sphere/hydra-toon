@@ -12,10 +12,10 @@ if(TOON_WITH_VULKAN)
       "$<TARGET_FILE_DIR:toon-headless>/shaders"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "${TOON_VERTEX_SPV}"
-      "$<TARGET_FILE_DIR:toon-headless>/shaders/triangle.vert.spv"
+      "$<TARGET_FILE_DIR:toon-headless>/shaders/mesh.vert.spv"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "${TOON_FRAGMENT_SPV}"
-      "$<TARGET_FILE_DIR:toon-headless>/shaders/triangle.frag.spv"
+      "$<TARGET_FILE_DIR:toon-headless>/shaders/mesh.frag.spv"
     VERBATIM)
 endif()
 
