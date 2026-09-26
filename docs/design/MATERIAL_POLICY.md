@@ -5,9 +5,10 @@ owner: hydra-toon
 
 # Material policy
 
-> Status: **proposed**, 2026-09-26. Nothing here is implemented. It becomes
-> binding piece by piece as Renderer Phase 1 (MToon opaque), Phase 4 (MMD) and
-> Phase 5 (PreviewSurface) land. It expands
+> Status: **proposed**, 2026-09-26. It becomes binding piece by piece as
+> Renderer Phase 1 (MToon opaque), Phase 4 (MMD) and Phase 5
+> (PreviewSurface) land; what is implemented is the
+> [capability matrix](../reference/CAPABILITY_MATRIX.md). It expands
 > [DESIGN_POLICY.md](DESIGN_POLICY.md) §8 and wins over it on materials.
 
 ## 1. Purpose

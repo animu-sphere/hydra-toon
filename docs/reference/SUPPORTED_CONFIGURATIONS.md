@@ -8,8 +8,8 @@ local run, and the report named in the row holds its detail.
 
 | OS | Compiler | Build | Runtime | GPU | Result | Report |
 | --- | --- | --- | --- | --- | --- | --- |
-| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `core`, Release | OpenStrata `cy2026` `core` (no OpenUSD) | NVIDIA RTX A5000 | `ost build`, `ost test` 4/4, `ost validate` passed with `renderer.install_tree` PASS | [renderer 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md) |
-| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `hydra` intent, Release | OpenStrata `cy2026` `lookdev`, OpenUSD 26.08, Python 3.13 | NVIDIA RTX A5000 | `ost build`, `ost test` 8/8 including `testusdview`, `ost validate` passed with 13 of 13 renderer assertions | [renderer 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md) |
+| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `core`, Release | OpenStrata `cy2026` `core` (no OpenUSD) | NVIDIA RTX A5000 | `ost build`, `ost test` 4/4, `ost validate` passed with `renderer.install_tree` PASS | [renderer 03](../reports/renderer/03-2026-09-26-material-sprim.md) |
+| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `hydra` intent, Release | OpenStrata `cy2026` `lookdev`, OpenUSD 26.08, Python 3.13 | NVIDIA RTX A5000 | `ost build`, `ost test` 9/9 including `testusdview`, `ost validate` passed with 13 of 13 renderer assertions | [renderer 03](../reports/renderer/03-2026-09-26-material-sprim.md) |
 | Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | standalone viewport | OpenStrata `cy2026` `core` | NVIDIA RTX A5000 | `ost renderer viewport -- --frames 8 --hidden` presented 8 frames; `ost validate --intent renderer-viewport` passed | [renderer 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md) |
 
 ## Requirements

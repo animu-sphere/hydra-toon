@@ -77,5 +77,52 @@ int main() {
   if (!Check(world.Commit().meshes.empty(), "a removed mesh must be gone")) {
     return 1;
   }
+
+  // A material value edit rewrites its slot; only a structural edit
+  // (material policy §8) advances the structure revision.
+  const Toon::MaterialId material = world.CreateMaterial();
+  const Toon::FrameSnapshot created = world.Commit();
+  if (!Check(created.materials.size() == 1 &&
+                 created.materials[0].material == Toon::ToonMaterial{},
+          "a new material must be the fallback material")) {
+    return 1;
+  }
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  world.SetMaterial(material, toon);
+  const Toon::MaterialSnapshot selected = world.Commit().materials[0];
+  if (!Check(selected.structure_revision !=
+                 created.materials[0].structure_revision,
+          "a model change must be structural")) {
+    return 1;
+  }
+  toon.mtoon.shading_shift = 0.2F;
+  world.SetMaterial(material, toon);
+  const Toon::FrameSnapshot shifted = world.Commit();
+  if (!Check(shifted.materials[0].parameters_revision !=
+                 selected.parameters_revision,
+          "a value edit must advance the parameters revision") ||
+      !Check(shifted.materials[0].structure_revision ==
+                 selected.structure_revision,
+          "a value edit must not be structural")) {
+    return 1;
+  }
+  world.SetMaterial(material, toon);
+  if (!Check(world.Commit().revision == shifted.revision,
+          "setting the same values must not commit")) {
+    return 1;
+  }
+  toon.alpha_mode = Toon::ToonAlphaMode::Mask;
+  world.SetMaterial(material, toon);
+  if (!Check(world.Commit().materials[0].structure_revision !=
+                 shifted.materials[0].structure_revision,
+          "an alpha mode change must be structural")) {
+    return 1;
+  }
+  world.RemoveMaterial(material);
+  if (!Check(world.Commit().materials.empty(),
+          "a removed material must be gone")) {
+    return 1;
+  }
   return 0;
 }

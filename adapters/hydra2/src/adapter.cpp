@@ -16,6 +16,7 @@
 #include <pxr/imaging/hd/renderPass.h>
 #include <pxr/imaging/hd/renderPassState.h>
 #include <pxr/imaging/hd/resourceRegistry.h>
+#include <pxr/imaging/hd/sceneIndex.h>
 #include <pxr/imaging/hd/tokens.h>
 
 #include <toon/extraction.hpp>
@@ -110,7 +111,9 @@ Toon::Matrix4 ToToon(const GfMatrix4d& matrix) {
   return result;
 }
 
-class AdapterState {
+} // namespace
+
+class HdToonAdapterState {
 public:
   Toon::MeshId CreateMesh() {
     std::scoped_lock lock(mutex_);
@@ -146,6 +149,22 @@ public:
   void SetMeshVisible(Toon::MeshId mesh, bool visible) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshVisible(mesh, visible);
+  }
+
+  Toon::MaterialId CreateMaterial() {
+    std::scoped_lock lock(mutex_);
+    return world_.CreateMaterial();
+  }
+
+  void RemoveMaterial(Toon::MaterialId material) {
+    std::scoped_lock lock(mutex_);
+    world_.RemoveMaterial(material);
+  }
+
+  void SetMaterial(Toon::MaterialId material,
+      const Toon::ToonMaterial& values) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMaterial(material, values);
   }
 
   void Render(const HdRenderPassStateSharedPtr& pass_state) {
@@ -253,9 +272,11 @@ private:
   std::uint64_t frame_index_{};
 };
 
+namespace {
+
 class HdToonMesh final : public HdMesh {
 public:
-  HdToonMesh(const SdfPath& id, std::shared_ptr<AdapterState> state)
+  HdToonMesh(const SdfPath& id, std::shared_ptr<HdToonAdapterState> state)
       : HdMesh(id), state_(std::move(state)), mesh_(state_->CreateMesh()) {
   }
 
@@ -363,7 +384,7 @@ private:
     return points;
   }
 
-  // Constant display colour only, until materials arrive; anything else
+  // Constant display colour only, until meshes bind materials; anything else
   // falls back to grey.
   static Toon::Float3 ReadDisplayColor(const VtValue& value) {
     if (value.IsHolding<VtVec3fArray>()) {
@@ -378,7 +399,7 @@ private:
     return {0.5F, 0.5F, 0.5F};
   }
 
-  std::shared_ptr<AdapterState> state_;
+  std::shared_ptr<HdToonAdapterState> state_;
   Toon::MeshId mesh_;
 };
 
@@ -395,7 +416,7 @@ class HdToonRenderPass final : public HdRenderPass {
 public:
   HdToonRenderPass(HdRenderIndex* index,
       const HdRprimCollection& collection,
-      std::shared_ptr<AdapterState> state)
+      std::shared_ptr<HdToonAdapterState> state)
       : HdRenderPass(index, collection), state_(std::move(state)) {
   }
 
@@ -406,7 +427,7 @@ private:
     state_->Render(render_pass_state);
   }
 
-  std::shared_ptr<AdapterState> state_;
+  std::shared_ptr<HdToonAdapterState> state_;
 };
 } // namespace
 
@@ -579,9 +600,54 @@ void HdToonRenderBuffer::_Deallocate() {
   data_.clear();
 }
 
+HdToonMaterial::HdToonMaterial(const SdfPath& id,
+    std::shared_ptr<HdToonAdapterState> state)
+    : HdMaterial(id), state_(std::move(state)),
+      material_(state_->CreateMaterial()) {
+}
+
+HdToonMaterial::~HdToonMaterial() {
+  state_->RemoveMaterial(material_);
+}
+
+// The canonical values are not in the material network: a format
+// repository's realization does not connect to them (renderer report 02).
+// They are read from the prim's own data sources on the render index's
+// terminal scene index, where the format's UsdImaging adapter puts them.
+void HdToonMaterial::Sync(HdSceneDelegate* delegate,
+    HdRenderParam* render_param, HdDirtyBits* dirty_bits) {
+  (void)render_param;
+  if (*dirty_bits != Clean) {
+    HdContainerDataSourceHandle prim;
+    if (const HdSceneIndexBaseRefPtr terminal =
+            delegate->GetRenderIndex().GetTerminalSceneIndex()) {
+      prim = terminal->GetPrim(GetId()).dataSource;
+    } else {
+      static std::once_flag warned;
+      std::call_once(warned, [] {
+        TF_WARN("Toon reads materials from the terminal scene index, which "
+                "this render index does not have; every material is "
+                "PreviewSurface");
+      });
+    }
+    values_ = HdToonReadMaterial(prim);
+    state_->SetMaterial(material_, values_);
+  }
+  *dirty_bits = Clean;
+}
+
+HdDirtyBits HdToonMaterial::GetInitialDirtyBitsMask() const {
+  return AllDirty;
+}
+
+const Toon::ToonMaterial& HdToonMaterial::GetToonMaterial() const {
+  return values_;
+}
+
 class HdToonRenderDelegate::Impl {
 public:
-  std::shared_ptr<AdapterState> state = std::make_shared<AdapterState>();
+  std::shared_ptr<HdToonAdapterState> state =
+      std::make_shared<HdToonAdapterState>();
 };
 
 HdToonRenderDelegate::HdToonRenderDelegate(
@@ -600,7 +666,7 @@ const TfTokenVector& HdToonRenderDelegate::GetSupportedRprimTypes() const {
 
 const TfTokenVector& HdToonRenderDelegate::GetSupportedSprimTypes() const {
   static const TfTokenVector types{HdPrimTypeTokens->camera,
-      HdPrimTypeTokens->extComputation};
+      HdPrimTypeTokens->extComputation, HdPrimTypeTokens->material};
   return types;
 }
 
@@ -650,6 +716,9 @@ HdSprim* HdToonRenderDelegate::CreateSprim(const TfToken& type_id,
   if (type_id == HdPrimTypeTokens->extComputation) {
     return new HdExtComputation(sprim_id);
   }
+  if (type_id == HdPrimTypeTokens->material) {
+    return new HdToonMaterial(sprim_id, impl_->state);
+  }
   return nullptr;
 }
 
@@ -660,6 +729,10 @@ HdSprim* HdToonRenderDelegate::CreateFallbackSprim(
   }
   if (type_id == HdPrimTypeTokens->extComputation) {
     return new HdExtComputation(SdfPath::EmptyPath());
+  }
+  // Never synced, so it keeps the fallback material's values.
+  if (type_id == HdPrimTypeTokens->material) {
+    return new HdToonMaterial(SdfPath::EmptyPath(), impl_->state);
   }
   return nullptr;
 }

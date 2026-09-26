@@ -34,6 +34,17 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - `toon-hydra2-material-probe`, which records what of a Material's canonical
   semantics reaches a classic `HdMaterial`, and renderer report 02, which
   answers MAT-Q1 for MToon with it.
+- `ToonMaterial` in the core: material policy §4's common part and MToon
+  block, without textures. `RenderWorld` holds materials, and a value edit
+  advances only a material's parameters revision while a model, alpha-mode
+  or double-sidedness edit also advances its structure revision.
+- `hdToon` creates a material Sprim for every Hydra material. In `Sync` it
+  reads the prim's `vrm` container from the terminal scene index: `vrm/mtoon`
+  selects MToon and its `vrm/material` and `vrm/mtoon` values are
+  normalized into `ToonMaterial`; anything else is PreviewSurface. Meshes do
+  not bind materials yet.
+- The CTest `toon-renderer-hydra-material`, whose binary also reports what a
+  real stage's materials select with `--stage`, and renderer report 03.
 
 ### Changed
 

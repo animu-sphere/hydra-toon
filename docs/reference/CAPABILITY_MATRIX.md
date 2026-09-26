@@ -28,7 +28,8 @@ Configurations each row was measured on are
 | Camera | ✅ | a `ToonView` in the OpenGL clip convention; the Vulkan backend flips y and maps z to [0, 1] |
 | Lighting and shading | ⬜ | flat colour only |
 | `UsdSkel` skinning | ⬜ | Renderer Phase 1 |
-| MToon | ⬜ | Renderer Phase 1–2 |
+| `ToonMaterial` | ✅ | material policy §4's common part and MToon block, without textures; a value edit advances a material's parameters revision, a model, alpha-mode or double-sidedness edit its structure revision; CTest `toon-render-world`. Nothing draws with it yet |
+| MToon shading | ⬜ | Renderer Phase 1–2 |
 | Inverted-hull outline | ⬜ | Renderer Phase 1 |
 | Morphs, expressions, look-at | ⬜ | Renderer Phase 3 |
 | Late motion latching | ⬜ | Renderer Phase 3 |
@@ -50,8 +51,12 @@ Configurations each row was measured on are
 | Skinned points (`UsdSkel` ext computations) | ⚠️ | the computations' CPU kernels run during mesh sync, as HdEmbree does; GPU skinning is Renderer Phase 1 |
 | Colour and depth AOVs | ✅ | read back from the GPU and written bottom row first, as Hydra buffers are laid out |
 | `primId`, `instanceId`, `elementId` AOVs | 🧪 | filled with -1; no picking |
+| `material` | ✅ | selected by [material policy §3](../design/MATERIAL_POLICY.md#3-selection-a-realization-is-chosen-not-merged): `vrm/mtoon` on the prim, read from the terminal scene index in `Sync`, is MToon, and its `vrm/material` and `vrm/mtoon` values are normalized into `ToonMaterial`; anything else is PreviewSurface with the fallback's values. CTest `toon-renderer-hydra-material`; [renderer report 03](../reports/renderer/03-2026-09-26-material-sprim.md) |
+| MMD selection, PreviewSurface network, material textures | ⬜ | Renderer Phase 4, 5 and 1 |
+| Value-only material changes (time samples) | ⬜ | never reach `Sync`; the delegate-side route is on the [roadmap](../roadmap/current.md#before-renderer-phase-1) |
+| Material binding on meshes | ⬜ | Renderer Phase 1; meshes still draw their display colour |
 | Render tags, instancers, framing data window | ⬜ | every visible mesh is drawn over the whole AOV |
-| Materials, lights | ⬜ | |
+| Lights | ⬜ | |
 
 ## Hosts
 

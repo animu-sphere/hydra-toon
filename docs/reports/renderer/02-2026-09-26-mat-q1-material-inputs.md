@@ -1,5 +1,7 @@
 # MAT-Q1 measured: canonical material values reach a classic delegate only through `vrmImaging`, and a value-only change produces no Sync
 
+> Followed by [report 03](03-2026-09-26-material-sprim.md): `hdToon`'s material Sprim reads the `vrm` container this report found, in `Sync`.
+
 - Date: 2026-09-26
 - Machine: Windows 11, MSVC 14.51
 - Tooling: `ost 0.23.10`; the `hydra` intent's OpenUSD 26.08 runtime;

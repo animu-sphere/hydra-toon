@@ -11,13 +11,12 @@ endif()
 
 # The co-built runtime is implementation detail of the module. It is not an
 # independently packaged OpenStrata plugin bundle or renderer SDK component.
-add_library(toon-hydra2-runtime STATIC src/adapter.cpp)
+add_library(toon-hydra2-runtime STATIC src/adapter.cpp src/material.cpp)
 target_include_directories(toon-hydra2-runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(toon-hydra2-runtime
-  PUBLIC hd
+  PUBLIC hd Toon::RenderWorld
   PRIVATE
-    Toon::RenderWorld
     Toon::RenderExtraction
     Toon::Vulkan
     ${CMAKE_DL_LIBS})
@@ -98,6 +97,17 @@ if(TOON_BUILD_TESTS)
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
+  # Without arguments, a CTest on a retained scene index that spells the
+  # `vrm` locators itself; with --stage, a report of what a real stage's
+  # materials select in the session's plugins.
+  add_executable(toon-hydra2-material-test tests/material_test.cpp)
+  target_link_libraries(toon-hydra2-material-test
+    PRIVATE toon-hydra2-runtime usdImaging usd)
+  target_compile_features(toon-hydra2-material-test PRIVATE cxx_std_20)
+  target_compile_definitions(toon-hydra2-material-test PRIVATE
+    NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+
   add_executable(toon-hydra2-render-buffer-test
     tests/render_buffer_test.cpp)
   target_link_libraries(toon-hydra2-render-buffer-test
@@ -129,10 +139,13 @@ if(TOON_BUILD_TESTS)
       "$<TARGET_FILE_DIR:hdToon>/resources")
   add_test(NAME toon-renderer-hydra-render-buffer
     COMMAND toon-hydra2-render-buffer-test)
+  add_test(NAME toon-renderer-hydra-material
+    COMMAND toon-hydra2-material-test)
   set_tests_properties(
     toon-renderer-plugin-discovery
     toon-renderer-delegate-creation
     toon-renderer-hydra-render-buffer
+    toon-renderer-hydra-material
     PROPERTIES ENVIRONMENT_MODIFICATION
       "${_toon_pxr_runtime_modifications}")
 
