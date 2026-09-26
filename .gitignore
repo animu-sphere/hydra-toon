@@ -8,6 +8,9 @@
 /out/
 /CMakeUserPresets.json
 /compile_commands.json
+# `ost` rewrites the lock on every build, pinning whichever runtime profile
+# built last; it records this workstation, not the project.
+/strata.lock
 
 # Accidental in-source CMake and Ninja products.
 /CMakeCache.txt

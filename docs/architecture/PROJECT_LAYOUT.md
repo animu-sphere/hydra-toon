@@ -33,11 +33,11 @@ that moment every file is project-owned; the template is not re-applied.
 | --- | --- | --- | --- |
 | `core/render-world/` | `toon-render-world` | `Toon::RenderWorld` | host-neutral scene state |
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
-| `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: offscreen frame, swapchain presentation, Slang shaders |
+| `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline, Slang shaders |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport` | — | standalone GLFW window; optional (`TOON_ENABLE_VIEWPORT`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
-| `validation/` | CTest only | — | core boundary, evidence and install-tree checks |
+| `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
 `adapters/hydra2/` is OpenStrata's name for the Hydra scene-input slot; the code
 is a classic `HdRenderDelegate` ([DESIGN_POLICY.md](../design/DESIGN_POLICY.md)

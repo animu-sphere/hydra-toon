@@ -17,9 +17,37 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - Documentation: the design policy, integration scope and material policy;
   the project layout; the capability matrix and measured configurations; the
   roadmap; the building guide; and the first `ost` dogfooding report.
+- Renderer Phase 0's scene path. `RenderWorld` holds meshes (triangulated
+  indices, points, transform, colour, visibility) and a `ToonView` camera,
+  each with its own revision, and extraction turns a commit into a
+  `DrawList`.
+- `Toon::OffscreenRenderer`: a persistent Vulkan renderer that creates its
+  pipeline once, reallocates render targets only on a resize, uploads mesh
+  geometry only when its revision changes, and reads colour and depth back at
+  any extent. It uses dynamic rendering, Synchronization2 and one timeline
+  semaphore, with one frame in flight.
+- `hdToon` draws Hydra meshes through the Hydra camera at the AOV's
+  resolution. Mesh sync is routed by dirty bit. Skinned points are taken from
+  `UsdSkel`'s ext computations, whose CPU kernels the delegate runs.
+- The CTest `toon-render-world` for the core's dirty routing, and the first
+  renderer report.
 
 ### Changed
 
+- The bootstrap triangle is a scene mesh drawn by `shaders/mesh.slang`
+  through the same pipeline on every host; `triangle.slang` is gone.
+- `renderer.frame.persistence` also requires one pipeline, one target
+  allocation and one mesh upload across its 1,000 frames.
+- The swapchain path renders with dynamic rendering and a depth attachment,
+  and tracks its frame on a timeline semaphore instead of a fence.
+- The device must be Vulkan 1.3 with `dynamicRendering`, `synchronization2`
+  and `timelineSemaphore`; `shaderDrawParameters` is no longer required.
+- `strata.lock` is no longer tracked. `ost` rewrites it on every build with
+  the runtime that built last, so it recorded the workstation, not the
+  project.
+- The Hydra colour and depth AOVs are written bottom row first, as Hydra
+  lays them out; the template's copy was upside down, and its triangle,
+  itself flipped in Vulkan clip space, hid that.
 - The Hydra renderer plugin reads `gpuEnabled` through the
   `HdRendererCreateArgs` container schema on OpenUSD 26.08 and later
   (`HD_API_VERSION` 98), which the template's code did not compile against.

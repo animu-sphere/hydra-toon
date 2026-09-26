@@ -10,7 +10,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️
 
 | Document | Contents |
 | --- | --- |
-| [current.md](current.md) | Renderer Phase 0's open items, scaffold conformance, and project infrastructure. |
+| [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1, and project infrastructure. |
 
 ## Sequence
 
@@ -26,7 +26,7 @@ in.** Other documents name a phase and defer the version here.
 
 | Phase | Status | Target |
 | --- | --- | --- |
-| Renderer Phase 0 — Skeleton | 🚧 in progress (scaffold generated 2026-09-26) | v0.1.0 |
+| Renderer Phase 0 — Skeleton | ✅ implemented, unreleased | v0.1.0 |
 | Renderer Phase 1 — Avatar MVP | ⬜ | unscheduled |
 | Renderer Phase 2 — MToon completion | ⬜ | unscheduled |
 | Renderer Phase 3 — Animation fast path | ⬜ | unscheduled |

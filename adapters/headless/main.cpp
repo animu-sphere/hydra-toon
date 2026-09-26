@@ -99,12 +99,14 @@ bool WriteReport(const std::string& path,
            << Escape(session.target) << "\",\"started_unix\":" << session.started
            << ",\"completed_unix\":" << session.completed << ",\"outcome\":\""
            << (session.succeeded ? "success" : "failure") << "\"},\n";
-    if (!frame.device_name.empty()) {
+    const Toon::OffscreenStatistics& device = frame.statistics;
+    if (!device.device_name.empty()) {
       output << "  \"device\": {\"backend\":\"vulkan\",\"name\":\""
-             << Escape(frame.device_name) << "\",\"api_version\":\""
-             << Escape(frame.api_version) << "\",\"driver_version\":\""
-             << Escape(frame.driver_version) << "\",\"vendor_id\":"
-             << frame.vendor_id << ",\"device_id\":" << frame.device_id << "},\n";
+             << Escape(device.device_name) << "\",\"api_version\":\""
+             << Escape(device.api_version) << "\",\"driver_version\":\""
+             << Escape(device.driver_version) << "\",\"vendor_id\":"
+             << device.vendor_id << ",\"device_id\":" << device.device_id
+             << "},\n";
     }
     output << "  \"checks\": [\n";
     for (std::size_t index = 0; index < checks.size(); ++index) {
@@ -171,16 +173,16 @@ int main(int argc, char** argv) {
   world.SetBootstrapTriangle();
   const Toon::FrameSnapshot first = world.Commit();
   const Toon::FrameSnapshot unchanged = world.Commit();
-  const Toon::DrawSummary draw = Toon::ExtractDrawSummary(first);
+  const Toon::DrawList draws = Toon::ExtractDrawList(first);
   const bool core_ok = first.revision == 1 && unchanged.revision == first.revision &&
-                       draw.draw_count == 1 && draw.triangle_count == 1;
+                       draws.draws.size() == 1 && draws.triangle_count == 1;
 
   const Toon::BackendCapability capability = Toon::ProbeVulkanBackend();
   const std::filesystem::path shader_directory =
       std::filesystem::absolute(argv[0]).parent_path() / "shaders";
   const Toon::GpuFrameEvidence frame = Toon::RenderOffscreen(
-      draw, (shader_directory / "triangle.vert.spv").string(),
-      (shader_directory / "triangle.frag.spv").string(), 1000);
+      draws,(shader_directory / "mesh.vert.spv").string(),
+      (shader_directory / "mesh.frag.spv").string(), 1000);
 
   bool color_ok = false;
   bool depth_ok = false;
@@ -212,7 +214,15 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    persistence_ok = frame.frames_rendered == 1000 && frame.completion == 1000;
+    // 1,000 frames on one device: one pipeline, one target allocation and one
+    // upload of the unchanged mesh, every later frame reusing them.
+    const Toon::OffscreenStatistics& statistics = frame.statistics;
+    persistence_ok = statistics.frames_rendered == 1000 &&
+                     statistics.completion == 1000 &&
+                     statistics.pipelines_created == 1 &&
+                     statistics.target_allocations == 1 &&
+                     statistics.topology_uploads == 1 &&
+                     statistics.point_uploads == 1;
   }
 
   std::vector<Check> checks;
@@ -221,17 +231,18 @@ int main(int argc, char** argv) {
   checks.push_back({"renderer.backend.capability",
       capability.available ? "pass" : "skip", capability.detail});
   checks.push_back({"renderer.gpu.frame", Status(frame.status), frame.detail});
-  if (frame.validation_available) {
+  const Toon::OffscreenStatistics& statistics = frame.statistics;
+  if (statistics.validation_available) {
     checks.push_back({"renderer.validation.messages",
-        frame.validation_message_count == 0 ? "pass" : "fail",
-        frame.validation_message_count == 0
+        statistics.validation_message_count == 0 ? "pass" : "fail",
+        statistics.validation_message_count == 0
             ? ""
-            : frame.validation_detail});
+            : statistics.validation_detail});
   } else {
     checks.push_back({"renderer.validation.messages", "skip",
-        frame.validation_detail.empty()
+        statistics.validation_detail.empty()
             ? "Vulkan validation capture was unavailable"
-            : frame.validation_detail});
+            : statistics.validation_detail});
   }
   if (frame.status == Toon::FrameStatus::Pass) {
     checks.push_back({"renderer.render_product.color", color_ok ? "pass" : "fail",
@@ -240,7 +251,9 @@ int main(int argc, char** argv) {
         depth_ok ? "" : "depth metadata or numeric payload mismatch"});
     checks.push_back({"renderer.frame.persistence",
         persistence_ok ? "pass" : "fail",
-        persistence_ok ? "" : "1,000-frame completion count mismatch"});
+        persistence_ok ? ""
+                       : "1,000 frames did not complete on one pipeline, "
+                         "target allocation and mesh upload"});
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
     checks.push_back({"renderer.render_product.color", "skip", dependent});

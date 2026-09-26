@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Standalone viewport host for the project bootstrap draw. `ost renderer
+// Standalone viewport host drawing the bootstrap triangle scene. `ost renderer
 // viewport` builds and launches this executable; it also runs headless-style
 // as a GPU smoke test (`--hidden --frames N`). Exit codes: 0 success, 1
 // failure, 77 skip (the environment cannot present).
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
     Toon::RenderWorld world;
     world.SetBootstrapTriangle();
     const Toon::FrameSnapshot snapshot = world.Commit();
-    const Toon::DrawSummary draw = Toon::ExtractDrawSummary(snapshot);
+    const Toon::DrawList draws = Toon::ExtractDrawList(snapshot);
 
     std::unique_ptr<Toon::viewport::Window> window;
     Toon::PresentSurfaceProvider provider;
@@ -131,8 +131,8 @@ int main(int argc, char** argv) {
     Toon::PresentSetupStatus status = Toon::PresentSetupStatus::Error;
     std::string error;
     auto session = Toon::CreatePresentSession(
-        provider, (shader_directory / "triangle.vert.spv").string(),
-        (shader_directory / "triangle.frag.spv").string(), arguments.vsync,
+        provider, (shader_directory / "mesh.vert.spv").string(),
+        (shader_directory / "mesh.frag.spv").string(), arguments.vsync,
         status, error);
     if (session == nullptr) {
       if (status == Toon::PresentSetupStatus::Unavailable) {
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
         continue;
       }
       bool presented = false;
-      if (!session->RenderFrame(draw, width, height, presented, error)) {
+      if (!session->RenderFrame(draws, width, height, presented, error)) {
         std::cerr << "toon-viewport: " << error << '\n';
         return 1;
       }

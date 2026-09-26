@@ -3,6 +3,7 @@
 
 #include <pxr/pxr.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <vector>
@@ -33,9 +34,14 @@ int main() {
     return 1;
   }
   color.SetConverged(true);
+  // The source's top-left red pixel lands on the buffer's top row, which is
+  // Hydra's last; its bottom-left blue pixel starts the buffer.
   const auto* pixels = static_cast<const std::uint8_t*>(color.Map());
-  if (!Check(pixels != nullptr && pixels[0] == 255 && pixels[3] == 255,
-          "scaled color payload is incorrect") ||
+  const std::size_t top_left = 3U * 4U * 4U;
+  if (!Check(pixels != nullptr && pixels[0] == 0 && pixels[2] == 255 &&
+                 pixels[3] == 255 && pixels[top_left] == 255 &&
+                 pixels[top_left + 2U] == 0,
+          "flipped, scaled color payload is incorrect") ||
       !Check(color.IsMapped(), "color map state is incorrect") ||
       !Check(color.IsConverged(), "color did not converge")) {
     return 1;

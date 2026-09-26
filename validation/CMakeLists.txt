@@ -11,6 +11,10 @@ add_test(NAME toon-renderer-core-boundary
   COMMAND "${CMAKE_COMMAND}"
     -P "${CMAKE_CURRENT_BINARY_DIR}/check-core-boundary.cmake")
 
+add_executable(toon-render-world-test render_world_test.cpp)
+target_link_libraries(toon-render-world-test PRIVATE Toon::RenderExtraction)
+add_test(NAME toon-render-world COMMAND toon-render-world-test)
+
 add_test(NAME toon-renderer-evidence
   COMMAND "$<TARGET_FILE:toon-headless>"
     --report "${CMAKE_BINARY_DIR}/renderer-ctest-report.json")

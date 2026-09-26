@@ -6,6 +6,7 @@ OpenUSD or OpenStrata behaviour this project had to measure.
 | Document | Contents |
 | --- | --- |
 | [ost/](ost/) | The `ost` dogfooding series — one report per version exercised. Append-only; the newest report carries the live upstream ask list. |
+| [renderer/](renderer/) | Runs of the renderer itself — what a change made it do, and the evidence it left. |
 
 Renderer benchmarks — the latency and frame-time KPIs of
 [design policy §23](../design/DESIGN_POLICY.md#23-performance-kpis) — will be

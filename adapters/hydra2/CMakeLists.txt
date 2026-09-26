@@ -61,10 +61,10 @@ add_custom_command(TARGET hdToon POST_BUILD
     "$<TARGET_FILE_DIR:hdToon>/shaders"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${TOON_VERTEX_SPV}"
-    "$<TARGET_FILE_DIR:hdToon>/shaders/triangle.vert.spv"
+    "$<TARGET_FILE_DIR:hdToon>/shaders/mesh.vert.spv"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${TOON_FRAGMENT_SPV}"
-    "$<TARGET_FILE_DIR:hdToon>/shaders/triangle.frag.spv"
+    "$<TARGET_FILE_DIR:hdToon>/shaders/mesh.frag.spv"
   VERBATIM)
 
 set(TOON_HYDRA_INSTALL_DIR

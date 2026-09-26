@@ -34,6 +34,9 @@ public:
   void Resolve() override;
   bool IsConverged() const override;
 
+  // The sources have their origin at the top left, as the renderer's
+  // products do; Hydra buffers start at the bottom row, so rows are flipped,
+  // and a source of another size is resampled to the nearest pixel.
   bool WriteColor(const std::vector<std::uint8_t>& rgba8,
       std::uint32_t source_width, std::uint32_t source_height);
   bool WriteDepth(const std::vector<float>& depth,
