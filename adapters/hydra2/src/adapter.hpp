@@ -7,6 +7,7 @@
 #include <pxr/imaging/hd/material.h>
 #include <pxr/imaging/hd/renderBuffer.h>
 #include <pxr/imaging/hd/renderDelegate.h>
+#include <pxr/imaging/hd/sceneIndex.h>
 
 #include <toon/render_world.hpp>
 
@@ -69,6 +70,11 @@ class HdToonAdapterState;
 // PreviewSurface. A null container is the fallback material.
 Toon::ToonMaterial HdToonReadMaterial(const HdContainerDataSourceHandle& prim);
 
+// Whether a material prim's dirtied locators are a value-only change: `vrm`
+// values without `material`, which emulation turns into no dirty bit
+// (material policy §8).
+bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators);
+
 class HdToonMaterial final : public HdMaterial {
 public:
   HdToonMaterial(const SdfPath& id, std::shared_ptr<HdToonAdapterState> state);
@@ -78,10 +84,17 @@ public:
       HdDirtyBits* dirty_bits) override;
   HdDirtyBits GetInitialDirtyBitsMask() const override;
 
-  // What the last Sync read.
+  // A value-only change, which never reaches Sync (material policy §8): the
+  // delegate calls this from Update() for a material whose `vrm` locators
+  // alone were dirtied.
+  void SyncValues(const HdSceneIndexBase& terminal);
+
+  // What the last Sync or SyncValues read.
   const Toon::ToonMaterial& GetToonMaterial() const;
 
 private:
+  void Read(const HdContainerDataSourceHandle& prim);
+
   std::shared_ptr<HdToonAdapterState> state_;
   Toon::MaterialId material_;
   Toon::ToonMaterial values_;
@@ -114,6 +127,9 @@ public:
   void DestroyBprim(HdBprim* bprim) override;
   void CommitResources(HdChangeTracker* tracker) override;
   HdAovDescriptor GetDefaultAovDescriptor(const TfToken& name) const override;
+  void SetTerminalSceneIndex(
+      const HdSceneIndexBaseRefPtr& terminal_scene_index) override;
+  void Update() override;
 
 private:
   class Impl;

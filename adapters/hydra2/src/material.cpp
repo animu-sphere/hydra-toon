@@ -8,6 +8,7 @@
 
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/staticTokens.h>
+#include <pxr/imaging/hd/materialSchema.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -140,6 +141,12 @@ void ReadMToon(const HdContainerDataSourceHandle& group,
 }
 
 } // namespace
+
+bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
+  static const HdDataSourceLocator vrm(_tokens->vrm);
+  return locators.Intersects(vrm) &&
+         !locators.Intersects(HdMaterialSchema::GetDefaultLocator());
+}
 
 // Rule 2 of the selection, MMD, waits for `mmdImaging`'s Hydra view
 // (MAT-Q1). Rule 3's surface network is read in Renderer Phase 5; until then

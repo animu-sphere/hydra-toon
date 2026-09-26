@@ -53,7 +53,7 @@ Configurations each row was measured on are
 | `primId`, `instanceId`, `elementId` AOVs | 🧪 | filled with -1; no picking |
 | `material` | ✅ | selected by [material policy §3](../design/MATERIAL_POLICY.md#3-selection-a-realization-is-chosen-not-merged): `vrm/mtoon` on the prim, read from the terminal scene index in `Sync`, is MToon, and its `vrm/material` and `vrm/mtoon` values are normalized into `ToonMaterial`; anything else is PreviewSurface with the fallback's values. CTest `toon-renderer-hydra-material`; [renderer report 03](../reports/renderer/03-2026-09-26-material-sprim.md) |
 | MMD selection, PreviewSurface network, material textures | ⬜ | Renderer Phase 4, 5 and 1 |
-| Value-only material changes (time samples) | ⬜ | never reach `Sync`; the delegate-side route is on the [roadmap](../roadmap/current.md#before-renderer-phase-1) |
+| Value-only material changes (time samples) | ✅ | a `vrm` locator dirtied without `material` never reaches `Sync`; the delegate observes the terminal scene index and re-reads that material in `Update()` into the same slot. CTest `toon-renderer-hydra-material`; [renderer report 04](../reports/renderer/04-2026-09-26-material-value-route.md) |
 | Material binding on meshes | ⬜ | Renderer Phase 1; meshes still draw their display colour |
 | Render tags, instancers, framing data window | ⬜ | every visible mesh is drawn over the whole AOV |
 | Lights | ⬜ | |
