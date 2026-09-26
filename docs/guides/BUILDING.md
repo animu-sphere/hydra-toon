@@ -1,7 +1,7 @@
 # Building and testing
 
 Every command on this page has been run in this repository; the latest run is
-[ost report 02](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md).
+[ost report 03](../reports/ost/03-2026-09-26-v0.23.8-report-02-reverified.md).
 What each build contains is
 [PROJECT_LAYOUT.md §5](../architecture/PROJECT_LAYOUT.md#5-build-intents-and-runtime-profiles),
 and what it was measured on is
@@ -9,7 +9,7 @@ and what it was measured on is
 
 ## Prerequisites
 
-- `ost` 0.23.7 or newer (`ost --version`).
+- `ost` 0.23.8 or newer (`ost --version`).
 - A Vulkan SDK that provides Vulkan 1.3 and `slangc` (bundled from 1.3.296).
   Without it the build still succeeds, and the GPU checks report `SKIP`.
 - CMake 3.24 or newer, Ninja, and a C++20 compiler. On Windows, `ost` loads
@@ -26,9 +26,11 @@ ost validate
 
 `ost build` runs `toon-headless`, which renders the bootstrap frame 1,000
 times and writes `build/<target>/renderer-report.json`. `ost validate` reads
-it; the Hydra assertions are `SKIP` in this build by design, and so is
-`renderer.install_tree`, even after its CTest passes
-([report 02 §3](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md#3-p3--rendererinstall_tree-on-core)).
+it; the Hydra assertions are `SKIP` in this build by design.
+`renderer.install_tree` is `SKIP` after `ost build` and passes once `ost test`
+has run `toon-renderer-install-tree`, which installs the project, runs the
+installed `toon-headless --install-tree` and merges its verdict into the
+report.
 
 ## The Hydra adapter
 
@@ -50,10 +52,8 @@ on the installed smoke scene for a few seconds and keeps
 `usdview-first-frame.png` and `usdview-stable-update.png` under
 `build/<target>--hydra/adapters/hydra2/usdview-install/`.
 
-The `lookdev` build rewrites `strata.lock` to pin the `lookdev` runtime, and
-the next plain `ost build` restores the `core` pin. Do not commit the
-`lookdev` rewrite
-([report 02 §4](../reports/ost/02-2026-09-26-v0.23.7-report-01-reverified.md#4-observation--stratalock-follows-the-last-profile-built)).
+The `lookdev` build rewrites `strata.lock` to pin the `lookdev` runtime. Run
+`ost lock` to restore the `core` pin before committing.
 
 `ost renderer view` opens `usdview` interactively on the same install. It has
 not been run in this repository yet.
