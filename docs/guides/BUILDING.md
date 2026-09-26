@@ -9,13 +9,31 @@ and what it was measured on is
 
 ## Prerequisites
 
-- `ost` 0.23.8 or newer (`ost --version`).
 - A Vulkan SDK that provides Vulkan 1.3 and `slangc` (bundled from 1.3.296).
   Without it the build still succeeds, and the GPU checks report `SKIP`.
 - CMake 3.24 or newer, Ninja, and a C++20 compiler. On Windows, `ost` loads
-  the MSVC environment itself.
+  the MSVC environment itself; for plain CMake, use a developer shell with the
+  compiler on `PATH`.
 
-## The default build — no OpenUSD
+## Plain CMake — no OpenUSD
+
+From the repository root, build and run the default tests:
+
+```sh
+cmake -S . -B build/plain-cmake -G Ninja
+cmake --build build/plain-cmake
+ctest --test-dir build/plain-cmake --output-on-failure
+```
+
+The options are `TOON_ENABLE_VULKAN` (default `ON`), `TOON_ENABLE_HYDRA2`,
+`TOON_ENABLE_VIEWPORT` and `TOON_BUILD_TESTS` (default `ON`). Plain CMake does
+not require `ost`; optional adapters need their own dependencies. A plain-CMake
+tree can be validated with `ost validate --build-dir build/plain-cmake`, which
+does not claim `ost` built it.
+
+## OpenStrata — no OpenUSD
+
+With `ost` 0.23.8 or newer (`ost --version`), run:
 
 ```sh
 ost build --check
@@ -70,11 +88,3 @@ The first run fetches GLFW. Omit the arguments after `--` for an interactive
 window. The viewport builds its own tree, `build/<target>--renderer-viewport`,
 and `ost validate --intent renderer-viewport` validates that tree and its
 launch record.
-
-## Plain CMake
-
-The project is an ordinary CMake project. `ost` adds the runtime prefix, the
-generator and the evidence bookkeeping. The options are `TOON_ENABLE_VULKAN`
-(default `ON`), `TOON_ENABLE_HYDRA2`, `TOON_ENABLE_VIEWPORT` and
-`TOON_BUILD_TESTS` (default `ON`). A plain-CMake tree is validated with
-`ost validate --build-dir <dir>`, which does not claim `ost` built it.

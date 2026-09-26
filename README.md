@@ -1,4 +1,6 @@
-# hydra-toon
+# Hydra Toon
+
+[![License: Apache-2.0](https://img.shields.io/github/license/animu-sphere/hydra-toon)](LICENSE)
 
 > A low-latency, avatar-first Hydra raster renderer, optimized for
 > continuously changing animation rather than continuously changing scenes.
@@ -63,10 +65,22 @@ is [PROJECT_LAYOUT.md](docs/architecture/PROJECT_LAYOUT.md).
 [roadmap](docs/roadmap/README.md), [building](docs/guides/BUILDING.md),
 [changelog](CHANGELOG.md).
 
+[Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) ·
+[Security policy](SECURITY.md).
+
 ## Build
 
-The project is built with [OpenStrata](https://github.com/animu-sphere/open-strata)
-(`ost`) and generated from its `renderer` template:
+With CMake 3.24+, Ninja and a C++20 compiler, build and test from the repository
+root (on Windows, use a compiler developer shell):
+
+```sh
+cmake -S . -B build/plain-cmake -G Ninja
+cmake --build build/plain-cmake
+ctest --test-dir build/plain-cmake --output-on-failure
+```
+
+For [OpenStrata](https://github.com/animu-sphere/open-strata) (`ost`)
+renderer validation, run:
 
 ```sh
 ost build --jobs auto
@@ -74,8 +88,9 @@ ost test
 ost validate
 ```
 
-The default build needs Vulkan 1.3 and `slangc` and no OpenUSD. The Hydra
-adapter, the viewport and plain CMake are in [BUILDING.md](docs/guides/BUILDING.md).
+The default build does not require OpenUSD. GPU checks need Vulkan 1.3 and
+`slangc`; without them they report `SKIP`. See [BUILDING.md](docs/guides/BUILDING.md)
+for dependencies, the Hydra adapter and the viewport.
 
 ## License
 
