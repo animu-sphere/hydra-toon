@@ -30,10 +30,12 @@ CY2026 names (2022.x) is what a managed build pins.
   MToon for every VRM material in `testusdview`
   ([renderer report 05](../reports/renderer/05-2026-09-26-vrm-usdview-session.md)).
 - ⛔ **`ost formation resolve`** refuses every packaged target
-  ([ost report 04](../reports/ost/04-2026-09-26-v0.23.10-a-renderer-formation.md) P1).
+  ([ost report 04](../reports/ost/04-2026-09-26-v0.23.10-a-renderer-formation.md) P1,
+  [open-strata#251](https://github.com/animu-sphere/open-strata/issues/251)).
 - ⚠️ **The renderer package comes from an intentless build** with
   `TOON_ENABLE_HYDRA2=ON` set in its cache, and its contract names a plugin
-  directory the install does not have (ost report 04 P2, P3). Replace when
+  directory the install does not have (ost report 04 P2, P3;
+  [open-strata#252](https://github.com/animu-sphere/open-strata/issues/252), [open-strata#253](https://github.com/animu-sphere/open-strata/issues/253)). Replace when
   `ost package` takes an intent and the contract matches the install.
 - ⬜ **A Formation in the repository** and a `testusdview` check run through
   `ost formation run`, once P1–P3 are answered. It pins published digests
@@ -41,7 +43,7 @@ CY2026 names (2022.x) is what a managed build pins.
 - ⬜ **Publish the runtime and the renderer package** under the names above.
   The runtime here is an adopted local build with no source identity; a
   published one should come from `ost`'s canonical producer (ost report 04
-  P5) or a managed `--build`.
+  P5, [open-strata#255](https://github.com/animu-sphere/open-strata/issues/255)) or a managed `--build`.
 
 ## Linux x86_64
 
