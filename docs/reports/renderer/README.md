@@ -11,3 +11,4 @@ finding gets a new report and a one-line forward note on the old one.
 | [03](03-2026-09-26-material-sprim.md) | `hdToon`'s material Sprim: MToon selected from `vrmImaging`'s container and normalized into `ToonMaterial`; every material is PreviewSurface without the plugins |
 | [04](04-2026-09-26-material-value-route.md) | Value-only material changes taken from the terminal scene index: a time move across a canonical value reaches `ToonMaterial` in `Update()`, without a Sync |
 | [05](05-2026-09-26-vrm-usdview-session.md) | The VRM `usdview` session composed from packages: every VRM material is MToon in `testusdview` with `vrmImaging` and PreviewSurface without it; the Formation does not resolve |
+| [06](06-2026-09-27-vrm-formation.md) | The VRM `usdview` session as a Formation: `ost formation run` draws with `hdToon`; 12 MToon slots on the avatar with `vrmImaging`, none without; the Formation's own command waits on a Python in the session |

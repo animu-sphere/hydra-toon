@@ -52,14 +52,26 @@ report.
 
 ## The Hydra adapter
 
-The adapter needs a real OpenUSD imaging runtime. This repository was measured
-with an OpenUSD 26.08 `lookdev` runtime the workstation had already adopted;
-`ost runtime list` shows what is available, and OpenStrata's
-[adoption guide](https://github.com/animu-sphere/open-strata/blob/main/docs/guides/adopt-a-renderer-project.md#2-adopt-a-digest-pinned-runtime)
-covers adopting one.
+The adapter needs a real OpenUSD imaging runtime. This repository is measured
+with OpenStrata's canonical OpenUSD 26.08 `lookdev` runtime, which includes
+`usdview`, pulled by digest:
 
 ```sh
-ost runtime list
+ost artifact pull oci://ghcr.io/animu-sphere/openstrata-runtime-cy2026-lookdev@sha256:b840ed4690aa39d4582bc03c0a09fa7bab717216635b55a4eb718482dbfb196b \
+    --expect-artifact sha256:b982656c07dd9147973e3c7197d9b050ee48dd1ac291988f7e6025c76c4a785b
+ost runtime pull cy2026 --profile lookdev \
+    --from-artifact sha256:b982656c07dd9147973e3c7197d9b050ee48dd1ac291988f7e6025c76c4a785b
+ost runtime validate cy2026 --profile lookdev
+```
+
+That is the Windows x86_64 leaf; the Linux leaf's digests are in OpenStrata's
+[v0.23.11 verification report](https://github.com/animu-sphere/open-strata/blob/main/docs/reports/2026-09-26-v0.23.11-renderer-formations.md#canonical-runtime-evidence),
+and its
+[adoption guide](https://github.com/animu-sphere/open-strata/blob/main/docs/guides/adopt-a-renderer-project.md#2-adopt-a-digest-pinned-runtime)
+covers adopting other runtimes. `ost runtime list` shows what is already in
+the local store.
+
+```sh
 ost build --profile lookdev --intent hydra --jobs auto
 ost test --profile lookdev --intent hydra
 ost validate --profile lookdev --intent hydra
@@ -70,9 +82,14 @@ on the installed smoke scene for a few seconds and keeps
 `usdview-first-frame.png` and `usdview-stable-update.png` under
 `build/<target>--hydra/adapters/hydra2/usdview-install/`.
 
-`ost` writes `strata.lock` on every build, pinning the runtime that built
-last. The file is local and ignored by Git; `ost lock` restores the `core`
-pin.
+`ost` pins the `core` runtime in `strata.lock` and the `lookdev` one in
+`strata.openstrata-cy2026-<os>-<arch>-py313-lookdev.lock`; a `lookdev` build
+leaves `strata.lock` alone. Both files are local and ignored by Git.
+
+`ost package --profile lookdev --intent hydra` packages the adapter's build
+as a `renderer` component, which an OpenStrata Formation composes into a
+`usdview` session
+([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md)).
 
 `ost renderer view` opens `usdview` interactively on the same install. It has
 not been run in this repository yet.

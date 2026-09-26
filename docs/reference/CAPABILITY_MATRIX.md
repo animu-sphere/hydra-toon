@@ -65,4 +65,4 @@ Configurations each row was measured on are
 | --- | --- | --- |
 | Headless runner (`toon-headless`) | ✅ | runs during `ost build`; writes `renderer-report.json` |
 | Standalone viewport (`toon-viewport`) | 🧪 | `ost renderer viewport`; shows the bootstrap triangle scene only |
-| `usdview` | ✅ | `testusdview` in CTest; with `vrmImaging` in the session, composed by hand from packages, VRM materials select MToon ([renderer report 05](../reports/renderer/05-2026-09-26-vrm-usdview-session.md)); `ost renderer view` and `ost formation run` have not been run |
+| `usdview` | ✅ | `testusdview` in CTest; in an `ost formation run` session with `vrmImaging`, VRM materials select MToon, with the host's Python supplied to the run ([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md)); `ost renderer view` has not been run |

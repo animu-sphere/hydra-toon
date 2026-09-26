@@ -26,24 +26,25 @@ CY2026 names (2022.x) is what a managed build pins.
 
 ## Windows x86_64
 
-- ✅ **The session, composed by hand from the three packages**, selects
-  MToon for every VRM material in `testusdview`
-  ([renderer report 05](../reports/renderer/05-2026-09-26-vrm-usdview-session.md)).
-- ⛔ **`ost formation resolve`** refuses every packaged target
-  ([ost report 04](../reports/ost/04-2026-09-26-v0.23.10-a-renderer-formation.md) P1,
-  [open-strata#251](https://github.com/animu-sphere/open-strata/issues/251)).
-- ⚠️ **The renderer package comes from an intentless build** with
-  `TOON_ENABLE_HYDRA2=ON` set in its cache, and its contract names a plugin
-  directory the install does not have (ost report 04 P2, P3;
-  [open-strata#252](https://github.com/animu-sphere/open-strata/issues/252), [open-strata#253](https://github.com/animu-sphere/open-strata/issues/253)). Replace when
-  `ost package` takes an intent and the contract matches the install.
-- ⬜ **A Formation in the repository** and a `testusdview` check run through
-  `ost formation run`, once P1–P3 are answered. It pins published digests
-  only, so it waits on the next item.
-- ⬜ **Publish the runtime and the renderer package** under the names above.
-  The runtime here is an adopted local build with no source identity; a
-  published one should come from `ost`'s canonical producer (ost report 04
-  P5, [open-strata#255](https://github.com/animu-sphere/open-strata/issues/255)) or a managed `--build`.
+- ✅ **The session as a Formation** of the canonical runtime, `vrmImaging`
+  and `toon`: resolved, locked and run by `ost formation`, every VRM material
+  selecting MToon in `testusdview`
+  ([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md);
+  [ost report 05](../reports/ost/05-2026-09-27-v0.23.11-report-04-reverified.md)).
+- ⚠️ **The run supplies the host's Python.** `ost formation run` puts no
+  interpreter on the command's `PATH` and the runtime ships none, so the
+  Formation's `testusdview` command is overridden with the host's
+  `python.exe` (ost report 05 Q1). Replace when `ost` composes the platform
+  interpreter.
+- ⚠️ **The Formation must live in a short directory.** Under a deep one, Qt
+  cannot load its platform plugin from the materialized runtime (ost report
+  05 Q2).
+- ⬜ **A Formation in the repository** and its `testusdview` check. It pins
+  published digests only, so it waits on the next item.
+- ⬜ **Publish the renderer package** as
+  `ghcr.io/animu-sphere/hydra-toon:toon-<version>-cy2026-windows-x86_64-py313-lookdev`,
+  and `vrmImaging` from `usd-vrm-plugins`. The runtime is published
+  (`sha256:b982656c…`).
 
 ## Linux x86_64
 
@@ -51,33 +52,26 @@ CY2026 names (2022.x) is what a managed build pins.
   Linux host or WSL 2 with a Vulkan 1.3 device:
 
   ```sh
-  # A lookdev runtime: OpenUSD 26.08 with usdview, built by ost for CY2026,
-  # which pins the CY cell's oneTBB. The build interpreter needs Jinja2,
-  # PySide6 and PyOpenGL.
-  ost runtime pull cy2026 --profile lookdev --build <OpenUSD v26.08 checkout> \
-      --openusd-variant gl --jobs <n>
+  # The canonical lookdev runtime, pinned by its OCI manifest digest.
+  ost artifact pull oci://ghcr.io/animu-sphere/openstrata-runtime-cy2026-lookdev@sha256:d0dfa81e6bf7bbc19b0b0a5185d4eda789bbb38546505c236311c348b001980f       --expect-artifact sha256:7b41fe89f1c4b868ac6af73bc0593a24aa3ce4952fcf4fe4d96d0ae1724f3f34
+  ost runtime pull cy2026 --profile lookdev       --from-artifact sha256:7b41fe89f1c4b868ac6af73bc0593a24aa3ce4952fcf4fe4d96d0ae1724f3f34
   ost runtime validate cy2026 --profile lookdev
-  ost runtime export cy2026 --profile lookdev --slim
 
   # In usd-vrm-plugins: vrmImaging and the vrmSchema it carries.
-  ost lock --profile lookdev
   ost plugin build plugins/vrmSchema --profile lookdev
   ost plugin build plugins/vrmImaging --profile lookdev
   ost plugin package plugins/vrmImaging --profile lookdev
-  ost lock
   ost artifact import plugins/vrmImaging/dist/plugins/vrmImaging/0.9.0/cy2026-linux-x86_64-py313-lookdev
 
-  # Here: the renderer package (see the Windows workaround above).
-  ost build --profile lookdev --jobs auto
-  cmake -DTOON_ENABLE_HYDRA2=ON build/cy2026-linux-x86_64-py313-lookdev
-  ost build --profile lookdev --jobs auto
-  ost test --profile lookdev
-  ost package --profile lookdev
-  ost artifact import dist/toon/<version>/cy2026-linux-x86_64-py313-lookdev
+  # Here: the renderer package, from the hydra intent.
+  ost build --profile lookdev --intent hydra --jobs auto
+  ost test --profile lookdev --intent hydra
+  ost package --profile lookdev --intent hydra
+  ost artifact import dist/toon/<version>/cy2026-linux-x86_64-py313-lookdev--hydra
   ```
 
-  Then the Formation, as on Windows. ost report 04 P1 applies to Linux
-  targets too.
+  Then the Formation, as on Windows. Ost report 05 Q1 applies to Linux too:
+  `testusdview`'s `#!/usr/bin/env python3` meets the same `PATH`.
 
 ## macOS arm64
 
@@ -89,19 +83,18 @@ CY2026 names (2022.x) is what a managed build pins.
   built or run. The planned commands, on macOS 15 with Xcode's 15.5 SDK:
 
   ```sh
-  # A lookdev runtime with usdview, at CY2026's SDK and deployment target.
-  # The build interpreter needs Jinja2, PySide6 and PyOpenGL.
+  # A lookdev runtime with usdview, at CY2026's SDK and deployment target;
+  # there is no canonical macOS lookdev leaf. The build interpreter needs
+  # Jinja2, PySide6 and PyOpenGL.
   ost runtime pull cy2026 --profile lookdev --build <OpenUSD v26.08 checkout> \
       --openusd-variant metal --sdk 15.5 --deployment-target 13.0 --jobs <n>
   ost runtime validate cy2026 --profile lookdev
   ost runtime export cy2026 --profile lookdev --slim
 
   # In usd-vrm-plugins, as on Linux.
-  ost lock --profile lookdev
   ost plugin build plugins/vrmSchema --profile lookdev
   ost plugin build plugins/vrmImaging --profile lookdev
   ost plugin package plugins/vrmImaging --profile lookdev
-  ost lock
   ost artifact import plugins/vrmImaging/dist/plugins/vrmImaging/0.9.0/cy2026-macos-arm64-py313-lookdev
   ```
 
