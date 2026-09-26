@@ -13,6 +13,9 @@
 # workstation, not the project.
 /strata.lock
 /strata.*.lock
+# Local Formations for the VRM usdview session; they pin this workstation's
+# unpublished packages (renderer report 06).
+/formations/
 
 # Accidental in-source CMake and Ninja products.
 /CMakeCache.txt
