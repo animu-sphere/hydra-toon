@@ -84,12 +84,14 @@ struct HdToonMaterialSource {
   Toon::ToonMaterial values;
   HdToonTextureKey base_texture;
   HdToonTextureKey shade_texture;
+  HdToonTextureKey outline_width_texture;
 };
 
 // Selects a material's model and normalizes its values from its Hydra prim's
 // own data sources (material policy §2–§4): a `vrm/mtoon` container is
 // MToon, read in the locator hierarchy `vrmImaging` froze, with its base
-// and shade colour textures; anything else is PreviewSurface. A null
+// and shade colour textures and its outline width texture; anything else is
+// PreviewSurface. A null
 // container is the fallback material.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim);
@@ -131,6 +133,7 @@ private:
   // Held while this material samples them.
   Toon::TextureId base_texture_ = 0;
   Toon::TextureId shade_texture_ = 0;
+  Toon::TextureId outline_width_texture_ = 0;
 };
 
 class HdToonRenderDelegate final : public HdRenderDelegate {

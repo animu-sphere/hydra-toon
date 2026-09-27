@@ -90,6 +90,16 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - The headless assertion `renderer.skinning.gpu`, the CTest
   `toon-renderer-hydra-skinning`, and `skin_uploads`, `pose_writes` and
   `draws_skinned` in the host frame evidence; renderer report 09.
+- The inverted-hull outline: `mtoon_outline` (`shaders/mtoon_outline.slang`)
+  draws, before the surface, the hull of every MToon draw whose material asks
+  for an outline, each skinned vertex moved out along its normal by MToon's
+  width, in world or screen units, times the outline width texture's G, with
+  front faces culled, in the outline colour mixed with the surface's shading.
+  `ToonMaterial`'s MToon block carries the outline width texture, and
+  `HasOutline` says whether a material draws a hull. `hdToon` reads
+  `vrm/textureInfo/outlineWidthMultiply` as data.
+- The headless assertion `renderer.material.mtoon_outline`, and
+  `draws_outline` in the host frame evidence; renderer report 10.
 
 ### Changed
 
@@ -97,7 +107,12 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   through the same pipeline on every host; `triangle.slang` is gone.
 - `renderer.frame.persistence` also requires one pipeline, one target
   allocation and one mesh upload across its 1,000 frames. With
-  `mtoon_opaque` it requires the two scene pipelines, each created once.
+  `mtoon_opaque` it requires the two scene pipelines, each created once, and
+  with `mtoon_outline` the three.
+- `mtoon.slang`'s shared parts moved to `mtoon_common.slang`, which
+  `mtoon_outline.slang` includes too. The material set is visible to the
+  vertex stage, and a material's parameter slot grew from 144 to 224 bytes
+  to hold the outline.
 - `CreateOffscreenRenderer`, `RenderOffscreen` and `CreatePresentSession`
   take a `SceneShaders` set, which `SceneShadersIn` fills from a shader
   directory, instead of one vertex and fragment shader path.

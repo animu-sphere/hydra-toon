@@ -135,15 +135,21 @@ bool WriteReport(const std::string& path,
   return true;
 }
 
-// The centre pixel of a colour product, RGBA.
-std::array<std::uint8_t, 4> CenterPixel(const Toon::ColorProduct& color) {
-  const std::size_t center =
-      (color.height / 2U) * color.row_pitch + (color.width / 2U) * 4U;
-  if (center + 3U >= color.payload.size()) {
+// One pixel of a colour product, RGBA; row 0 is the top.
+std::array<std::uint8_t, 4> PixelAt(const Toon::ColorProduct& color,
+    std::uint32_t column, std::uint32_t row) {
+  const std::size_t offset =
+      static_cast<std::size_t>(row) * color.row_pitch + column * 4U;
+  if (offset + 3U >= color.payload.size()) {
     return {};
   }
-  return {color.payload[center], color.payload[center + 1U],
-      color.payload[center + 2U], color.payload[center + 3U]};
+  return {color.payload[offset], color.payload[offset + 1U],
+      color.payload[offset + 2U], color.payload[offset + 3U]};
+}
+
+// The centre pixel of a colour product, RGBA.
+std::array<std::uint8_t, 4> CenterPixel(const Toon::ColorProduct& color) {
+  return PixelAt(color, color.width / 2U, color.height / 2U);
 }
 
 // mtoon_opaque (material policy §7): the bootstrap triangle bound to an
@@ -297,6 +303,139 @@ Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
     return {id, "fail",
         "a texture must upload once however it is sampled, and a UV edit "
         "must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
+// mtoon_outline (material policy §5): an octahedron of radius 0.5, seen
+// along -z through an orthographic camera, is a diamond |x| + |y| <= 0.5 on
+// screen, and its smooth normals at the four rim corners point along x and
+// y. A world-coordinates outline of 0.2 in green, unlit, grows the hull to
+// |x| + |y| <= 0.7, so the pixel at x = 0.58 on the centre row draws green
+// while the centre stays the surface's. With the mode None, a value-only
+// edit, that pixel is background; as screen coordinates, 0.1 of the screen
+// height is the same 0.2 under this camera; a width texture whose G is 0,
+// sampled in the vertex stage, takes the outline away again.
+Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_outline";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  const Toon::MeshId mesh = world.CreateMesh();
+  world.SetMeshPoints(mesh, {{0.5F, 0.0F, 0.0F}, {-0.5F, 0.0F, 0.0F},
+                                {0.0F, 0.5F, 0.0F}, {0.0F, -0.5F, 0.0F}, {0.0F, 0.0F, 0.5F},
+                                {0.0F, 0.0F, -0.5F}});
+  // Counter-clockwise seen from outside: one triangle per octant.
+  world.SetMeshTopology(mesh, {0, 2, 4, 1, 4, 2, 0, 4, 3, 1, 3, 4, 0, 5, 2,
+                                  1, 2, 5, 0, 3, 5, 1, 5, 3});
+  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
+  // OpenGL's orthographic projection of the unit cube: z is negated, so +z
+  // faces the camera and is nearer.
+  Toon::ToonView view;
+  view.projection.m[10] = -1.0F;
+  world.SetView(view);
+  const Toon::MaterialId material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1.0F, 0.0F, 0.0F};
+  toon.mtoon.shade_color = {0.0F, 0.0F, 1.0F};
+  toon.outline = true;
+  toon.outline_width = 0.2F;
+  toon.outline_color = {0.0F, 1.0F, 0.0F};
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  toon.mtoon.outline_lighting_mix = 0.0F;
+  world.SetMaterial(material, toon);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  struct Shot {
+    std::array<std::uint8_t, 4> rim{};
+    std::array<std::uint8_t, 4> center{};
+    Toon::OffscreenStatistics statistics;
+  };
+  // Column 50's centre is x = 0.578; row 32's is y = -0.016.
+  const auto render = [&](Shot& shot) {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    shot.rim = PixelAt(color, 50, 32);
+    shot.center = CenterPixel(color);
+    shot.statistics = renderer->statistics();
+    return true;
+  };
+  Shot world_width;
+  Shot none;
+  Shot screen_width;
+  Shot textured;
+  if (!render(world_width)) {
+    return {id, "fail", detail};
+  }
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::None;
+  world.SetMaterial(material, toon);
+  if (!render(none)) {
+    return {id, "fail", detail};
+  }
+  toon.outline_width = 0.1F;
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::Screen;
+  world.SetMaterial(material, toon);
+  if (!render(screen_width)) {
+    return {id, "fail", detail};
+  }
+  const Toon::TextureId texture = world.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 1;
+  texels.height = 1;
+  texels.encoding = Toon::ToonTextureEncoding::Linear;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 255, 255});
+  world.SetTexture(texture, texels);
+  toon.mtoon.outline_width_texture.texture = texture;
+  world.SetMaterial(material, toon);
+  if (!render(textured)) {
+    return {id, "fail", detail};
+  }
+
+  const Toon::OffscreenStatistics& first = world_width.statistics;
+  const Toon::OffscreenStatistics& last = textured.statistics;
+  if (last.validation_message_count != 0) {
+    return {id, "fail", last.validation_detail};
+  }
+  const auto is_outline = [](const std::array<std::uint8_t, 4>& pixel) {
+    return pixel[1] > 200U && pixel[0] < 50U && pixel[2] < 50U;
+  };
+  if (!is_outline(world_width.rim)) {
+    return {id, "fail", "a world-coordinates outline did not draw its hull"};
+  }
+  if (world_width.center[1] > 50U || world_width.center[0] < 150U) {
+    return {id, "fail", "the hull must stay behind the surface it outlines"};
+  }
+  if (none.rim[1] > 80U) {
+    return {id, "fail", "an outline width mode of None must draw no hull"};
+  }
+  if (!is_outline(screen_width.rim)) {
+    return {id, "fail",
+        "a screen-coordinates outline did not draw its ratio of the height"};
+  }
+  if (textured.rim[1] > 80U) {
+    return {id, "fail",
+        "a width texture whose G is 0 must take the outline away"};
+  }
+  if (first.material_writes != 1 || none.statistics.material_writes != 2 ||
+      screen_width.statistics.material_writes != 3 ||
+      screen_width.statistics.texture_uploads != 0 ||
+      last.texture_uploads != 1 ||
+      last.pipelines_created != first.pipelines_created ||
+      last.point_uploads != first.point_uploads ||
+      last.topology_uploads != first.topology_uploads) {
+    return {id, "fail",
+        "an outline edit must rewrite one slot and nothing else"};
   }
   return {id, "pass", ""};
 }
@@ -479,13 +618,13 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: the two scene pipelines, one target
+    // 1,000 frames on one device: the three scene pipelines, one target
     // allocation and one upload of the unchanged mesh, every later frame
     // reusing them.
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 2 &&
+                     statistics.pipelines_created == 3 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;
@@ -522,6 +661,7 @@ int main(int argc, char** argv) {
                          "pipelines, one target allocation and mesh upload"});
     checks.push_back(MToonOpaqueCheck(shaders));
     checks.push_back(MToonTexturedCheck(shaders));
+    checks.push_back(MToonOutlineCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
@@ -530,6 +670,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.frame.persistence", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_outline", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",

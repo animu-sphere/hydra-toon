@@ -82,9 +82,16 @@ a VRM character displays in real time.
 - ✅ **GPU skinning.** Linear blend skinning in the vertex stage of both
   scene pipelines; a pose change writes a mesh's joint buffer and nothing
   else ([renderer report 09](../reports/renderer/09-2026-09-27-gpu-skinning.md)).
-- ⬜ **Inverted-hull outline** (`mtoon_outline`,
-  [material policy §5](../design/MATERIAL_POLICY.md#5-outline)). Next; its
-  vertex stage skins as the surface's does.
+- ✅ **Inverted-hull outline.** `mtoon_outline`
+  ([material policy §5](../design/MATERIAL_POLICY.md#5-outline)) draws the
+  hull of every MToon draw whose material asks for an outline, skinned as the
+  surface is, in world or screen units, with the width texture; an outline
+  edit rewrites one parameter slot
+  ([renderer report 10](../reports/renderer/10-2026-09-27-mtoon-outline.md)).
+
+Every item of [design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)
+Phase 1 now draws on the avatar; the phase waits on the VRM packages its
+host session composes (above).
 
 Stand-ins this phase accepts so far:
 
@@ -108,6 +115,12 @@ Stand-ins this phase accepts so far:
   Past 128 images, a texture samples white until an entry frees.
 - ⚠️ **Every texture is sampled trilinearly**, because glTF's sampler filters
   are not on the stage.
+- ⚠️ **A world-coordinates outline is as wide in stage units** as MToon
+  states in metres: the render world does not carry the stage's
+  `metersPerUnit`. The test avatar's stage, as the VRM importer wrote it,
+  has `metersPerUnit = 1`.
+- ⚠️ **The outline width texture is sampled at mip 0**, in the vertex stage,
+  where there are no derivatives to choose another.
 
 ## Project infrastructure
 

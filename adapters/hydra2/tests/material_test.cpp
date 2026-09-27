@@ -139,7 +139,8 @@ HdContainerDataSourceHandle TexturedPrim(
 
 // vrm/textureInfo/<role> (vrmImaging §29): a 2x2 image written here, named
 // by a resolved asset path, is decoded top row first and shared by every
-// role and material that names it; its sampling fields are read; a path
+// role and material that names it in the same encoding; its sampling
+// fields are read; a path
 // that does not resolve, or another TEXCOORD set, samples nothing; and the
 // texture goes when its last material does.
 int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
@@ -190,6 +191,7 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
               })},
           })},
           {"shadeMultiply", role({})},
+          {"outlineWidthMultiply", role({})},
       })},
       {b_id, HdPrimTypeTokens->material,
           TexturedPrim({{"baseColor", role({})}})},
@@ -218,10 +220,15 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
   }
   const Toon::ToonTextureRef& base = a->GetToonMaterial().base_texture;
   const Toon::TextureId shared = base.texture;
+  const Toon::TextureId outline_width =
+      a->GetToonMaterial().mtoon.outline_width_texture.texture;
   if (!Check(shared != 0, "a resolved base colour texture must be sampled") ||
       !Check(a->GetToonMaterial().mtoon.shade_texture.texture == shared &&
                  b->GetToonMaterial().base_texture.texture == shared,
           "one image must be one texture across roles and materials") ||
+      !Check(outline_width != 0 && outline_width != shared,
+          "the outline width role must read the same image as data, a "
+          "texture of its own") ||
       !Check(base.wrap_s == Toon::ToonWrap::ClampToEdge &&
                  base.wrap_t == Toon::ToonWrap::MirroredRepeat &&
                  base.offset == Toon::Float2{0.5F, 0.25F} &&

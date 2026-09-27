@@ -69,6 +69,7 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (textureInfo)
     (baseColor)
     (shadeMultiply)
+    (outlineWidthMultiply)
     (file)
     (texCoord)
     (wrapS)
@@ -257,7 +258,8 @@ HdToonMaterialSource HdToonReadMaterial(
     ReadCommon(material, result);
   }
   ReadMToon(mtoon, result);
-  // Both roles are colour (the schema fixes colour or data by role).
+  // The schema fixes colour or data by role: the base and shade textures
+  // are colour, the outline width a factor in G.
   const HdContainerDataSourceHandle textures =
       Group(vrm, _tokens->textureInfo);
   ReadTexture(Group(textures, _tokens->baseColor),
@@ -266,6 +268,9 @@ HdToonMaterialSource HdToonReadMaterial(
   ReadTexture(Group(textures, _tokens->shadeMultiply),
       Toon::ToonTextureEncoding::Srgb, source.shade_texture,
       result.mtoon.shade_texture);
+  ReadTexture(Group(textures, _tokens->outlineWidthMultiply),
+      Toon::ToonTextureEncoding::Linear, source.outline_width_texture,
+      result.mtoon.outline_width_texture);
   return source;
 }
 
