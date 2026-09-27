@@ -119,6 +119,14 @@ command and give the avatar's MToon material count:
 TOON_EXPECT_MTOON=12 ost formation run formation.toml --     testusdview <avatar.usdz> --renderer Toon --testScript vrm_material_check.py
 ```
 
+Hydra does not carry a stage's `metersPerUnit`, so a stage whose unit is
+not the metre states it through the render setting `toon:metersPerUnit`, 1
+by default; MToon's world-coordinates outline width is in metres, and this
+setting turns it into the stage's units. In a `testusdview` script,
+`appController._stageView.SetRendererSetting("toon:metersPerUnit", 0.01)`
+sets it for a stage of centimetres
+([renderer report 17](../reports/renderer/17-2026-09-28-outline-meters-per-unit.md)).
+
 `TOON_HYDRA_EVIDENCE` and `TOON_HYDRA_IMAGE` keep the frame evidence and the
 image; unset, they go to a temporary directory the check prints
 ([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)).

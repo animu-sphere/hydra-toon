@@ -189,7 +189,8 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
 
 // The delegate's render settings.
 TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
-    ((msaaSamples, "toon:msaaSamples")));
+    ((msaaSamples, "toon:msaaSamples"))
+    ((metersPerUnit, "toon:metersPerUnit")));
 
 constexpr int kDefaultSamples = static_cast<int>(Toon::RenderOptions{}.samples);
 
@@ -201,6 +202,19 @@ std::uint32_t RequestedSamples(const HdRenderDelegate& delegate) {
   const int requested =
       samples.IsHolding<int>() ? samples.UncheckedGet<int>() : kDefaultSamples;
   return static_cast<std::uint32_t>(std::max(requested, 1));
+}
+
+// The stage's metersPerUnit as `toon:metersPerUnit` states it. Hydra does
+// not carry a stage's metadata, so the host that opened the stage sets it;
+// 1, a VRM avatar's metre, until it does. A value that is not positive and
+// finite leaves the scene's unit as it was.
+float RequestedMetersPerUnit(const HdRenderDelegate& delegate) {
+  const VtValue value =
+      VtValue::Cast<double>(delegate.GetRenderSetting(
+          SettingTokens->metersPerUnit));
+  return value.IsHolding<double>()
+             ? static_cast<float>(value.UncheckedGet<double>())
+             : 1.0F;
 }
 
 } // namespace
@@ -355,7 +369,7 @@ public:
   }
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
-      std::uint32_t samples) {
+      std::uint32_t samples, float meters_per_unit) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
         pass_state->GetAovBindings();
@@ -378,6 +392,7 @@ public:
 
     world_.SetView({ToToon(pass_state->GetWorldToViewMatrix()),
         ToToon(pass_state->GetProjectionMatrix())});
+    world_.SetMetersPerUnit(meters_per_unit);
     world_.Commit(snapshot_);
     Toon::ExtractDrawList(snapshot_, draws_);
     std::string error;
@@ -905,8 +920,9 @@ private:
   void _Execute(const HdRenderPassStateSharedPtr& render_pass_state,
       const TfTokenVector& render_tags) override {
     (void)render_tags;
-    state_->Render(render_pass_state,
-        RequestedSamples(*GetRenderIndex()->GetRenderDelegate()));
+    const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
+    state_->Render(render_pass_state, RequestedSamples(delegate),
+        RequestedMetersPerUnit(delegate));
   }
 
   std::shared_ptr<HdToonAdapterState> state_;
@@ -1253,7 +1269,11 @@ HdToonRenderDelegate::HdToonRenderDelegate(
 HdRenderSettingDescriptorList
 HdToonRenderDelegate::GetRenderSettingDescriptors() const {
   return {{"MSAA samples per pixel", SettingTokens->msaaSamples,
-      VtValue(kDefaultSamples)}};
+              VtValue(kDefaultSamples)},
+      // A float, which usdview's settings panel can show; a double it
+      // leaves out of the list.
+      {"Stage meters per unit", SettingTokens->metersPerUnit,
+          VtValue(1.0F)}};
 }
 
 HdToonRenderDelegate::~HdToonRenderDelegate() = default;

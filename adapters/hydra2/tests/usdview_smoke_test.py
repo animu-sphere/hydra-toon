@@ -64,3 +64,17 @@ def testUsdviewInputFunction(appController):
     assert single["samples"] == 1
     assert single["pipelines"] == 4 and single["target_allocations"] == 1
     assert single["topology_uploads"] == 1 and single["point_uploads"] == 1
+
+    # toon:metersPerUnit is the stage's unit, which Hydra does not carry. A
+    # new unit is a new scene revision and nothing else: no slot, upload,
+    # pipeline or target. It is a float, the type usdview's settings list
+    # takes, and 1 until the host sets it.
+    settings = [(setting.key, setting.defValue) for setting in
+                appController._stageView.GetRendererSettingsList()]
+    assert ("toon:metersPerUnit", 1.0) in settings, settings
+    appController._stageView.SetRendererSetting("toon:metersPerUnit", 0.01)
+    centimetres = _render(appController, "centimetres")
+    assert centimetres["scene_revision"] > single["scene_revision"]
+    for counter in ("pipelines", "target_allocations", "topology_uploads",
+                    "point_uploads", "material_writes", "texture_uploads"):
+        assert centimetres[counter] == single[counter], counter

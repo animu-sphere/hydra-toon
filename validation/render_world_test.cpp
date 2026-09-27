@@ -64,6 +64,27 @@ int main() {
     return 1;
   }
 
+  world.SetMetersPerUnit(0.01F);
+  const Toon::FrameSnapshot centimetres = world.Commit();
+  world.SetMetersPerUnit(0.0F);
+  world.SetMetersPerUnit(-1.0F);
+  const Toon::FrameSnapshot refused = world.Commit();
+  if (!Check(looked.meters_per_unit == 1.0F,
+          "a scene's unit must be a metre until set") ||
+      !Check(centimetres.revision > looked.revision &&
+                 centimetres.meters_per_unit == 0.01F &&
+                 Toon::ExtractDrawList(centimetres).meters_per_unit == 0.01F,
+          "a unit edit must commit and reach the draw list") ||
+      !Check(centimetres.view_revision == looked.view_revision &&
+                 centimetres.meshes[0].points_revision ==
+                     looked.meshes[0].points_revision,
+          "a unit edit must touch neither the camera nor geometry") ||
+      !Check(refused.revision == centimetres.revision &&
+                 refused.meters_per_unit == 0.01F,
+          "a unit that is not positive must change nothing")) {
+    return 1;
+  }
+
   world.SetMeshTopology(mesh, {0, 1, 4});
   if (!Check(Toon::ExtractDrawList(world.Commit()).draws.empty(),
           "an index past the last point must not be drawn")) {
