@@ -25,6 +25,10 @@ struct SceneShaders {
   // mtoon_opaque (material policy §7).
   std::string mtoon_vertex;
   std::string mtoon_fragment;
+  // mtoon_outline: the inverted hull of an MToon material that asks for an
+  // outline (material policy §5).
+  std::string mtoon_outline_vertex;
+  std::string mtoon_outline_fragment;
 };
 
 // The shaders as the build and install trees lay them out: `<module>.vert.spv`

@@ -15,3 +15,4 @@ finding gets a new report and a one-line forward note on the old one.
 | [07](07-2026-09-27-mtoon-opaque.md) | `mtoon_opaque` draws: meshes bind their material, all 20 avatar draws are shaded as MToon with `vrmImaging` and none without; a value-only edit rewrites one parameter slot |
 | [08](08-2026-09-27-basic-textures.md) | Basic textures: `mtoon_opaque` samples the base and shade colour textures through UVs, wrap and texture transform; the avatar's 12 MToon materials share 6 images, each uploaded once |
 | [09](09-2026-09-27-gpu-skinning.md) | GPU skinning: all 20 avatar draws skinned in the vertex stage; a joint turn writes 20 joint buffers and uploads nothing else; dual quaternion skinning stays on the CPU kernel |
+| [10](10-2026-09-27-mtoon-outline.md) | Inverted-hull outline: `mtoon_outline` adds the hull of 15 of the 20 avatar draws in world or screen units; widening or disabling an outline rewrites one parameter slot |

@@ -18,6 +18,7 @@ if(TOON_WITH_VULKAN)
   toon_add_shader_library(toon-renderer-shaders
     shaders/mesh.slang
     shaders/mtoon.slang
-    INCLUDES shaders/skinning.slang)
+    shaders/mtoon_outline.slang
+    INCLUDES shaders/skinning.slang shaders/mtoon_common.slang)
   set(TOON_SHADER_SPVS "${TOON_SHADER_SPVS}" PARENT_SCOPE)
 endif()

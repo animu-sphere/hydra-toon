@@ -218,6 +218,12 @@ void RenderWorld::SetView(const ToonView& view) {
   }
 }
 
+bool HasOutline(const ToonMaterial& material) {
+  return material.model == ToonShadingModel::MToon && material.outline &&
+         material.mtoon.outline_width_mode != ToonOutlineWidthMode::None &&
+         material.outline_width > 0.0F;
+}
+
 bool IsStructuralChange(const ToonMaterial& before,
     const ToonMaterial& after) {
   return before.model != after.model ||
@@ -225,7 +231,9 @@ bool IsStructuralChange(const ToonMaterial& before,
          before.double_sided != after.double_sided ||
          before.base_texture.texture != after.base_texture.texture ||
          before.mtoon.shade_texture.texture !=
-             after.mtoon.shade_texture.texture;
+             after.mtoon.shade_texture.texture ||
+         before.mtoon.outline_width_texture.texture !=
+             after.mtoon.outline_width_texture.texture;
 }
 
 MaterialId RenderWorld::CreateMaterial() {

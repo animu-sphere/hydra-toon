@@ -25,8 +25,9 @@ struct DrawConstants {
   std::uint32_t padding[3];
 };
 
-// Must match DrawConstants in shaders/mtoon.slang: 128 bytes, the push
-// constant size every Vulkan device offers.
+// Must match DrawConstants in shaders/mtoon_common.slang, which both
+// mtoon_opaque and mtoon_outline read: 128 bytes, the push constant size
+// every Vulkan device offers.
 struct MToonDrawConstants {
   float clip_from_object[16];
   // Rows of the view-space normal matrix, each padded to four floats.
@@ -36,7 +37,9 @@ struct MToonDrawConstants {
   // kDrawConstantInfluences and the influences per point from
   // kInfluenceCountShift up when it is skinned.
   std::uint32_t flags;
-  std::uint32_t padding[2];
+  // |projection[1][1]|, for mtoon_outline's screen-coordinates width.
+  float projection_scale;
+  std::uint32_t padding;
 };
 static_assert(sizeof(MToonDrawConstants) == 128);
 
@@ -44,6 +47,11 @@ constexpr std::uint32_t kDrawHasUVs = 1U;
 constexpr std::uint32_t kDrawSkinned = 2U;
 constexpr std::uint32_t kDrawConstantInfluences = 4U;
 constexpr std::uint32_t kInfluenceCountShift = 8U;
+
+// An MToon slot's outline width mode, as mtoon_outline reads it; 0 draws
+// no outline.
+constexpr std::uint32_t kOutlineWorld = 1U;
+constexpr std::uint32_t kOutlineScreen = 2U;
 
 // Entries in the texture table mtoon_opaque indexes, and a shader constant
 // (kTextureCapacity in shaders/mtoon.slang). Entry 0 is a white placeholder,
@@ -56,7 +64,7 @@ constexpr std::uint32_t kTextureCapacity = 128;
 constexpr std::uint32_t kSamplerCount = 9;
 
 // One material's slot in the parameter buffer. Must match MToonParameters
-// in shaders/mtoon.slang.
+// in shaders/mtoon_common.slang.
 struct MToonParameters {
   float base_color[4];
   // a: the alpha cutoff, negative when the material is not Mask.
@@ -71,8 +79,16 @@ struct MToonParameters {
   // in glTF's UV space, each padded to four floats.
   float base_uv[8];
   float shade_uv[8];
+  // rgb linear, a the outline lighting mix.
+  float outline_color[4];
+  // x the outline width factor.
+  float outline[4];
+  // x outline width texture entry, y its sampler; z kOutlineWorld,
+  // kOutlineScreen or 0.
+  std::uint32_t outline_texture[4];
+  float outline_uv[8];
 };
-static_assert(sizeof(MToonParameters) == 144);
+static_assert(sizeof(MToonParameters) == 224);
 
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
 // pass or framebuffer to rebuild on resize), Synchronization2 and timeline
@@ -109,22 +125,25 @@ struct ScenePipeline {
 };
 
 // The scene pipelines for one colour/depth format pair: the unlit mesh
-// pipeline and mtoon_opaque, which reads the material parameter buffer, the
-// texture table and the wrap samplers through `material_layout` (set 0).
-// Both skin a mesh in the vertex stage through `skin_layout` (set 1): its
-// influences and its joint buffer. Viewport and scissor are dynamic, and so
-// are mtoon_opaque's cull mode, front face and vertex strides, so each
-// pipeline is created once and survives every resize, every material and
-// every mesh with or without UVs or a skin.
+// pipeline, mtoon_opaque and mtoon_outline. The MToon pair reads the
+// material parameter buffer, the texture table and the wrap samplers
+// through `material_layout` (set 0), in both stages, since the outline's
+// width is the vertex stage's to apply. Every pipeline skins a mesh in the
+// vertex stage through `skin_layout` (set 1): its influences and its joint
+// buffer. Viewport and scissor are dynamic, and so are the MToon pair's
+// cull mode, front face and vertex strides, so each pipeline is created once
+// and survives every resize, every material and every mesh with or without
+// UVs or a skin.
 struct ScenePipelines {
   ScenePipeline mesh;
   ScenePipeline mtoon;
+  ScenePipeline mtoon_outline;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
   VkSampler samplers[kSamplerCount] = {};
 
-  static constexpr std::uint32_t kCount = 2;
+  static constexpr std::uint32_t kCount = 3;
 };
 
 // The SPIR-V of every scene pipeline, loaded before any device exists so a
@@ -134,6 +153,8 @@ struct SceneShaderWords {
   std::vector<std::uint32_t> mesh_fragment;
   std::vector<std::uint32_t> mtoon_vertex;
   std::vector<std::uint32_t> mtoon_fragment;
+  std::vector<std::uint32_t> mtoon_outline_vertex;
+  std::vector<std::uint32_t> mtoon_outline_fragment;
 };
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -268,8 +289,12 @@ public:
     // The table entries the slot was written with.
     std::uint32_t base_entry = 0;
     std::uint32_t shade_entry = 0;
+    std::uint32_t outline_entry = 0;
     ToonShadingModel model = ToonShadingModel::PreviewSurface;
     bool double_sided = false;
+    // Whether a draw with this material also draws mtoon_outline's hull:
+    // an MToon material that asks for an outline of some width.
+    bool outline = false;
     std::uint64_t generation = 0;
   };
 
@@ -327,7 +352,9 @@ public:
   // Upload whatever `draws` changed and release meshes it no longer draws.
   // No frame that reads these buffers may be in flight.
   bool Update(const DrawList& draws, std::string& detail);
-  // Unlit draws first, then every draw whose material selected MToon.
+  // Unlit draws first; then the outline hull of every MToon draw that asks
+  // for one (design policy §10's first pass); then every draw whose
+  // material selected MToon.
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws) const;
   void Destroy();

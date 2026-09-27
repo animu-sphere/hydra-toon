@@ -30,6 +30,7 @@ validation:
     - renderer.frame.persistence
     - renderer.material.mtoon_opaque
     - renderer.material.mtoon_textured
+    - renderer.material.mtoon_outline
     - renderer.skinning.gpu
     - renderer.install_tree
     - renderer.plugin.discovery

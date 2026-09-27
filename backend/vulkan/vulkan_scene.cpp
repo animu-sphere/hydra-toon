@@ -44,7 +44,7 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
     return false;
   }
   // The material set: its parameter buffer, the texture table and the
-  // samplers, all in the fragment stage.
+  // samplers, each stage that reads them counting them once.
   const VkPhysicalDeviceLimits& limits = properties.limits;
   if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity ||
       limits.maxDescriptorSetSampledImages < kTextureCapacity ||
@@ -272,8 +272,21 @@ VkSamplerAddressMode AddressMode(std::uint32_t wrap) {
   return VK_SAMPLER_ADDRESS_MODE_REPEAT;
 }
 
+std::uint32_t OutlineMode(const ToonMaterial& material) {
+  switch (material.mtoon.outline_width_mode) {
+  case ToonOutlineWidthMode::World:
+    return kOutlineWorld;
+  case ToonOutlineWidthMode::Screen:
+    return kOutlineScreen;
+  case ToonOutlineWidthMode::None:
+    break;
+  }
+  return 0U;
+}
+
 void WriteParameters(const ToonMaterial& material, std::uint32_t base_entry,
-    std::uint32_t shade_entry, MToonParameters& slot) {
+    std::uint32_t shade_entry, std::uint32_t outline_entry,
+    MToonParameters& slot) {
   slot = {};
   slot.base_color[0] = material.base_color.x;
   slot.base_color[1] = material.base_color.y;
@@ -297,6 +310,15 @@ void WriteParameters(const ToonMaterial& material, std::uint32_t base_entry,
   slot.textures[3] = SamplerIndex(material.mtoon.shade_texture);
   WriteUvRows(material.base_texture, slot.base_uv);
   WriteUvRows(material.mtoon.shade_texture, slot.shade_uv);
+  slot.outline_color[0] = material.outline_color.x;
+  slot.outline_color[1] = material.outline_color.y;
+  slot.outline_color[2] = material.outline_color.z;
+  slot.outline_color[3] = material.mtoon.outline_lighting_mix;
+  slot.outline[0] = material.outline_width;
+  slot.outline_texture[0] = outline_entry;
+  slot.outline_texture[1] = SamplerIndex(material.mtoon.outline_width_texture);
+  slot.outline_texture[2] = OutlineMode(material);
+  WriteUvRows(material.mtoon.outline_width_texture, slot.outline_uv);
 }
 
 // Every level down to 1x1.
@@ -344,7 +366,11 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
   return LoadSpirv(shaders.mesh_vertex, words.mesh_vertex, detail) &&
          LoadSpirv(shaders.mesh_fragment, words.mesh_fragment, detail) &&
          LoadSpirv(shaders.mtoon_vertex, words.mtoon_vertex, detail) &&
-         LoadSpirv(shaders.mtoon_fragment, words.mtoon_fragment, detail);
+         LoadSpirv(shaders.mtoon_fragment, words.mtoon_fragment, detail) &&
+         LoadSpirv(shaders.mtoon_outline_vertex, words.mtoon_outline_vertex,
+             detail) &&
+         LoadSpirv(shaders.mtoon_outline_fragment,
+             words.mtoon_outline_fragment, detail);
 }
 
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
@@ -368,19 +394,23 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
     }
   }
 
+  // mtoon_outline's vertex stage reads the width, its mode and its texture
+  // from the same slot and table the fragment stages do.
+  const VkShaderStageFlags material_stages =
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   VkDescriptorSetLayoutBinding material_bindings[3]{};
   material_bindings[0].binding = 0;
   material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[0].descriptorCount = 1;
-  material_bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  material_bindings[0].stageFlags = material_stages;
   material_bindings[1].binding = 1;
   material_bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   material_bindings[1].descriptorCount = kTextureCapacity;
-  material_bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  material_bindings[1].stageFlags = material_stages;
   material_bindings[2].binding = 2;
   material_bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
   material_bindings[2].descriptorCount = kSamplerCount;
-  material_bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  material_bindings[2].stageFlags = material_stages;
   material_bindings[2].pImmutableSamplers = pipelines.samplers;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
@@ -417,13 +447,20 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   mtoon.push_constant_size = sizeof(MToonDrawConstants);
   mtoon.vertex_streams = 3;
   mtoon.dynamic_draw_state = true;
+  // The same streams, constants and dynamic state; only the shaders differ.
+  PipelineDescription outline = mtoon;
+  outline.vertex_words = &words.mtoon_outline_vertex;
+  outline.fragment_words = &words.mtoon_outline_fragment;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
          CreateScenePipeline(device, mtoon, pipelines, color_format,
-             depth_format, pipelines.mtoon, detail);
+             depth_format, pipelines.mtoon, detail) &&
+         CreateScenePipeline(device, outline, pipelines, color_format,
+             depth_format, pipelines.mtoon_outline, detail);
 }
 
 void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
+  DestroyScenePipeline(device, pipelines.mtoon_outline);
   DestroyScenePipeline(device, pipelines.mtoon);
   DestroyScenePipeline(device, pipelines.mesh);
   vkDestroyDescriptorSetLayout(device, pipelines.material_layout, nullptr);
@@ -884,16 +921,21 @@ bool MaterialCache::Update(const DrawList& draws,
         textures.Entry(material.material.base_texture.texture);
     const std::uint32_t shade_entry =
         textures.Entry(material.material.mtoon.shade_texture.texture);
+    const std::uint32_t outline_entry =
+        textures.Entry(material.material.mtoon.outline_width_texture.texture);
     if (entry.parameters_revision != material.parameters_revision ||
-        entry.base_entry != base_entry || entry.shade_entry != shade_entry) {
+        entry.base_entry != base_entry || entry.shade_entry != shade_entry ||
+        entry.outline_entry != outline_entry) {
       auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
       WriteParameters(material.material, base_entry, shade_entry,
-          slots[entry.slot]);
+          outline_entry, slots[entry.slot]);
       entry.parameters_revision = material.parameters_revision;
       entry.base_entry = base_entry;
       entry.shade_entry = shade_entry;
+      entry.outline_entry = outline_entry;
       entry.model = material.material.model;
       entry.double_sided = material.material.double_sided;
+      entry.outline = HasOutline(material.material);
       ++writes_;
       written = true;
     }
@@ -1205,47 +1247,63 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
   }
 
-  vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      pipelines.mtoon.pipeline);
+  // Both MToon pipelines share the layout, the streams and the constants;
+  // they differ in shaders and in which faces they cull.
   const VkDescriptorSet material_set = materials.descriptor_set();
-  vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      pipelines.mtoon.layout, 0, 1, &material_set, 0, nullptr);
-  for (const MeshSnapshot& mesh : draws.draws) {
-    const auto found = entries_.find(mesh.id);
-    const MaterialCache::Entry* material = mtoon_material(mesh);
-    if (found == entries_.end() || material == nullptr) {
-      continue;
-    }
-    const Entry& entry = found->second;
-    const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
-        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
-    const VkDeviceSize offsets[] = {0, 0, 0};
-    const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
-        entry.has_uvs ? sizeof(Float2) : 0U};
-    vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
-        strides);
-    vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-    const VkDescriptorSet skin_set =
-        entry.skinned ? entry.skin_set : unskinned_set_;
+  const float projection_scale = std::fabs(draws.view.projection.m[5]);
+  const auto record_mtoon = [&](const ScenePipeline& pipeline, bool outline) {
+    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline.pipeline);
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        pipelines.mtoon.layout, 1, 1, &skin_set, 0, nullptr);
-    MToonDrawConstants constants{};
-    const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
-    std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
-        sizeof(constants.clip_from_object));
-    const bool mirrored = NormalRows(Multiply(draws.view.view, mesh.transform),
-        constants.view_normal_rows);
-    constants.material_slot = material->slot;
-    constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | entry.skin_flags;
-    vkCmdSetCullMode(command, material->double_sided ? VK_CULL_MODE_NONE
-                                                     : VK_CULL_MODE_BACK_BIT);
-    vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
-                                        : VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdPushConstants(command, pipelines.mtoon.layout,
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-        sizeof(constants), &constants);
-    vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
-  }
+        pipeline.layout, 0, 1, &material_set, 0, nullptr);
+    for (const MeshSnapshot& mesh : draws.draws) {
+      const auto found = entries_.find(mesh.id);
+      const MaterialCache::Entry* material = mtoon_material(mesh);
+      if (found == entries_.end() || material == nullptr ||
+          (outline && !material->outline)) {
+        continue;
+      }
+      const Entry& entry = found->second;
+      const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
+          entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
+      const VkDeviceSize offsets[] = {0, 0, 0};
+      const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
+          entry.has_uvs ? sizeof(Float2) : 0U};
+      vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
+          strides);
+      vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
+          VK_INDEX_TYPE_UINT32);
+      const VkDescriptorSet skin_set =
+          entry.skinned ? entry.skin_set : unskinned_set_;
+      vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+          pipeline.layout, 1, 1, &skin_set, 0, nullptr);
+      MToonDrawConstants constants{};
+      const Matrix4 clip_from_object =
+          Multiply(clip_from_world, mesh.transform);
+      std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
+          sizeof(constants.clip_from_object));
+      const bool mirrored = NormalRows(
+          Multiply(draws.view.view, mesh.transform),
+          constants.view_normal_rows);
+      constants.material_slot = material->slot;
+      constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | entry.skin_flags;
+      constants.projection_scale = projection_scale;
+      // The hull culls its front faces whether or not the material is
+      // double-sided, as MToon states.
+      vkCmdSetCullMode(command,
+          outline                  ? VK_CULL_MODE_FRONT_BIT
+          : material->double_sided ? VK_CULL_MODE_NONE
+                                   : VK_CULL_MODE_BACK_BIT);
+      vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
+                                          : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+      vkCmdPushConstants(command, pipeline.layout,
+          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+          sizeof(constants), &constants);
+      vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
+    }
+  };
+  record_mtoon(pipelines.mtoon_outline, true);
+  record_mtoon(pipelines.mtoon, false);
 }
 
 void MeshCache::Destroy() {

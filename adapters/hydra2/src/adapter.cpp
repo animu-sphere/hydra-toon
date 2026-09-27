@@ -102,9 +102,11 @@ void AppendHostEvidence(std::uint64_t frame_index,
       ++mtoon_materials;
     }
   }
-  // And how many of this frame's draws went through mtoon_opaque, and how
-  // many were skinned on the GPU.
+  // And how many of this frame's draws went through mtoon_opaque, how many
+  // of those added mtoon_outline's hull, and how many were skinned on the
+  // GPU.
   std::size_t mtoon_draws{};
+  std::size_t outline_draws{};
   std::size_t skinned_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
     skinned_draws += Toon::IsSkinned(mesh) ? 1U : 0U;
@@ -117,6 +119,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
         material->id == mesh.material &&
         material->material.model == Toon::ToonShadingModel::MToon) {
       ++mtoon_draws;
+      outline_draws += Toon::HasOutline(material->material) ? 1U : 0U;
     }
   }
   std::ofstream output(path, std::ios::binary | std::ios::app);
@@ -143,6 +146,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " materials_mtoon=" << mtoon_materials
          << " draws=" << draws.draws.size()
          << " draws_mtoon=" << mtoon_draws
+         << " draws_outline=" << outline_draws
          << " draws_skinned=" << skinned_draws << '\n';
 }
 
@@ -1056,6 +1060,7 @@ HdToonMaterial::~HdToonMaterial() {
   state_->RemoveMaterial(material_, GetId());
   state_->ReleaseTexture(base_texture_);
   state_->ReleaseTexture(shade_texture_);
+  state_->ReleaseTexture(outline_width_texture_);
 }
 
 // The canonical values are not in the material network: a format
@@ -1101,12 +1106,17 @@ void HdToonMaterial::Read(const HdContainerDataSourceHandle& prim) {
       state_->AcquireTexture(source.base_texture);
   const Toon::TextureId shade_texture =
       state_->AcquireTexture(source.shade_texture);
+  const Toon::TextureId outline_width_texture =
+      state_->AcquireTexture(source.outline_width_texture);
   state_->ReleaseTexture(base_texture_);
   state_->ReleaseTexture(shade_texture_);
+  state_->ReleaseTexture(outline_width_texture_);
   base_texture_ = base_texture;
   shade_texture_ = shade_texture;
+  outline_width_texture_ = outline_width_texture;
   source.values.base_texture.texture = base_texture;
   source.values.mtoon.shade_texture.texture = shade_texture;
+  source.values.mtoon.outline_width_texture.texture = outline_width_texture;
   values_ = source.values;
   state_->SetMaterial(material_, values_);
 }

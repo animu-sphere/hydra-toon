@@ -244,9 +244,28 @@ int main() {
   }
   textured.mtoon.shade_texture.texture = texture;
   world.SetMaterial(bound, textured);
-  if (!Check(world.Commit().materials[0].structure_revision !=
-                 moved_uv.structure_revision,
+  const Toon::MaterialSnapshot shaded = world.Commit().materials[0];
+  if (!Check(shaded.structure_revision != moved_uv.structure_revision,
           "sampling a shade texture must be structural")) {
+    return 1;
+  }
+  // An outline's mode, width and colour are values; its width texture's
+  // identity is structural, as every texture's is (material policy §8).
+  textured.outline = true;
+  textured.outline_width = 0.01F;
+  textured.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  world.SetMaterial(bound, textured);
+  const Toon::MaterialSnapshot outlined = world.Commit().materials[0];
+  if (!Check(outlined.parameters_revision != shaded.parameters_revision &&
+                 outlined.structure_revision == shaded.structure_revision,
+          "turning an outline on must not be structural")) {
+    return 1;
+  }
+  textured.mtoon.outline_width_texture.texture = texture;
+  world.SetMaterial(bound, textured);
+  if (!Check(world.Commit().materials[0].structure_revision !=
+                 outlined.structure_revision,
+          "sampling an outline width texture must be structural")) {
     return 1;
   }
   world.RemoveTexture(texture);

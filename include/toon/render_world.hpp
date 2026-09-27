@@ -206,6 +206,8 @@ struct ToonMaterial {
   bool double_sided = false;
   // Linear, with any strength multiplier already applied.
   Float3 emissive;
+  // Whether the source asks for an outline, its width in the unit the
+  // model states (MToon: `outline_width_mode`), and its linear colour.
   bool outline = false;
   float outline_width = 0.0F;
   Float3 outline_color;
@@ -224,6 +226,9 @@ struct ToonMaterial {
     float rim_lift = 0.0F;
     float rim_lighting_mix = 1.0F;
     ToonOutlineWidthMode outline_width_mode = ToonOutlineWidthMode::None;
+    // MToon's outlineWidthMultiplyTexture: its G channel multiplies the
+    // outline width. Data, not colour.
+    ToonTextureRef outline_width_texture;
     float outline_lighting_mix = 1.0F;
     float uv_scroll_x_speed = 0.0F;
     float uv_scroll_y_speed = 0.0F;
@@ -236,6 +241,10 @@ struct ToonMaterial {
 
   friend bool operator==(const ToonMaterial&, const ToonMaterial&) = default;
 };
+
+// Whether a material's draws add an outline (material policy §5): an MToon
+// material whose width mode is not None, with a width above zero.
+[[nodiscard]] bool HasOutline(const ToonMaterial& material);
 
 // Whether moving from one material to the other changes how it is drawn —
 // its model, alpha mode, double-sidedness or which textures it samples —
