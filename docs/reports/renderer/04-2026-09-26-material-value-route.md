@@ -8,7 +8,7 @@
   `…-lookdev` (OpenUSD 26.08); `usd-vrm-plugins` `vrmSchema` 0.9 and
   `vrmImaging` 0.9.0, each registered only through `PXR_PLUGINPATH_NAME`
 - Occasion: the item [report 03](03-2026-09-26-material-sprim.md) left
-  next on the [roadmap](../../roadmap/current.md#before-renderer-phase-1) —
+  next on the [roadmap](https://github.com/animu-sphere/hydra-toon/blob/428202238e9d2d2346b21371c5d2f383d1fe1426/docs/roadmap/current.md#before-renderer-phase-1) —
   the delegate-side route for a `vrm/<group>/<field>` change that scene index
   emulation turns into no dirty bit
   ([report 02](02-2026-09-26-mat-q1-material-inputs.md);

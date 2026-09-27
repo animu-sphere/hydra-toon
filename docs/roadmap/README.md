@@ -1,51 +1,97 @@
 # Roadmap
 
-The roadmap holds only **incomplete** work owned by this repository. Shipped
-work is in the [CHANGELOG](../../CHANGELOG.md) and the
-[release records](../releases/); rationale lives in [design/](../design/).
-Sibling repositories' work is planned in their own roadmaps and not mirrored
-here.
+What this repository builds next. Each milestone is a `v0.x.0` release
+([design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases));
+a milestone is released when its work is done, not on a date.
 
-Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️ accepted workaround
-
-| Document | Contents |
-| --- | --- |
-| [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1's MToon path, Renderer Phase 1's items and stand-ins, Renderer Phase 2's items and stand-ins, and project infrastructure. |
-| [vrm-host-session.md](vrm-host-session.md) | The VRM `usdview` session as a Formation: its members, package names, and the state and plan on Windows, Linux and macOS. |
+The roadmap holds only work that is not done. It carries no status marks:
+what is implemented is the
+[capability matrix](../reference/CAPABILITY_MATRIX.md), and what a release
+established is its [record](../releases/). A finished item is deleted here in
+the change that finishes it, and a milestone's page is deleted when that
+version is released. Work no milestone carries yet waits under
+[not yet in a milestone](#not-yet-in-a-milestone) until one takes it. Sibling
+repositories' work is planned in their own roadmaps.
 
 ## Sequence
 
-One sequence is live: **Renderer Phase 0–7**, defined in
-[design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases).
-A reference to it is always qualified — "Renderer Phase 1", never a bare
-"Phase 1" — because every sibling repository has phases of its own.
-
-## Status at a glance
-
-**This table is the single source of truth for which release a phase lands
-in.** Other documents name a phase and defer the version here.
-
-| Phase | Status | Target |
+| Milestone | Theme | Page |
 | --- | --- | --- |
-| Renderer Phase 0 — Skeleton | ✅ | [v0.1.0](../releases/v0.1.0.md) |
-| Renderer Phase 1 — Avatar MVP | ✅ renderer work in v0.1.0; the host session's Formation on `main` ([report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)) | the release after v0.1.0, unscheduled |
-| Renderer Phase 2 — MToon completion | 🚧 rim and MatCap on `main` ([report 14](../reports/renderer/14-2026-09-28-mtoon-rim.md)) | unscheduled |
-| Renderer Phase 3 — Animation fast path | ⬜ | unscheduled |
-| Renderer Phase 4 — MMD | ⬜ | unscheduled |
-| Renderer Phase 5 — UsdPreviewSurface | ⬜ | unscheduled |
-| Renderer Phase 6 — WebGPU | ⬜ | unscheduled |
-| Renderer Phase 7 — Optimization | ⬜ | unscheduled |
+| v0.2.0 | MToon quality: transparency, the rest of MToon, anti-aliasing, outline stability, scene lights, Linux and more GPU vendors | [v0.2.0.md](v0.2.0.md) |
+| v0.3.0 | Avatar animation fast path: GPU morphs, expressions, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
+| v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
+| v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
+| v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
+| after v0.6.0 | Candidates, taken up when the above is settled | [later.md](later.md#after-v060) |
 
-## Quality bar (applies to every phase)
+## Priority
 
-- A pose, expression or camera change never rebuilds topology, draw packets or
-  pipelines ([design policy §11, §14](../design/DESIGN_POLICY.md#14-dirty-propagation)).
-- No `vkDeviceWaitIdle` or `vkQueueWaitIdle` in an ordinary frame
-  ([§19](../design/DESIGN_POLICY.md#19-cpu--gpu-synchronization)).
-- Public core headers stay free of OpenUSD, Hydra, Vulkan and windowing types,
-  and CI enforces it ([PROJECT_LAYOUT.md §4](../architecture/PROJECT_LAYOUT.md#4-dependency-directions)).
-- Nothing links a format repository; a sibling's contract is linked, never
-  restated ([integration scope](../design/INTEGRATION_SCOPE_POLICY.md)).
-- A performance claim cites a measurement, and a measurement is a
-  [report](../reports/).
-- Every documented command is one that has actually been run.
+Work is taken in this order, across milestones:
+
+1. MToon transparency
+2. The anti-aliasing approach
+3. Outline stability and cost
+4. The rest of MToon
+5. Linux and multi-vendor Vulkan
+6. Scene lights
+7. GPU morphs
+8. The expression fast path
+9. Late motion latching
+10. MMD
+11. `UsdPreviewSurface`
+12. WebGPU
+
+The avatar path is finished before a new feature family is added.
+
+## Project infrastructure
+
+Not tied to a milestone:
+
+- **CI on pull requests.** A generated OpenStrata CI lane: the `core` build
+  with its GPU checks as capability-gated `SKIP`s on hosted runners, and the
+  `hydra` intent against a digest-pinned runtime.
+- **Documentation check.** A `scripts/check_docs.py` that resolves relative
+  links and checks category indexes, as the sibling repositories have.
+- **Core boundary check by glob.** The check lists its headers by name
+  ([PROJECT_LAYOUT.md §4](../architecture/PROJECT_LAYOUT.md#4-dependency-directions));
+  it should find every public core header itself.
+
+## Not yet in a milestone
+
+Planned, but not yet given to a milestone. When one takes an item, it moves
+to that milestone's page.
+
+- **Off-thread asset upload.** Geometry and textures staged and copied off
+  the render thread, on a transfer queue, with a placeholder until they
+  arrive ([design policy §20](../design/DESIGN_POLICY.md#20-asset-upload)).
+- **Dual quaternion skinning on the GPU.** A dual quaternion variant of the
+  skinning vertex stage, replacing usdSkelImaging's CPU kernel and its point
+  uploads, when an asset needs it.
+- **Hgi interop.** Hand the Hydra host the rendered image without reading
+  every frame back into CPU `HdRenderBuffer`s and waiting for it.
+- **Picking.** Fill the `primId`, `instanceId` and `elementId` AOVs.
+- **Render tags, instancers and the framing data window.**
+- **The VRM host session on macOS arm64: the runtime and the VRM package
+  only.** `hdToon` has no Metal backend
+  ([design policy §4](../design/DESIGN_POLICY.md#4-backends)), so no renderer
+  package is planned for macOS. The planned commands, on macOS 15 with
+  Xcode's 15.5 SDK, not run yet:
+
+  ```sh
+  # A lookdev runtime with usdview, at CY2026's SDK and deployment target;
+  # there is no canonical macOS lookdev leaf. The build interpreter needs
+  # Jinja2, PySide6 and PyOpenGL.
+  ost runtime pull cy2026 --profile lookdev --build <OpenUSD v26.08 checkout>       --openusd-variant metal --sdk 15.5 --deployment-target 13.0 --jobs <n>
+  ost runtime validate cy2026 --profile lookdev
+  ost runtime export cy2026 --profile lookdev --slim
+
+  # In usd-vrm-plugins; it publishes no macOS lookdev package.
+  ost plugin build plugins/vrmSchema --profile lookdev
+  ost plugin build plugins/vrmImaging --profile lookdev
+  ost plugin package plugins/vrmImaging --profile lookdev
+  ost artifact import plugins/vrmImaging/dist/plugins/vrmImaging/0.10.0/cy2026-macos-arm64-py313-lookdev
+  ```
+
+  With those, `usdview` can show whether `vrmImaging` contributes its
+  container on macOS, but with Storm; that is `usd-vrm-plugins`' evidence,
+  not this renderer's.

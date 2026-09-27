@@ -10,7 +10,7 @@
 - Occasion: [v0.1.0](../../releases/v0.1.0.md) published the `hydra`
   intent's package. Every member of the VRM host session is now published,
   so its Formation can pin published digests only and be committed — the last
-  item [before Renderer Phase 1](../../roadmap/current.md#before-renderer-phase-1)'s
+  item [before Renderer Phase 1](https://github.com/animu-sphere/hydra-toon/blob/428202238e9d2d2346b21371c5d2f383d1fe1426/docs/roadmap/current.md#before-renderer-phase-1)'s
   MToon path. The release lane's runner has no Vulkan device, so this is also
   the first time the published package draws on a GPU
 

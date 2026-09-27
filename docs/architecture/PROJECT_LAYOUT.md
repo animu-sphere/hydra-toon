@@ -61,7 +61,7 @@ placement rule; it does not say the component exists.
 | `RenderGraph` (§16) | `core/render-graph/` when it exists | new core target |
 | `ToonRenderer` (frame loop, late latch, telemetry) | `core/` | new core target |
 | Vulkan backend | `backend/vulkan/` | `toon-render-vulkan` |
-| WebGPU backend (Renderer Phase 6) | `backend/webgpu/` | new backend target |
+| WebGPU backend | `backend/webgpu/` | new backend target |
 | Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |

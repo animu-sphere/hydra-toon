@@ -1,14 +1,43 @@
 # Release records
 
-Each released version gets an immutable record here: its objective, the
-capabilities it shipped, compatibility notes, and known limitations. Release
-records are history — once written for a released version they are not
-rewritten; new work goes to a new record. Active, incomplete work lives in the
-[roadmap](../roadmap/), not here.
+Each released version gets an immutable record here: what it established,
+compatibility notes, and known limitations. Release records are history —
+once written for a released version they are not rewritten, except to keep a
+link resolving. What comes next is the [roadmap](../roadmap/).
 
-| Version | Record | Theme |
+| Version | Record | Milestone |
 | --- | --- | --- |
-| v0.1.0 | [v0.1.0.md](v0.1.0.md) | The avatar renderer, packaged: Renderer Phase 0 and Phase 1's renderer work — MToon with textures, outline and GPU skinning through `hdToon` — published as a package a Formation pins |
+| v0.1.0 | [v0.1.0.md](v0.1.0.md) | Foundation: the render world, the persistent Vulkan renderer, `hdToon`, opaque MToon with textures, GPU skinning and the inverted-hull outline, and the release lane |
+
+## Versioning
+
+Each `v0.x.0` is a milestone
+([design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)):
+the version says how far the renderer has come, not how much changed, and it
+is released when the milestone's work is done. Ordinary fixes, improvements
+and compatibility work go into the next `v0.x.0`.
+
+A patch release (`v0.x.1`) is cut only when the next milestone cannot wait:
+a published package that is unusable in practice, a serious crash, a missing
+release artifact, a serious packaging, ABI or dependency mismatch, a security
+fix, or a serious regression.
+
+## Release gate
+
+Before a `v0.x.0` is tagged, the validation its milestone needs has passed:
+
+- **Build** on Windows and Linux, with plain CMake and with OpenStrata. Linux
+  joins the gate with v0.2.0.
+- **Tests** of what the tree implements: the core, render extraction, the
+  backend, materials, skinning, morphs, the Hydra adapter, the install tree
+  and a host smoke test.
+- **GPU evidence.** CI without a GPU never completes a renderer release. On
+  at least one real GPU, Vulkan validation, a representative scene and a
+  representative avatar, with frame evidence and performance evidence, each
+  a [report](../reports/).
+- **Packaging**: the GitHub release, a source archive, the binary package,
+  its manifest and SPDX SBOM, checksums, the OCI package on GHCR, and the
+  digests a Formation pins.
 
 ## How a release is cut
 
@@ -23,8 +52,7 @@ tagging:
    `## [X.Y.Z] - YYYY-MM-DD`, and a new, empty `[Unreleased]` section sits
    above it.
 3. This version's record is written here and listed in the table above, and
-   the [status table](../roadmap/README.md#status-at-a-glance) names what it
-   carries.
+   the version's page in the [roadmap](../roadmap/) is deleted.
 4. A dry run of the workflow (`workflow_dispatch` on `main`) is green.
 
 The workflow then:
