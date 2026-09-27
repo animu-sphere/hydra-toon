@@ -1,8 +1,10 @@
 # Supported configurations
 
 Configurations a build and test run has actually passed on. A configuration
-that has only been reviewed is not listed. No CI runs yet, so every row is a
-local run, and the report named in the row holds its detail.
+that has only been reviewed is not listed. A local run names the report that
+holds its detail; the one CI row is the
+[release workflow](../releases/README.md#how-a-release-is-cut)'s build, which
+runs on a tag or a manual dry run, never on a pull request.
 
 ## Measured
 
@@ -10,6 +12,7 @@ local run, and the report named in the row holds its detail.
 | --- | --- | --- | --- | --- | --- | --- |
 | Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `core`, Release | OpenStrata `cy2026` `core` (no OpenUSD) | NVIDIA RTX A5000 | `ost build`, `ost test` 4/4, `ost validate` passed with `renderer.install_tree` PASS | [renderer 06](../reports/renderer/06-2026-09-27-vrm-formation.md) |
 | Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | `hydra` intent, Release | OpenStrata `cy2026` `lookdev`, the canonical `26.08-gl-windows-x86_64` leaf: OpenUSD 26.08, oneTBB 2022.1.0, Python 3.13 | NVIDIA RTX A5000 | `ost build`, `ost test` 9/9 including `testusdview`, `ost validate` passed with 13 of 13 renderer assertions; packaged and run in a Formation with `vrmImaging` | [renderer 06](../reports/renderer/06-2026-09-27-vrm-formation.md) |
+| Windows Server 2022 x86_64, GitHub-hosted `windows-2022` | MSVC 14.44 (Visual Studio 2022) | `hydra` intent, Release | the same canonical `lookdev` leaf; Vulkan SDK 1.4.350.0 | none: `vkCreateInstance` fails, and OpenGL is below the 4.5 `usdview` needs | `ost build`; `ost test` 9 passed and `toon-renderer-usdview-host` `SKIP`; `ost validate` passed with every GPU and `usdview` host assertion `SKIP`; packaged twice to one archive digest | release workflow dry run [36332782445](https://github.com/animu-sphere/hydra-toon/actions/runs/36332782445) |
 | Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | standalone viewport | OpenStrata `cy2026` `core` | NVIDIA RTX A5000 | `ost renderer viewport -- --frames 8 --hidden` presented 8 frames; `ost validate --intent renderer-viewport` passed | [renderer 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md) |
 
 ## Requirements
