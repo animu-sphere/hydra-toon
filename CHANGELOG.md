@@ -40,6 +40,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
   `toon:msaaSamples` expose it, and the statistics and host frame evidence
   record it as `samples`. The headless check `renderer.antialiasing.msaa`,
   and renderer report 16.
+- The scene's unit: `RenderWorld::SetMetersPerUnit` and the `hdToon` render
+  setting `toon:metersPerUnit`, 1 by default, since Hydra does not carry a
+  stage's `metersPerUnit`. A world-coordinates outline's width is metres,
+  divided into the scene's unit through a draw constant, so a new unit
+  rewrites no parameter slot. Renderer report 17.
 - Documentation: the release milestones. `v0.x.0` versions replace
   Renderer Phase 0–7 as the delivery sequence; the roadmap has a page per
   coming milestone and no status marks, and the capability matrix is the
@@ -57,6 +62,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - The MToon pipelines' push constants carry view-from-object's top three
   rows in place of the normal matrix, which the shaders now derive, so a
   fragment knows its view-space position.
+- A world-coordinates outline was drawn in stage units whatever the stage's
+  unit; it is now drawn in metres.
 
 ## [0.1.0] - 2026-09-28
 

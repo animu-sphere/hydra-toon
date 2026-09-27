@@ -95,6 +95,10 @@ The initial method for both is inverted hull
 `outlineWidthMode` is an MToon semantic, not an instruction to use a
 particular technique: `screenCoordinates` is honoured by scaling the hull
 offset in clip space, not by switching to a screen-space outline.
+`worldCoordinates` is in metres, as VRM's lengths are; the renderer divides
+it by the stage's `metersPerUnit`. That is stage metadata Hydra does not
+carry, so the host states it as the render setting `toon:metersPerUnit`,
+which is 1, VRM's unit, until it does.
 
 ## 6. Transparency and draw order
 

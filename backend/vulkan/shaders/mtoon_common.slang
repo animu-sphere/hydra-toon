@@ -22,7 +22,9 @@ struct DrawConstants {
   // Read by mtoon_outline's screen-coordinates width alone. Scalars, not a
   // uint2, which could align past 128 bytes.
   float projection_scale;
-  uint padding0;
+  // The scene's units per metre: 1 / its metersPerUnit. Read by
+  // mtoon_outline's world-coordinates width alone.
+  float units_per_meter;
 };
 
 static const uint kDrawHasUVs = 1;

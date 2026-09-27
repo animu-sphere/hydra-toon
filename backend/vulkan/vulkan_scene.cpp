@@ -1342,6 +1342,7 @@ void MeshCache::Record(VkCommandBuffer command,
   // layouts are identical, so the material set stays bound across them.
   const VkDescriptorSet material_set = materials.descriptor_set();
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
+  const float units_per_meter = 1.0F / draws.meters_per_unit;
   // A perspective projection puts -z into w; an orthographic one keeps w 1.
   const bool orthographic = draws.view.projection.m[11] == 0.0F;
   // Only mtoon_opaque turns alpha into coverage, and only multisampled.
@@ -1391,6 +1392,7 @@ void MeshCache::Record(VkCommandBuffer command,
                       (&pipeline == &pipelines.mtoon ? coverage : 0U) |
                       entry.skin_flags;
     constants.projection_scale = projection_scale;
+    constants.units_per_meter = units_per_meter;
     vkCmdSetCullMode(command, cull);
     vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
                                         : VK_FRONT_FACE_COUNTER_CLOCKWISE);

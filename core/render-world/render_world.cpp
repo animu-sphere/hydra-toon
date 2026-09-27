@@ -218,6 +218,13 @@ void RenderWorld::SetView(const ToonView& view) {
   }
 }
 
+void RenderWorld::SetMetersPerUnit(float meters) {
+  if (std::isfinite(meters) && meters > 0.0F && meters != meters_per_unit_) {
+    meters_per_unit_ = meters;
+    dirty_ = true;
+  }
+}
+
 bool HasOutline(const ToonMaterial& material) {
   return material.model == ToonShadingModel::MToon && material.outline &&
          material.mtoon.outline_width_mode != ToonOutlineWidthMode::None &&
@@ -351,6 +358,7 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   snapshot.revision = revision_;
   snapshot.view = view_;
   snapshot.view_revision = view_revision_;
+  snapshot.meters_per_unit = meters_per_unit_;
   snapshot.meshes.clear();
   for (auto& entry : meshes_) {
     MeshRecord& record = entry.second;

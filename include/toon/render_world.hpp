@@ -290,6 +290,10 @@ struct FrameSnapshot {
   std::uint64_t revision = 0;
   ToonView view;
   std::uint64_t view_revision = 0;
+  // The scene's linear unit in metres, as UsdGeom's metersPerUnit states
+  // it: what a length MToon gives in metres, a world-coordinates outline
+  // width, is divided by to become a length in the scene.
+  float meters_per_unit = 1.0F;
   // Ordered by id.
   std::vector<MeshSnapshot> meshes;
   // Ordered by id.
@@ -318,6 +322,9 @@ public:
   void SetMeshSkin(MeshId mesh, ToonSkin skin);
   void SetMeshSkinPose(MeshId mesh, ToonSkinPose pose);
   void SetView(const ToonView& view);
+  // The scene's linear unit in metres, 1 until set. A value that is not
+  // positive and finite changes nothing.
+  void SetMetersPerUnit(float meters);
 
   // A new material is the default `ToonMaterial`: the fallback material.
   [[nodiscard]] MaterialId CreateMaterial();
@@ -354,6 +361,7 @@ private:
   MeshId next_mesh_ = 1;
   ToonView view_;
   std::uint64_t view_revision_ = 0;
+  float meters_per_unit_ = 1.0F;
   std::map<MeshId, MeshRecord> meshes_;
   MaterialId next_material_ = 1;
   std::map<MaterialId, MaterialSnapshot> materials_;

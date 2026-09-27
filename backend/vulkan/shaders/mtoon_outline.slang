@@ -26,13 +26,16 @@ VertexStageOutput vertex_main(VertexInput input) {
           samplers[material.outline_texture.y],
           TransformUV(material.outline_uv, input.st), 0.0);
   float width = material.outline.x * width_texel.g;
-  // worldCoordinates is a length in view space, which a rigid view keeps
-  // from world space. screenCoordinates is a ratio of the screen height,
-  // which spans 2 in clip space: that ratio of it at this vertex's w is
+  // worldCoordinates is a length in metres; in the scene's units it is a
+  // length in view space, which a rigid view keeps from world space.
+  // screenCoordinates is a ratio of the screen height, which spans 2 in
+  // clip space: that ratio of it at this vertex's w is
   // 2 * width * w / |projection[1][1]| in view space, perspective or not.
   if (material.outline_texture.z == kOutlineScreen) {
     const float w = mul(draw.clip_from_object, float4(position, 1.0)).w;
     width *= 2.0 * w / max(draw.projection_scale, 1e-6);
+  } else {
+    width *= draw.units_per_meter;
   }
   // The object-space move that is `width` along the view-space normal: the
   // inverse of the model-view 3x3 is the normal matrix transposed, so it

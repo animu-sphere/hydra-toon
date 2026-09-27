@@ -336,12 +336,14 @@ Toon::MeshId AddOctahedron(Toon::RenderWorld& world) {
   return mesh;
 }
 
-// mtoon_outline (material policy §5), on AddOctahedron's diamond. A
-// world-coordinates outline of 0.2 in green, unlit, grows the hull to
-// |x| + |y| <= 0.7, so the pixel at x = 0.58 on the centre row draws green
-// while the centre stays the surface's. With the mode None, a value-only
-// edit, that pixel is background; as screen coordinates, 0.1 of the screen
-// height is the same 0.2 under this camera; a width texture whose G is 0,
+// mtoon_outline (material policy §5), on AddOctahedron's diamond, in a
+// scene whose unit is a centimetre. A world-coordinates outline of 2 mm in
+// green, unlit, is 0.2 units and grows the hull to |x| + |y| <= 0.7, so the
+// pixel at x = 0.58 on the centre row draws green while the centre stays
+// the surface's. Read in a scene of metres, the same 2 mm is too thin to
+// reach that pixel. With the mode None, a value-only edit, that pixel is
+// background; as screen coordinates, 0.1 of the screen height is the same
+// 0.2 under this camera whatever the unit; a width texture whose G is 0,
 // sampled in the vertex stage, takes the outline away again.
 Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
   const std::string id = "renderer.material.mtoon_outline";
@@ -354,13 +356,14 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
 
   Toon::RenderWorld world;
   const Toon::MeshId mesh = AddOctahedron(world);
+  world.SetMetersPerUnit(0.01F);
   const Toon::MaterialId material = world.CreateMaterial();
   Toon::ToonMaterial toon;
   toon.model = Toon::ToonShadingModel::MToon;
   toon.base_color = {1.0F, 0.0F, 0.0F};
   toon.mtoon.shade_color = {0.0F, 0.0F, 1.0F};
   toon.outline = true;
-  toon.outline_width = 0.2F;
+  toon.outline_width = 0.002F;
   toon.outline_color = {0.0F, 1.0F, 0.0F};
   toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
   toon.mtoon.outline_lighting_mix = 0.0F;
@@ -386,12 +389,18 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
     return true;
   };
   Shot world_width;
+  Shot metres;
   Shot none;
   Shot screen_width;
   Shot textured;
   if (!render(world_width)) {
     return {id, "fail", detail};
   }
+  world.SetMetersPerUnit(1.0F);
+  if (!render(metres)) {
+    return {id, "fail", detail};
+  }
+  world.SetMetersPerUnit(0.01F);
   toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::None;
   world.SetMaterial(material, toon);
   if (!render(none)) {
@@ -431,6 +440,10 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
   if (world_width.center[1] > 50U || world_width.center[0] < 150U) {
     return {id, "fail", "the hull must stay behind the surface it outlines"};
   }
+  if (metres.rim[1] > 80U) {
+    return {id, "fail",
+        "a world-coordinates width must be metres in the scene's unit"};
+  }
   if (none.rim[1] > 80U) {
     return {id, "fail", "an outline width mode of None must draw no hull"};
   }
@@ -442,7 +455,9 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
     return {id, "fail",
         "a width texture whose G is 0 must take the outline away"};
   }
-  if (first.material_writes != 1 || none.statistics.material_writes != 2 ||
+  if (first.material_writes != 1 ||
+      metres.statistics.material_writes != 1 ||
+      none.statistics.material_writes != 2 ||
       screen_width.statistics.material_writes != 3 ||
       screen_width.statistics.texture_uploads != 0 ||
       last.texture_uploads != 1 ||
@@ -450,7 +465,8 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
       last.point_uploads != first.point_uploads ||
       last.topology_uploads != first.topology_uploads) {
     return {id, "fail",
-        "an outline edit must rewrite one slot and nothing else"};
+        "an outline edit must rewrite one slot and nothing else, and a unit "
+        "edit nothing at all"};
   }
   return {id, "pass", ""};
 }

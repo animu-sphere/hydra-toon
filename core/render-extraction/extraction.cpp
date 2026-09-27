@@ -7,6 +7,7 @@ void ExtractDrawList(const FrameSnapshot& snapshot, DrawList& draws) {
   draws.source_revision = snapshot.revision;
   draws.view = snapshot.view;
   draws.view_revision = snapshot.view_revision;
+  draws.meters_per_unit = snapshot.meters_per_unit;
   draws.draws.clear();
   draws.triangle_count = 0;
   for (const MeshSnapshot& mesh : snapshot.meshes) {

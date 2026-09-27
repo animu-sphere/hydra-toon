@@ -42,7 +42,9 @@ struct MToonDrawConstants {
   std::uint32_t flags;
   // |projection[1][1]|, for mtoon_outline's screen-coordinates width.
   float projection_scale;
-  std::uint32_t padding;
+  // The scene's units per metre, for mtoon_outline's world-coordinates
+  // width, which MToon gives in metres.
+  float units_per_meter;
 };
 static_assert(sizeof(MToonDrawConstants) == 128);
 

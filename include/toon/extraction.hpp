@@ -14,6 +14,8 @@ struct DrawList {
   std::uint64_t source_revision = 0;
   ToonView view;
   std::uint64_t view_revision = 0;
+  // The snapshot's unit in metres.
+  float meters_per_unit = 1.0F;
   std::vector<MeshSnapshot> draws;
   // Every material of the snapshot, ordered by id, so a consumer keeps one
   // parameter slot per material whether or not a draw binds it this frame.
