@@ -8,7 +8,7 @@ rewritten; new work goes to a new record. Active, incomplete work lives in the
 
 | Version | Record | Theme |
 | --- | --- | --- |
-| — | — | Nothing has been released. v0.1.0 is planned to carry Renderer Phase 0 ([status table](../roadmap/README.md#status-at-a-glance)). |
+| v0.1.0 | [v0.1.0.md](v0.1.0.md) | The avatar renderer, packaged: Renderer Phase 0 and Phase 1's renderer work — MToon with textures, outline and GPU skinning through `hdToon` — published as a package a Formation pins |
 
 ## How a release is cut
 
@@ -38,7 +38,7 @@ The workflow then:
   shader. The runner has no Vulkan device, so the GPU assertions are an
   explained `SKIP`; the evidence is kept as a workflow artifact.
 - **publish** — pushes the package to `ghcr.io/animu-sphere/hydra-toon`,
-  tagged `toon-X.Y.Z-<target>--hydra`, and writes `toon-package-pins.json`:
+  tagged `toon-X.Y.Z-<target>`, and writes `toon-package-pins.json`:
   the archive digest a Formation names as `artifact`, and the OCI digest to
   pull it from.
 - **release** — creates a **draft** GitHub release with the package, its

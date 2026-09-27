@@ -7,7 +7,8 @@ Fills ``docs/contributing/RELEASE_NOTES_TEMPLATE.md`` with:
 * ``{version}`` / ``{tag}`` — the release version (default: the project's,
   from ``scripts/release_version.py``).
 * ``{changelog}``           — that version's ``## [X.Y.Z] - YYYY-MM-DD``
-                              section of ``CHANGELOG.md``, heading dropped.
+                              section of ``CHANGELOG.md``, heading dropped,
+                              relative links made absolute at the tag.
 * ``{checksums}``           — contents of a ``SHA256SUMS`` file, when the
                               release workflow passes one.
 
@@ -29,6 +30,7 @@ import re
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+BLOB = "https://github.com/animu-sphere/hydra-toon/blob"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import release_version  # noqa: E402
@@ -77,6 +79,11 @@ def main(argv: list[str] | None = None) -> int:
     if not body:
         raise SystemExit(f"ERROR: the changelog section {heading!r} is empty")
 
+    # A relative link in the changelog is relative to the repository root;
+    # in a release body it would resolve against the release page.
+    body = re.sub(r"\]\((?![a-z]+:|#)([^)]+)\)",
+                  rf"]({BLOB}/v{version}/\1)", body)
+
     checksums = "(appended by the release workflow)"
     if args.checksums:
         checksums = pathlib.Path(args.checksums).read_text(encoding="utf-8").strip()
@@ -94,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         pathlib.Path(args.out).write_text(notes, encoding="utf-8", newline="\n")
         print(f"wrote release notes for v{version} -> {args.out}")
     else:
+        sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(notes)
     return 0
 

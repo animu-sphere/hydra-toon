@@ -12,7 +12,7 @@ Every item of [design policy §25](../design/DESIGN_POLICY.md#25-implementation-
 Phase 0 is implemented; what now exists is the
 [capability matrix](../reference/CAPABILITY_MATRIX.md), and the run that
 measured it is [renderer report 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md).
-It ships when v0.1.0 is released.
+It ships in [v0.1.0](../releases/v0.1.0.md).
 
 Stand-ins Phase 0 accepted, each replaced by the phase named:
 

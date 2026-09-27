@@ -3,9 +3,15 @@
 All notable changes to `hydra-toon` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each released
-version will have a record in [docs/releases/](docs/releases/README.md).
+version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-09-28
+
+The first release: Renderer Phase 0 and Renderer Phase 1's renderer work,
+published as a package a Formation pins
+([release record](docs/releases/v0.1.0.md)).
 
 ### Added
 
@@ -164,3 +170,6 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   verdict into `renderer-report.json`, as renderer template 0.5.3 does, so
   `ost validate` on the default build passes the check after `ost test`.
   `ost` 0.23.8 or newer is required.
+- `toon-renderer-usdview-host` is a `SKIP` on a host whose OpenGL is below
+  4.5, which `usdview` needs whatever the renderer, as on a hosted CI runner;
+  any other failure still fails.
