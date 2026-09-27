@@ -67,6 +67,8 @@ MeshId RenderWorld::CreateMesh() {
   mesh.points_revision = Stamp();
   mesh.indices = std::make_shared<const std::vector<std::uint32_t>>();
   mesh.topology_revision = Stamp();
+  mesh.uvs = std::make_shared<const std::vector<Float2>>();
+  mesh.uvs_revision = Stamp();
   dirty_ = true;
   return id;
 }
@@ -98,6 +100,15 @@ void RenderWorld::SetMeshPoints(MeshId mesh, std::vector<Float3> points) {
         std::make_shared<const std::vector<Float3>>(std::move(points));
     record->snapshot.points_revision = Stamp();
     record->normals_stale = true;
+    dirty_ = true;
+  }
+}
+
+void RenderWorld::SetMeshUVs(MeshId mesh, std::vector<Float2> uvs) {
+  if (MeshRecord* record = Find(mesh)) {
+    record->snapshot.uvs =
+        std::make_shared<const std::vector<Float2>>(std::move(uvs));
+    record->snapshot.uvs_revision = Stamp();
     dirty_ = true;
   }
 }
@@ -145,7 +156,10 @@ bool IsStructuralChange(const ToonMaterial& before,
     const ToonMaterial& after) {
   return before.model != after.model ||
          before.alpha_mode != after.alpha_mode ||
-         before.double_sided != after.double_sided;
+         before.double_sided != after.double_sided ||
+         before.base_texture.texture != after.base_texture.texture ||
+         before.mtoon.shade_texture.texture !=
+             after.mtoon.shade_texture.texture;
 }
 
 MaterialId RenderWorld::CreateMaterial() {
@@ -176,6 +190,41 @@ void RenderWorld::SetMaterial(MaterialId material, const ToonMaterial& values) {
   if (structural) {
     record.structure_revision = record.parameters_revision;
   }
+  dirty_ = true;
+}
+
+TextureId RenderWorld::CreateTexture() {
+  const TextureId id = next_texture_++;
+  TextureSnapshot& texture = textures_[id];
+  texture.id = id;
+  texture.texture.pixels = std::make_shared<const std::vector<std::uint8_t>>();
+  texture.revision = Stamp();
+  dirty_ = true;
+  return id;
+}
+
+void RenderWorld::RemoveTexture(TextureId texture) {
+  if (textures_.erase(texture) != 0) {
+    dirty_ = true;
+  }
+}
+
+// Pixels that do not fill width x height are dropped, so a consumer can
+// trust the size.
+void RenderWorld::SetTexture(TextureId texture, ToonTexture values) {
+  const auto found = textures_.find(texture);
+  if (found == textures_.end()) {
+    return;
+  }
+  if (values.pixels == nullptr ||
+      values.pixels->size() !=
+          static_cast<std::size_t>(values.width) * values.height * 4U) {
+    values.width = 0;
+    values.height = 0;
+    values.pixels = std::make_shared<const std::vector<std::uint8_t>>();
+  }
+  found->second.texture = std::move(values);
+  found->second.revision = Stamp();
   dirty_ = true;
 }
 
@@ -215,6 +264,10 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   snapshot.materials.clear();
   for (const auto& entry : materials_) {
     snapshot.materials.push_back(entry.second);
+  }
+  snapshot.textures.clear();
+  for (const auto& entry : textures_) {
+    snapshot.textures.push_back(entry.second);
   }
 }
 

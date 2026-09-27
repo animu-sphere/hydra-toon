@@ -18,6 +18,8 @@ struct DrawList {
   // Every material of the snapshot, ordered by id, so a consumer keeps one
   // parameter slot per material whether or not a draw binds it this frame.
   std::vector<MaterialSnapshot> materials;
+  // Every texture of the snapshot, ordered by id, for the same reason.
+  std::vector<TextureSnapshot> textures;
   std::uint64_t triangle_count = 0;
 };
 

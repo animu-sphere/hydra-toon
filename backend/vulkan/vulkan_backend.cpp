@@ -63,6 +63,7 @@ using vulkan_internal::SceneDeviceFeatures;
 using vulkan_internal::SceneShaderWords;
 using vulkan_internal::ScenePipelines;
 using vulkan_internal::SupportsSceneFeatures;
+using vulkan_internal::TextureCache;
 using vulkan_internal::ValidationState;
 using vulkan_internal::VulkanOk;
 
@@ -136,6 +137,7 @@ private:
   std::uint64_t submitted_ = 0;
   ScenePipelines pipelines_;
   MaterialCache materials_;
+  TextureCache textures_;
   MeshCache meshes_;
   std::uint32_t width_ = 0;
   std::uint32_t height_ = 0;
@@ -208,7 +210,9 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     return FrameStatus::Fail;
   }
   vkGetDeviceQueue(device_, *queue_family, 0, &queue_);
-  meshes_.Initialize(physical_device_, device_);
+  if (!meshes_.Initialize(physical_device_, device_, detail)) {
+    return FrameStatus::Fail;
+  }
 
   VkCommandPoolCreateInfo pool_create{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   pool_create.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -242,7 +246,9 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
   if (!CreateScenePipelines(device_, words, kColorFormat, kDepthFormat,
           pipelines_, detail) ||
       !materials_.Initialize(physical_device_, device_,
-          pipelines_.material_layout, detail)) {
+          pipelines_.material_layout, detail) ||
+      !textures_.Initialize(physical_device_, device_,
+          materials_.descriptor_set(), detail)) {
     return FrameStatus::Fail;
   }
   statistics_.pipelines_created += ScenePipelines::kCount;
@@ -271,9 +277,10 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
     return false;
   }
   // One frame in flight: the previous frame has completed before its
-  // targets, geometry or material slots are touched.
+  // targets, geometry, textures or material slots are touched.
   if (!WaitForCompletion(error) || !EnsureTargets(width, height, error) ||
-      !meshes_.Update(draws, error) || !materials_.Update(draws, error)) {
+      !meshes_.Update(draws, error) || !textures_.Update(draws, error) ||
+      !materials_.Update(draws, textures_, error)) {
     return false;
   }
 
@@ -287,6 +294,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
           error)) {
     return false;
   }
+  textures_.RecordUploads(command_);
 
   const VkImageMemoryBarrier2 to_attachment[] = {
       ImageBarrier(color_.image, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -399,6 +407,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   statistics_.topology_uploads = meshes_.topology_uploads();
   statistics_.point_uploads = meshes_.point_uploads();
   statistics_.material_writes = materials_.writes();
+  statistics_.texture_uploads = textures_.uploads();
   statistics_.validation_message_count = validation_.message_count;
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;
@@ -459,6 +468,7 @@ void VulkanOffscreenRenderer::Destroy() {
     // Teardown, not an ordinary frame: waiting for the device is allowed here.
     vkDeviceWaitIdle(device_);
     meshes_.Destroy();
+    textures_.Destroy();
     materials_.Destroy();
     DestroyTargets();
     DestroyScenePipelines(device_, pipelines_);

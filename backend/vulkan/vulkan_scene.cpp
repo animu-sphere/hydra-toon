@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "vulkan_scene.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -10,14 +12,16 @@
 namespace Toon::vulkan_internal {
 
 SceneDeviceFeatures::SceneDeviceFeatures() {
+  core.pNext = &vulkan12;
   vulkan12.pNext = &vulkan13;
 }
 
 void* SceneDeviceFeatures::EnableRequired() {
+  core.features.shaderSampledImageArrayDynamicIndexing = VK_TRUE;
   vulkan12.timelineSemaphore = VK_TRUE;
   vulkan13.dynamicRendering = VK_TRUE;
   vulkan13.synchronization2 = VK_TRUE;
-  return &vulkan12;
+  return &core;
 }
 
 bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
@@ -28,14 +32,26 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
     return false;
   }
   SceneDeviceFeatures supported;
-  VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-  features.pNext = &supported.vulkan12;
-  vkGetPhysicalDeviceFeatures2(device, &features);
+  vkGetPhysicalDeviceFeatures2(device, &supported.core);
   if (supported.vulkan12.timelineSemaphore != VK_TRUE ||
       supported.vulkan13.dynamicRendering != VK_TRUE ||
-      supported.vulkan13.synchronization2 != VK_TRUE) {
+      supported.vulkan13.synchronization2 != VK_TRUE ||
+      supported.core.features.shaderSampledImageArrayDynamicIndexing !=
+          VK_TRUE) {
     detail = std::string(properties.deviceName) +
-             " lacks timelineSemaphore, dynamicRendering or synchronization2";
+             " lacks timelineSemaphore, dynamicRendering, synchronization2 or "
+             "shaderSampledImageArrayDynamicIndexing";
+    return false;
+  }
+  // The material set: its parameter buffer, the texture table and the
+  // samplers, all in the fragment stage.
+  const VkPhysicalDeviceLimits& limits = properties.limits;
+  if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity ||
+      limits.maxDescriptorSetSampledImages < kTextureCapacity ||
+      limits.maxPerStageDescriptorSamplers < kSamplerCount ||
+      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 2U) {
+    detail = std::string(properties.deviceName) + " cannot bind a table of " +
+             std::to_string(kTextureCapacity) + " textures";
     return false;
   }
   return true;
@@ -57,10 +73,11 @@ struct PipelineDescription {
   const std::vector<std::uint32_t>* fragment_words = nullptr;
   std::uint32_t push_constant_size = 0;
   VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
-  // Position, then normal when there are two.
+  // Position, then normal and UV when there are three.
   std::uint32_t vertex_streams = 1;
-  // Cull mode and front face set per draw rather than baked in.
-  bool dynamic_culling = false;
+  // Cull mode, front face and vertex strides set per draw rather than baked
+  // in.
+  bool dynamic_draw_state = false;
 };
 
 bool CreateScenePipeline(VkDevice device,
@@ -101,16 +118,20 @@ bool CreateScenePipeline(VkDevice device,
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = fragment_module;
   stages[1].pName = "main";
-  VkVertexInputBindingDescription bindings[2]{};
-  VkVertexInputAttributeDescription attributes[2]{};
+  const VkFormat stream_formats[3] = {VK_FORMAT_R32G32B32_SFLOAT,
+      VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32_SFLOAT};
+  const std::uint32_t stream_strides[3] = {sizeof(Float3), sizeof(Float3),
+      sizeof(Float2)};
+  VkVertexInputBindingDescription bindings[3]{};
+  VkVertexInputAttributeDescription attributes[3]{};
   for (std::uint32_t stream = 0; stream < description.vertex_streams;
        ++stream) {
     bindings[stream].binding = stream;
-    bindings[stream].stride = sizeof(Float3);
+    bindings[stream].stride = stream_strides[stream];
     bindings[stream].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     attributes[stream].location = stream;
     attributes[stream].binding = stream;
-    attributes[stream].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[stream].format = stream_formats[stream];
     attributes[stream].offset = 0;
   }
   VkPipelineVertexInputStateCreateInfo vertex_input{
@@ -150,13 +171,15 @@ bool CreateScenePipeline(VkDevice device,
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   blend.attachmentCount = 1;
   blend.pAttachments = &blend_attachment;
-  // Cull mode and front face are core dynamic state in Vulkan 1.3.
+  // Cull mode, front face and vertex strides are core dynamic state in
+  // Vulkan 1.3; a stride of 0 stands in for a mesh's missing UVs.
   const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
       VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE,
-      VK_DYNAMIC_STATE_FRONT_FACE};
+      VK_DYNAMIC_STATE_FRONT_FACE,
+      VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE};
   VkPipelineDynamicStateCreateInfo dynamic{
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic.dynamicStateCount = description.dynamic_culling ? 4U : 2U;
+  dynamic.dynamicStateCount = description.dynamic_draw_state ? 5U : 2U;
   dynamic.pDynamicStates = dynamic_states;
   VkPipelineRenderingCreateInfo rendering{
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -219,7 +242,36 @@ bool NormalRows(const Matrix4& matrix, float rows[12]) {
   return determinant < 0.0F;
 }
 
-void WriteParameters(const ToonMaterial& material, MToonParameters& slot) {
+// KHR_texture_transform's translate * rotate * scale, as the two rows of a
+// 2x3 affine map in glTF's UV space, each padded to four floats.
+void WriteUvRows(const ToonTextureRef& texture, float rows[8]) {
+  const float c = std::cos(texture.rotation);
+  const float s = std::sin(texture.rotation);
+  const float values[8] = {texture.scale.x * c, texture.scale.y * s,
+      texture.offset.x, 0.0F, -texture.scale.x * s, texture.scale.y * c,
+      texture.offset.y, 0.0F};
+  std::copy(values, values + 8, rows);
+}
+
+std::uint32_t SamplerIndex(const ToonTextureRef& texture) {
+  return static_cast<std::uint32_t>(texture.wrap_s) * 3U +
+         static_cast<std::uint32_t>(texture.wrap_t);
+}
+
+VkSamplerAddressMode AddressMode(std::uint32_t wrap) {
+  switch (static_cast<ToonWrap>(wrap)) {
+  case ToonWrap::ClampToEdge:
+    return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  case ToonWrap::MirroredRepeat:
+    return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+  case ToonWrap::Repeat:
+    break;
+  }
+  return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+}
+
+void WriteParameters(const ToonMaterial& material, std::uint32_t base_entry,
+    std::uint32_t shade_entry, MToonParameters& slot) {
   slot = {};
   slot.base_color[0] = material.base_color.x;
   slot.base_color[1] = material.base_color.y;
@@ -237,6 +289,50 @@ void WriteParameters(const ToonMaterial& material, MToonParameters& slot) {
   slot.shading[0] = material.mtoon.shading_shift;
   slot.shading[1] = material.mtoon.shading_toony;
   slot.shading[2] = material.mtoon.gi_equalization;
+  slot.textures[0] = base_entry;
+  slot.textures[1] = SamplerIndex(material.base_texture);
+  slot.textures[2] = shade_entry;
+  slot.textures[3] = SamplerIndex(material.mtoon.shade_texture);
+  WriteUvRows(material.base_texture, slot.base_uv);
+  WriteUvRows(material.mtoon.shade_texture, slot.shade_uv);
+}
+
+// Every level down to 1x1.
+std::uint32_t MipLevels(std::uint32_t width, std::uint32_t height) {
+  std::uint32_t levels = 1;
+  for (std::uint32_t size = std::max(width, height); size > 1U; size /= 2U) {
+    ++levels;
+  }
+  return levels;
+}
+
+bool CanMakeMipmaps(VkPhysicalDevice device, VkFormat format) {
+  VkFormatProperties properties{};
+  vkGetPhysicalDeviceFormatProperties(device, format, &properties);
+  const VkFormatFeatureFlags required =
+      VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+      VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+  return (properties.optimalTilingFeatures & required) == required;
+}
+
+VkImageMemoryBarrier2 MipBarrier(VkImage image, std::uint32_t base_level,
+    std::uint32_t level_count, VkPipelineStageFlags2 source_stage,
+    VkAccessFlags2 source_access, VkPipelineStageFlags2 destination_stage,
+    VkAccessFlags2 destination_access, VkImageLayout old_layout,
+    VkImageLayout new_layout) {
+  VkImageMemoryBarrier2 barrier = ImageBarrier(image,
+      VK_IMAGE_ASPECT_COLOR_BIT, source_stage, source_access,
+      destination_stage, destination_access, old_layout, new_layout);
+  barrier.subresourceRange.baseMipLevel = base_level;
+  barrier.subresourceRange.levelCount = level_count;
+  return barrier;
+}
+
+void Barrier(VkCommandBuffer command, const VkImageMemoryBarrier2& barrier) {
+  VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  dependency.imageMemoryBarrierCount = 1;
+  dependency.pImageMemoryBarriers = &barrier;
+  vkCmdPipelineBarrier2(command, &dependency);
 }
 
 } // namespace
@@ -252,15 +348,42 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
     VkFormat color_format, VkFormat depth_format, ScenePipelines& pipelines,
     std::string& detail) {
-  VkDescriptorSetLayoutBinding material_binding{};
-  material_binding.binding = 0;
-  material_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  material_binding.descriptorCount = 1;
-  material_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  // Trilinear, since glTF's filters are not on the stage; one sampler per
+  // wrap pair, so a material's wrap is an index, not a descriptor.
+  for (std::uint32_t index = 0; index < kSamplerCount; ++index) {
+    VkSamplerCreateInfo sampler_create{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_create.magFilter = VK_FILTER_LINEAR;
+    sampler_create.minFilter = VK_FILTER_LINEAR;
+    sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_create.addressModeU = AddressMode(index / 3U);
+    sampler_create.addressModeV = AddressMode(index % 3U);
+    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create.maxLod = VK_LOD_CLAMP_NONE;
+    if (!VulkanOk(vkCreateSampler(device, &sampler_create, nullptr,
+                      &pipelines.samplers[index]),
+            "vkCreateSampler", detail)) {
+      return false;
+    }
+  }
+
+  VkDescriptorSetLayoutBinding material_bindings[3]{};
+  material_bindings[0].binding = 0;
+  material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  material_bindings[0].descriptorCount = 1;
+  material_bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  material_bindings[1].binding = 1;
+  material_bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  material_bindings[1].descriptorCount = kTextureCapacity;
+  material_bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  material_bindings[2].binding = 2;
+  material_bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+  material_bindings[2].descriptorCount = kSamplerCount;
+  material_bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  material_bindings[2].pImmutableSamplers = pipelines.samplers;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create.bindingCount = 1;
-  set_layout_create.pBindings = &material_binding;
+  set_layout_create.bindingCount = 3;
+  set_layout_create.pBindings = material_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.material_layout),
           "vkCreateDescriptorSetLayout", detail)) {
@@ -276,8 +399,8 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   mtoon.fragment_words = &words.mtoon_fragment;
   mtoon.push_constant_size = sizeof(MToonDrawConstants);
   mtoon.set_layout = pipelines.material_layout;
-  mtoon.vertex_streams = 2;
-  mtoon.dynamic_culling = true;
+  mtoon.vertex_streams = 3;
+  mtoon.dynamic_draw_state = true;
   return CreateScenePipeline(device, mesh, color_format, depth_format,
              pipelines.mesh, detail) &&
          CreateScenePipeline(device, mtoon, color_format, depth_format,
@@ -288,18 +411,21 @@ void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
   DestroyScenePipeline(device, pipelines.mtoon);
   DestroyScenePipeline(device, pipelines.mesh);
   vkDestroyDescriptorSetLayout(device, pipelines.material_layout, nullptr);
+  for (VkSampler sampler : pipelines.samplers) {
+    vkDestroySampler(device, sampler, nullptr);
+  }
   pipelines = {};
 }
 
 bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
     VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
     std::uint32_t width, std::uint32_t height, DeviceImage& image,
-    std::string& detail) {
+    std::string& detail, std::uint32_t mip_levels) {
   VkImageCreateInfo create{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   create.imageType = VK_IMAGE_TYPE_2D;
   create.format = format;
   create.extent = {width, height, 1};
-  create.mipLevels = 1;
+  create.mipLevels = mip_levels;
   create.arrayLayers = 1;
   create.samples = VK_SAMPLE_COUNT_1_BIT;
   create.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -333,7 +459,7 @@ bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
   view_create.viewType = VK_IMAGE_VIEW_TYPE_2D;
   view_create.format = format;
   view_create.subresourceRange.aspectMask = aspect;
-  view_create.subresourceRange.levelCount = 1;
+  view_create.subresourceRange.levelCount = mip_levels;
   view_create.subresourceRange.layerCount = 1;
   return VulkanOk(vkCreateImageView(device, &view_create, nullptr, &image.view),
       "vkCreateImageView", detail);
@@ -466,18 +592,240 @@ bool InvalidateIfNeeded(VkDevice device, const HostBuffer& buffer,
       "vkInvalidateMappedMemoryRanges", detail);
 }
 
+bool TextureCache::Initialize(VkPhysicalDevice physical_device,
+    VkDevice device, VkDescriptorSet set, std::string& detail) {
+  physical_device_ = physical_device;
+  device_ = device;
+  set_ = set;
+  srgb_mipmaps_ = CanMakeMipmaps(physical_device, VK_FORMAT_R8G8B8A8_SRGB);
+  linear_mipmaps_ = CanMakeMipmaps(physical_device, VK_FORMAT_R8G8B8A8_UNORM);
+  // White is white in either encoding. Every entry points at it until a
+  // texture takes the entry, so the whole table is always valid.
+  if (!CreateDeviceImage(physical_device_, device_, VK_FORMAT_R8G8B8A8_UNORM,
+          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+          VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, placeholder_, detail) ||
+      !Stage({255, 255, 255, 255}, placeholder_.image, 1, 1, 1, detail)) {
+    return false;
+  }
+  for (std::uint32_t entry = 0; entry < kTextureCapacity; ++entry) {
+    Point(entry, placeholder_.view);
+  }
+  return true;
+}
+
+bool TextureCache::Update(const DrawList& draws, std::string& detail) {
+  // The frame that copied from these has completed.
+  for (HostBuffer& staging : recorded_) {
+    DestroyHostBuffer(device_, staging);
+  }
+  recorded_.clear();
+  ++generation_;
+  for (const TextureSnapshot& snapshot : draws.textures) {
+    Resident& resident = textures_[snapshot.id];
+    resident.generation = generation_;
+    const ToonTexture& texture = snapshot.texture;
+    if (texture.pixels == nullptr || texture.pixels->empty()) {
+      Release(resident);
+      resident.revision = snapshot.revision;
+      continue;
+    }
+    if (resident.entry != 0 && resident.revision == snapshot.revision) {
+      continue;
+    }
+    // A texture that finds the table full keeps sampling the placeholder
+    // and tries again on a later frame.
+    if (resident.entry == 0) {
+      if (!free_entries_.empty()) {
+        resident.entry = free_entries_.back();
+        free_entries_.pop_back();
+      } else if (next_entry_ < kTextureCapacity) {
+        resident.entry = next_entry_++;
+      } else {
+        continue;
+      }
+    }
+    const bool srgb = texture.encoding == ToonTextureEncoding::Srgb;
+    const VkFormat format =
+        srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    const std::uint32_t mip_levels =
+        (srgb ? srgb_mipmaps_ : linear_mipmaps_)
+            ? MipLevels(texture.width, texture.height)
+            : 1U;
+    if (resident.image.image == VK_NULL_HANDLE ||
+        resident.width != texture.width || resident.height != texture.height ||
+        resident.format != format || resident.mip_levels != mip_levels) {
+      DestroyDeviceImage(device_, resident.image);
+      if (!CreateDeviceImage(physical_device_, device_, format,
+              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+              VK_IMAGE_ASPECT_COLOR_BIT, texture.width, texture.height,
+              resident.image, detail, mip_levels)) {
+        return false;
+      }
+      resident.width = texture.width;
+      resident.height = texture.height;
+      resident.format = format;
+      resident.mip_levels = mip_levels;
+    }
+    if (!Stage(*texture.pixels, resident.image.image, texture.width,
+            texture.height, mip_levels, detail)) {
+      return false;
+    }
+    Point(resident.entry, resident.image.view);
+    resident.revision = snapshot.revision;
+    ++uploads_;
+  }
+  for (auto texture = textures_.begin(); texture != textures_.end();) {
+    if (texture->second.generation != generation_) {
+      Release(texture->second);
+      texture = textures_.erase(texture);
+    } else {
+      ++texture;
+    }
+  }
+  return true;
+}
+
+void TextureCache::RecordUploads(VkCommandBuffer command) {
+  for (const Upload& upload : pending_) {
+    Barrier(command, MipBarrier(upload.image, 0, upload.mip_levels,
+        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+        VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {upload.width, upload.height, 1};
+    vkCmdCopyBufferToImage(command, upload.staging.buffer, upload.image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    // Each level is blitted from the one above it, which then waits,
+    // readable, for the final transition.
+    std::int32_t width = static_cast<std::int32_t>(upload.width);
+    std::int32_t height = static_cast<std::int32_t>(upload.height);
+    for (std::uint32_t level = 1; level < upload.mip_levels; ++level) {
+      Barrier(command, MipBarrier(upload.image, level - 1U, 1,
+          VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+          VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT,
+          VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL));
+      const std::int32_t next_width = std::max(width / 2, 1);
+      const std::int32_t next_height = std::max(height / 2, 1);
+      VkImageBlit blit{};
+      blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.srcSubresource.mipLevel = level - 1U;
+      blit.srcSubresource.layerCount = 1;
+      blit.srcOffsets[1] = {width, height, 1};
+      blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.dstSubresource.mipLevel = level;
+      blit.dstSubresource.layerCount = 1;
+      blit.dstOffsets[1] = {next_width, next_height, 1};
+      vkCmdBlitImage(command, upload.image,
+          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, upload.image,
+          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+      width = next_width;
+      height = next_height;
+    }
+    const std::uint32_t last = upload.mip_levels - 1U;
+    if (last > 0U) {
+      Barrier(command, MipBarrier(upload.image, 0, last,
+          VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_NONE,
+          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    }
+    Barrier(command, MipBarrier(upload.image, last, 1,
+        VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+        VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    recorded_.push_back(upload.staging);
+  }
+  pending_.clear();
+}
+
+std::uint32_t TextureCache::Entry(TextureId texture) const {
+  const auto found = textures_.find(texture);
+  return found == textures_.end() ? 0U : found->second.entry;
+}
+
+void TextureCache::Destroy() {
+  for (auto& texture : textures_) {
+    DestroyDeviceImage(device_, texture.second.image);
+  }
+  textures_.clear();
+  for (Upload& upload : pending_) {
+    DestroyHostBuffer(device_, upload.staging);
+  }
+  pending_.clear();
+  for (HostBuffer& staging : recorded_) {
+    DestroyHostBuffer(device_, staging);
+  }
+  recorded_.clear();
+  free_entries_.clear();
+  next_entry_ = 1;
+  DestroyDeviceImage(device_, placeholder_);
+}
+
+bool TextureCache::Stage(const std::vector<std::uint8_t>& pixels,
+    VkImage image, std::uint32_t width, std::uint32_t height,
+    std::uint32_t mip_levels, std::string& detail) {
+  HostBuffer staging;
+  if (!CreateHostBuffer(physical_device_, device_, pixels.size(),
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, staging, detail)) {
+    DestroyHostBuffer(device_, staging);
+    return false;
+  }
+  std::memcpy(staging.mapped, pixels.data(), pixels.size());
+  pending_.push_back({image, width, height, mip_levels, staging});
+  return FlushIfNeeded(device_, staging, detail);
+}
+
+void TextureCache::Point(std::uint32_t entry, VkImageView view) {
+  VkDescriptorImageInfo image_info{};
+  image_info.imageView = view;
+  image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  write.dstSet = set_;
+  write.dstBinding = 1;
+  write.dstArrayElement = entry;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  write.pImageInfo = &image_info;
+  vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+}
+
+// The entry samples the placeholder again, and is free for another texture.
+void TextureCache::Release(Resident& resident) {
+  if (resident.entry != 0) {
+    Point(resident.entry, placeholder_.view);
+    free_entries_.push_back(resident.entry);
+    resident.entry = 0;
+  }
+  DestroyDeviceImage(device_, resident.image);
+  resident.width = 0;
+  resident.height = 0;
+  resident.format = VK_FORMAT_UNDEFINED;
+}
+
 bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
     VkDevice device, VkDescriptorSetLayout layout, std::string& detail) {
   physical_device_ = physical_device;
   device_ = device;
-  VkDescriptorPoolSize pool_size{};
-  pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_size.descriptorCount = 1;
+  VkDescriptorPoolSize pool_sizes[3]{};
+  pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  pool_sizes[0].descriptorCount = 1;
+  pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  pool_sizes[1].descriptorCount = kTextureCapacity;
+  pool_sizes[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+  pool_sizes[2].descriptorCount = kSamplerCount;
   VkDescriptorPoolCreateInfo pool_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pool_create.maxSets = 1;
-  pool_create.poolSizeCount = 1;
-  pool_create.pPoolSizes = &pool_size;
+  pool_create.poolSizeCount = 3;
+  pool_create.pPoolSizes = pool_sizes;
   if (!VulkanOk(vkCreateDescriptorPool(device_, &pool_create, nullptr, &pool_),
           "vkCreateDescriptorPool", detail)) {
     return false;
@@ -495,7 +843,8 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
   return Reserve(64, detail);
 }
 
-bool MaterialCache::Update(const DrawList& draws, std::string& detail) {
+bool MaterialCache::Update(const DrawList& draws,
+    const TextureCache& textures, std::string& detail) {
   ++generation_;
   bool written = false;
   for (const MaterialSnapshot& material : draws.materials) {
@@ -514,10 +863,18 @@ bool MaterialCache::Update(const DrawList& draws, std::string& detail) {
       found = entries_.emplace(material.id, Entry{slot}).first;
     }
     Entry& entry = found->second;
-    if (entry.parameters_revision != material.parameters_revision) {
+    const std::uint32_t base_entry =
+        textures.Entry(material.material.base_texture.texture);
+    const std::uint32_t shade_entry =
+        textures.Entry(material.material.mtoon.shade_texture.texture);
+    if (entry.parameters_revision != material.parameters_revision ||
+        entry.base_entry != base_entry || entry.shade_entry != shade_entry) {
       auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
-      WriteParameters(material.material, slots[entry.slot]);
+      WriteParameters(material.material, base_entry, shade_entry,
+          slots[entry.slot]);
       entry.parameters_revision = material.parameters_revision;
+      entry.base_entry = base_entry;
+      entry.shade_entry = shade_entry;
       entry.model = material.material.model;
       entry.double_sided = material.material.double_sided;
       ++writes_;
@@ -582,9 +939,13 @@ bool MaterialCache::Reserve(std::uint32_t slots, std::string& detail) {
   return FlushIfNeeded(device_, buffer_, detail);
 }
 
-void MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device) {
+bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
+    std::string& detail) {
   physical_device_ = physical_device;
   device_ = device;
+  const Float2 zero;
+  return Upload(zero_uv_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &zero,
+      sizeof(zero), detail);
 }
 
 bool MeshCache::Update(const DrawList& draws, std::string& detail) {
@@ -619,12 +980,26 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
       }
       entry.normals_revision = mesh.normals_revision;
     }
+    // UVs are counted with the points they follow, like the normals.
+    const bool uvs_present = mesh.uvs != nullptr && !mesh.uvs->empty();
+    if (entry.uvs_revision != mesh.uvs_revision) {
+      if (uvs_present &&
+          !Upload(entry.uvs, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+              mesh.uvs->data(), mesh.uvs->size() * sizeof(Float2), detail)) {
+        return false;
+      }
+      entry.uvs_revision = mesh.uvs_revision;
+    }
+    // Against this frame's topology, which can reach past UVs that were
+    // long enough before, or come back within them.
+    entry.has_uvs = uvs_present && mesh.uvs->size() >= mesh.index_bound;
     entry.generation = generation_;
   }
   for (auto entry = entries_.begin(); entry != entries_.end();) {
     if (entry->second.generation != generation_) {
       DestroyHostBuffer(device_, entry->second.vertices);
       DestroyHostBuffer(device_, entry->second.normals);
+      DestroyHostBuffer(device_, entry->second.uvs);
       DestroyHostBuffer(device_, entry->second.indices);
       entry = entries_.erase(entry);
     } else {
@@ -683,9 +1058,13 @@ void MeshCache::Record(VkCommandBuffer command,
       continue;
     }
     const Entry& entry = found->second;
-    const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer};
-    const VkDeviceSize offsets[] = {0, 0};
-    vkCmdBindVertexBuffers(command, 0, 2, streams, offsets);
+    const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
+        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
+    const VkDeviceSize offsets[] = {0, 0, 0};
+    const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
+        entry.has_uvs ? sizeof(Float2) : 0U};
+    vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
+        strides);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
     MToonDrawConstants constants{};
     const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
@@ -694,6 +1073,7 @@ void MeshCache::Record(VkCommandBuffer command,
     const bool mirrored = NormalRows(Multiply(draws.view.view, mesh.transform),
         constants.view_normal_rows);
     constants.material_slot = material->slot;
+    constants.flags = entry.has_uvs ? kDrawHasUVs : 0U;
     vkCmdSetCullMode(command, material->double_sided ? VK_CULL_MODE_NONE
                                                      : VK_CULL_MODE_BACK_BIT);
     vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
@@ -709,9 +1089,11 @@ void MeshCache::Destroy() {
   for (auto& entry : entries_) {
     DestroyHostBuffer(device_, entry.second.vertices);
     DestroyHostBuffer(device_, entry.second.normals);
+    DestroyHostBuffer(device_, entry.second.uvs);
     DestroyHostBuffer(device_, entry.second.indices);
   }
   entries_.clear();
+  DestroyHostBuffer(device_, zero_uv_);
 }
 
 bool MeshCache::Upload(HostBuffer& buffer, VkBufferUsageFlags usage,

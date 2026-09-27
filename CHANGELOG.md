@@ -68,6 +68,17 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - The headless assertion `renderer.material.mtoon_opaque`, and
   `material_writes`, `draws` and `draws_mtoon` in the host frame evidence;
   renderer report 07.
+- Basic textures: `mtoon_opaque` samples MToon's base colour texture and
+  shade multiply texture through the mesh's UVs, each with glTF's wrap modes
+  and `KHR_texture_transform`. `RenderWorld` holds decoded textures and mesh
+  UVs, each with its own revision, and `ToonMaterial` references textures by
+  id. The backend keeps a 128-entry texture table and uploads a texture,
+  with mipmaps, only when it changes. `hdToon` reads
+  `vrm/textureInfo/baseColor` and `shadeMultiply`, decodes each image once
+  with `HioImage` and reads a mesh's `st`.
+- The headless assertion `renderer.material.mtoon_textured`, and
+  `texture_uploads` and `textures` in the host frame evidence; renderer
+  report 08.
 
 ### Changed
 
@@ -83,6 +94,8 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   and tracks its frame on a timeline semaphore instead of a fence.
 - The device must be Vulkan 1.3 with `dynamicRendering`, `synchronization2`
   and `timelineSemaphore`; `shaderDrawParameters` is no longer required.
+  With textures it must also offer `shaderSampledImageArrayDynamicIndexing`
+  and 128 sampled images per stage.
 - `strata.lock` is no longer tracked. `ost` rewrites it on every build with
   the runtime that built last, so it recorded the workstation, not the
   project.

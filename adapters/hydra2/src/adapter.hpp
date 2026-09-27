@@ -11,10 +11,12 @@
 
 #include <toon/render_world.hpp>
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -64,11 +66,39 @@ private:
 
 class HdToonAdapterState;
 
+// The image a material samples in one role: the path the session's resolver
+// gave its asset, empty when the role has none or it did not resolve, and
+// whether the role reads it as colour or data. Two roles or materials that
+// name the same key share one texture.
+struct HdToonTextureKey {
+  std::string path;
+  Toon::ToonTextureEncoding encoding = Toon::ToonTextureEncoding::Srgb;
+
+  friend auto operator<=>(const HdToonTextureKey&,
+      const HdToonTextureKey&) = default;
+};
+
+// A material as its prim states it: the normalized values, whose texture
+// references hold no texture id yet, and the image each reference names.
+struct HdToonMaterialSource {
+  Toon::ToonMaterial values;
+  HdToonTextureKey base_texture;
+  HdToonTextureKey shade_texture;
+};
+
 // Selects a material's model and normalizes its values from its Hydra prim's
 // own data sources (material policy §2–§4): a `vrm/mtoon` container is
-// MToon, read in the locator hierarchy `vrmImaging` froze; anything else is
-// PreviewSurface. A null container is the fallback material.
-Toon::ToonMaterial HdToonReadMaterial(const HdContainerDataSourceHandle& prim);
+// MToon, read in the locator hierarchy `vrmImaging` froze, with its base
+// and shade colour textures; anything else is PreviewSurface. A null
+// container is the fallback material.
+HdToonMaterialSource HdToonReadMaterial(
+    const HdContainerDataSourceHandle& prim);
+
+// Decodes an image to RGBA8 with its first row at the top. False, leaving
+// `texture` as it was, when it cannot be read or its format is not 8- or
+// 16-bit.
+bool HdToonLoadTexture(const std::string& path,
+    Toon::ToonTextureEncoding encoding, Toon::ToonTexture& texture);
 
 // Whether a material prim's dirtied locators are a value-only change: `vrm`
 // values without `material`, which emulation turns into no dirty bit
@@ -98,6 +128,9 @@ private:
   std::shared_ptr<HdToonAdapterState> state_;
   Toon::MaterialId material_;
   Toon::ToonMaterial values_;
+  // Held while this material samples them.
+  Toon::TextureId base_texture_ = 0;
+  Toon::TextureId shade_texture_ = 0;
 };
 
 class HdToonRenderDelegate final : public HdRenderDelegate {

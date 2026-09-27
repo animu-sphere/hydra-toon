@@ -36,8 +36,10 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -127,6 +129,8 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " topology_uploads=" << statistics.topology_uploads
          << " point_uploads=" << statistics.point_uploads
          << " material_writes=" << statistics.material_writes
+         << " texture_uploads=" << statistics.texture_uploads
+         << " textures=" << snapshot.textures.size()
          << " materials_preview=" << preview_materials
          << " materials_mtoon=" << mtoon_materials
          << " draws=" << draws.draws.size()
@@ -168,6 +172,11 @@ public:
   void SetMeshPoints(Toon::MeshId mesh, std::vector<Toon::Float3> points) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshPoints(mesh, std::move(points));
+  }
+
+  void SetMeshUVs(Toon::MeshId mesh, std::vector<Toon::Float2> uvs) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshUVs(mesh, std::move(uvs));
   }
 
   void SetMeshTransform(Toon::MeshId mesh, const Toon::Matrix4& transform) {
@@ -221,6 +230,58 @@ public:
       const Toon::ToonMaterial& values) {
     std::scoped_lock lock(mutex_);
     world_.SetMaterial(material, values);
+  }
+
+  // One texture per image and encoding, however many materials sample it,
+  // decoded when the first of them acquires it and removed when the last
+  // releases it. Returns 0 for an empty key or an image that cannot be
+  // read. The image is decoded without the lock held.
+  Toon::TextureId AcquireTexture(const HdToonTextureKey& key) {
+    if (key.path.empty()) {
+      return 0;
+    }
+    {
+      std::scoped_lock lock(mutex_);
+      if (const Toon::TextureId texture = AcquireLocked(key)) {
+        return texture;
+      }
+      if (unreadable_.count(key) != 0) {
+        return 0;
+      }
+    }
+    Toon::ToonTexture decoded;
+    const bool read = HdToonLoadTexture(key.path, key.encoding, decoded);
+    std::scoped_lock lock(mutex_);
+    if (const Toon::TextureId texture = AcquireLocked(key)) {
+      return texture;
+    }
+    if (!read) {
+      if (unreadable_.insert(key).second) {
+        TF_WARN("Toon could not read texture %s; the material samples "
+                "without it", key.path.c_str());
+      }
+      return 0;
+    }
+    const Toon::TextureId texture = world_.CreateTexture();
+    world_.SetTexture(texture, std::move(decoded));
+    textures_[key] = {texture, 1};
+    return texture;
+  }
+
+  void ReleaseTexture(Toon::TextureId texture) {
+    if (texture == 0) {
+      return;
+    }
+    std::scoped_lock lock(mutex_);
+    for (auto entry = textures_.begin(); entry != textures_.end(); ++entry) {
+      if (entry->second.texture == texture) {
+        if (--entry->second.users == 0) {
+          world_.RemoveTexture(texture);
+          textures_.erase(entry);
+        }
+        return;
+      }
+    }
   }
 
   void Render(const HdRenderPassStateSharedPtr& pass_state) {
@@ -282,6 +343,20 @@ public:
   }
 
 private:
+  struct SharedTexture {
+    Toon::TextureId texture = 0;
+    std::size_t users = 0;
+  };
+
+  Toon::TextureId AcquireLocked(const HdToonTextureKey& key) {
+    const auto found = textures_.find(key);
+    if (found == textures_.end()) {
+      return 0;
+    }
+    ++found->second.users;
+    return found->second.texture;
+  }
+
   // Linear in the meshes; it runs when a material prim is added or removed,
   // not per frame.
   void RebindLocked(const SdfPath& path, Toon::MaterialId material) {
@@ -330,6 +405,9 @@ private:
   std::unordered_map<SdfPath, Toon::MaterialId, SdfPath::Hash>
       materials_by_path_;
   std::unordered_map<Toon::MeshId, SdfPath> bindings_;
+  std::map<HdToonTextureKey, SharedTexture> textures_;
+  // Warned about once, and not decoded again.
+  std::set<HdToonTextureKey> unreadable_;
   // Reused every frame, so a steady frame allocates nothing.
   Toon::FrameSnapshot snapshot_;
   Toon::DrawList draws_;
@@ -373,6 +451,9 @@ public:
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, HdTokens->points)) {
       state_->SetMeshPoints(mesh_, ReadPoints(PointsValue(delegate)));
+    }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, StToken())) {
+      state_->SetMeshUVs(mesh_, ReadUVs(delegate));
     }
     if (HdChangeTracker::IsTransformDirty(*dirty_bits, id)) {
       state_->SetMeshTransform(mesh_, ToToon(delegate->GetTransform(id)));
@@ -449,6 +530,37 @@ private:
       }
     }
     return GetPoints(delegate);
+  }
+
+  static const TfToken& StToken() {
+    static const TfToken st("st");
+    return st;
+  }
+
+  // `st`, the set a VRM importer writes TEXCOORD_0 to, when it has one
+  // value per point. A face-varying `st` needs split vertices, which the
+  // core does not make yet, so it is not read.
+  std::vector<Toon::Float2> ReadUVs(HdSceneDelegate* delegate) const {
+    std::vector<Toon::Float2> uvs;
+    for (const HdInterpolation interpolation :
+        {HdInterpolationVertex, HdInterpolationVarying}) {
+      for (const HdPrimvarDescriptor& descriptor :
+          GetPrimvarDescriptors(delegate, interpolation)) {
+        if (descriptor.name != StToken()) {
+          continue;
+        }
+        const VtValue value = GetPrimvar(delegate, StToken());
+        if (value.IsHolding<VtVec2fArray>()) {
+          const VtVec2fArray& source = value.UncheckedGet<VtVec2fArray>();
+          uvs.reserve(source.size());
+          for (const GfVec2f& uv : source) {
+            uvs.push_back({uv[0], uv[1]});
+          }
+        }
+        return uvs;
+      }
+    }
+    return uvs;
   }
 
   static std::vector<Toon::Float3> ReadPoints(const VtValue& value) {
@@ -687,6 +799,8 @@ HdToonMaterial::HdToonMaterial(const SdfPath& id,
 
 HdToonMaterial::~HdToonMaterial() {
   state_->RemoveMaterial(material_, GetId());
+  state_->ReleaseTexture(base_texture_);
+  state_->ReleaseTexture(shade_texture_);
 }
 
 // The canonical values are not in the material network: a format
@@ -724,8 +838,21 @@ void HdToonMaterial::SyncValues(const HdSceneIndexBase& terminal) {
   Read(terminal.GetPrim(GetId()).dataSource);
 }
 
+// The textures are acquired before the old ones are released, so a texture
+// the material keeps sampling is never decoded again.
 void HdToonMaterial::Read(const HdContainerDataSourceHandle& prim) {
-  values_ = HdToonReadMaterial(prim);
+  HdToonMaterialSource source = HdToonReadMaterial(prim);
+  const Toon::TextureId base_texture =
+      state_->AcquireTexture(source.base_texture);
+  const Toon::TextureId shade_texture =
+      state_->AcquireTexture(source.shade_texture);
+  state_->ReleaseTexture(base_texture_);
+  state_->ReleaseTexture(shade_texture_);
+  base_texture_ = base_texture;
+  shade_texture_ = shade_texture;
+  source.values.base_texture.texture = base_texture;
+  source.values.mtoon.shade_texture.texture = shade_texture;
+  values_ = source.values;
   state_->SetMaterial(material_, values_);
 }
 
