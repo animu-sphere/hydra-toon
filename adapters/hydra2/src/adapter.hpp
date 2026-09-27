@@ -168,6 +168,9 @@ public:
   void DestroyBprim(HdBprim* bprim) override;
   void CommitResources(HdChangeTracker* tracker) override;
   HdAovDescriptor GetDefaultAovDescriptor(const TfToken& name) const override;
+  // `toon:msaaSamples`: MSAA samples per pixel, 4 by default; 1 turns
+  // anti-aliasing off.
+  HdRenderSettingDescriptorList GetRenderSettingDescriptors() const override;
   void SetTerminalSceneIndex(
       const HdSceneIndexBaseRefPtr& terminal_scene_index) override;
   void Update() override;

@@ -14,8 +14,10 @@ VertexStageOutput vertex_main(VertexInput input) {
 }
 
 // A back face is drawn only when the material is double-sided. Opaque and
-// Mask draw no alpha: Mask cuts a fragment away below its cutoff and draws
-// the rest whole.
+// Mask blend nothing: the alpha returned is the fragment's coverage, 1 for
+// Opaque, which a multisampled pipeline turns into samples. Mask cuts a
+// fragment away below its cutoff and draws the rest whole, or, under alpha
+// to coverage, keeps the share of samples MaskCoverage gives.
 [shader("fragment")]
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     float3 view_position : TEXCOORD1, bool front : SV_IsFrontFace)
@@ -23,8 +25,9 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
   const MToonParameters material = materials[draw.material_slot];
   const MToonSurface surface =
       ShadeSurface(material, view_normal, view_position, st, front);
-  if (CutAway(material, surface.alpha)) {
+  const float coverage = MaskCoverage(material, surface.alpha);
+  if (coverage <= 0.0) {
     discard;
   }
-  return float4(surface.color, 1.0);
+  return float4(surface.color, coverage);
 }

@@ -57,6 +57,36 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
   return true;
 }
 
+VkSampleCountFlagBits ChooseSampleCount(VkPhysicalDevice device,
+    VkFormat color_format, VkFormat depth_format, std::uint32_t requested) {
+  VkPhysicalDeviceProperties properties{};
+  vkGetPhysicalDeviceProperties(device, &properties);
+  VkSampleCountFlags offered = properties.limits.framebufferColorSampleCounts &
+                               properties.limits.framebufferDepthSampleCounts;
+  // The multisampled targets are transient attachments, as the scene
+  // targets create them.
+  const std::pair<VkFormat, VkImageUsageFlags> targets[] = {
+      {color_format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                         VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT},
+      {depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                         VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT}};
+  for (const auto& [format, usage] : targets) {
+    VkImageFormatProperties image{};
+    if (vkGetPhysicalDeviceImageFormatProperties(device, format,
+            VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &image) !=
+        VK_SUCCESS) {
+      return VK_SAMPLE_COUNT_1_BIT;
+    }
+    offered &= image.sampleCounts;
+  }
+  for (std::uint32_t count = VK_SAMPLE_COUNT_64_BIT; count > 1U; count /= 2U) {
+    if (count <= requested && (offered & count) != 0) {
+      return static_cast<VkSampleCountFlagBits>(count);
+    }
+  }
+  return VK_SAMPLE_COUNT_1_BIT;
+}
+
 Matrix4 VulkanClipFromWorld(const ToonView& view) {
   Matrix4 vulkan_clip;
   vulkan_clip.m[5] = -1.0F;
@@ -80,6 +110,9 @@ struct PipelineDescription {
   // Source over: the fragment's alpha blends it over the target, so one
   // that returns 1 draws as an opaque one would.
   bool blend = false;
+  // Multisampled, the fragment's alpha is the share of its samples it
+  // covers, so one that returns 1 covers them all.
+  bool alpha_to_coverage = false;
 };
 
 // Every scene pipeline shares the set layouts, material then skin, so a
@@ -162,7 +195,11 @@ bool CreateScenePipeline(VkDevice device,
   raster.lineWidth = 1.0F;
   VkPipelineMultisampleStateCreateInfo multisample{
       VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  multisample.rasterizationSamples = pipelines.samples;
+  multisample.alphaToCoverageEnable =
+      description.alpha_to_coverage && pipelines.samples != VK_SAMPLE_COUNT_1_BIT
+          ? VK_TRUE
+          : VK_FALSE;
   VkPipelineDepthStencilStateCreateInfo depth_state{
       VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
   depth_state.depthTestEnable = VK_TRUE;
@@ -400,8 +437,10 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
 }
 
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
-    VkFormat color_format, VkFormat depth_format, ScenePipelines& pipelines,
+    VkFormat color_format, VkFormat depth_format,
+    VkSampleCountFlagBits samples, ScenePipelines& pipelines,
     std::string& detail) {
+  pipelines.samples = samples;
   // Trilinear, since glTF's filters are not on the stage; one sampler per
   // wrap pair, so a material's wrap is an index, not a descriptor.
   for (std::uint32_t index = 0; index < kSamplerCount; ++index) {
@@ -473,9 +512,11 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   mtoon.push_constant_size = sizeof(MToonDrawConstants);
   mtoon.vertex_streams = 3;
   mtoon.dynamic_draw_state = true;
-  // The same streams, constants and dynamic state; only the shaders and
-  // blending differ. The hull blends, so a transparent material's outline
-  // takes its surface's alpha while an opaque one's returns 1.
+  // The same streams, constants and dynamic state; only the shaders,
+  // blending and coverage differ. The hull blends, so a transparent
+  // material's outline takes its surface's alpha while an opaque one's
+  // returns 1; blending and coverage from one alpha would apply it twice,
+  // so the hull cuts a Mask fragment away whole.
   PipelineDescription transparent = mtoon;
   transparent.vertex_words = &words.mtoon_transparent_vertex;
   transparent.fragment_words = &words.mtoon_transparent_fragment;
@@ -484,6 +525,7 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   outline.vertex_words = &words.mtoon_outline_vertex;
   outline.fragment_words = &words.mtoon_outline_fragment;
   outline.blend = true;
+  mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
          CreateScenePipeline(device, mtoon, pipelines, color_format,
@@ -510,14 +552,15 @@ void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
 bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
     VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
     std::uint32_t width, std::uint32_t height, DeviceImage& image,
-    std::string& detail, std::uint32_t mip_levels) {
+    std::string& detail, std::uint32_t mip_levels,
+    VkSampleCountFlagBits samples) {
   VkImageCreateInfo create{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   create.imageType = VK_IMAGE_TYPE_2D;
   create.format = format;
   create.extent = {width, height, 1};
   create.mipLevels = mip_levels;
   create.arrayLayers = 1;
-  create.samples = VK_SAMPLE_COUNT_1_BIT;
+  create.samples = samples;
   create.tiling = VK_IMAGE_TILING_OPTIMAL;
   create.usage = usage;
   create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -583,22 +626,39 @@ VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkImageAspectFlags aspect,
   return barrier;
 }
 
-void BeginSceneRendering(VkCommandBuffer command, VkImageView color,
-    VkImageView depth, VkExtent2D extent) {
+void BeginSceneRendering(VkCommandBuffer command,
+    const SceneAttachments& attachments, VkExtent2D extent) {
   VkRenderingAttachmentInfo color_attachment{
       VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-  color_attachment.imageView = color;
+  color_attachment.imageView = attachments.color;
   color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   color_attachment.clearValue.color = {{0.05F, 0.10F, 0.15F, 1.0F}};
+  if (attachments.color_resolve != VK_NULL_HANDLE) {
+    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color_attachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+    color_attachment.resolveImageView = attachments.color_resolve;
+    color_attachment.resolveImageLayout =
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  }
   VkRenderingAttachmentInfo depth_attachment{
       VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-  depth_attachment.imageView = depth;
+  depth_attachment.imageView = attachments.depth;
   depth_attachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
   depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   depth_attachment.clearValue.depthStencil = {1.0F, 0};
+  if (attachments.color_resolve != VK_NULL_HANDLE) {
+    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  }
+  // Sample 0 is the one resolve mode every Vulkan 1.2 device supports.
+  if (attachments.depth_resolve != VK_NULL_HANDLE) {
+    depth_attachment.resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+    depth_attachment.resolveImageView = attachments.depth_resolve;
+    depth_attachment.resolveImageLayout =
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  }
   VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
   rendering.renderArea.extent = extent;
   rendering.layerCount = 1;
@@ -1284,6 +1344,9 @@ void MeshCache::Record(VkCommandBuffer command,
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
   // A perspective projection puts -z into w; an orthographic one keeps w 1.
   const bool orthographic = draws.view.projection.m[11] == 0.0F;
+  // Only mtoon_opaque turns alpha into coverage, and only multisampled.
+  const std::uint32_t coverage =
+      pipelines.samples != VK_SAMPLE_COUNT_1_BIT ? kDrawAlphaToCoverage : 0U;
   const ScenePipeline* bound = nullptr;
   const auto bind = [&](const ScenePipeline& pipeline) {
     if (bound == &pipeline) {
@@ -1325,6 +1388,7 @@ void MeshCache::Record(VkCommandBuffer command,
     constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) |
                       (orthographic ? kDrawOrthographic : 0U) |
                       (material.transparent ? kDrawBlend : 0U) |
+                      (&pipeline == &pipelines.mtoon ? coverage : 0U) |
                       entry.skin_flags;
     constants.projection_scale = projection_scale;
     vkCmdSetCullMode(command, cull);

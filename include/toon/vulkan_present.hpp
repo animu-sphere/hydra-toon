@@ -35,6 +35,8 @@ enum class PresentSetupStatus {
 struct PresentStatistics {
   std::uint64_t frames_presented = 0;
   std::uint32_t swapchain_recreates = 0;
+  // Samples per pixel: RenderOptions' count, as far as the device offers it.
+  std::uint32_t samples = 1;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;
@@ -67,6 +69,7 @@ public:
 // Shader paths are explicit, as in RenderOffscreen.
 [[nodiscard]] std::unique_ptr<PresentSession> CreatePresentSession(
     const PresentSurfaceProvider& surface, const SceneShaders& shaders,
-    bool vsync, PresentSetupStatus& status, std::string& error);
+    bool vsync, PresentSetupStatus& status, std::string& error,
+    const RenderOptions& options = {});
 
 } // namespace Toon

@@ -47,6 +47,7 @@ BackendCapability ProbeVulkanBackend() {
 namespace {
 
 using vulkan_internal::BeginSceneRendering;
+using vulkan_internal::ChooseSampleCount;
 using vulkan_internal::CreateDeviceImage;
 using vulkan_internal::CreateHostBuffer;
 using vulkan_internal::CreateInstanceWithValidation;
@@ -63,6 +64,7 @@ using vulkan_internal::InvalidateIfNeeded;
 using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
+using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
 using vulkan_internal::SceneShaderWords;
 using vulkan_internal::ScenePipelines;
@@ -111,7 +113,8 @@ public:
     Destroy();
   }
 
-  FrameStatus Initialize(const SceneShaders& shaders, std::string& detail);
+  FrameStatus Initialize(const SceneShaders& shaders,
+      const RenderOptions& options, std::string& detail);
 
   [[nodiscard]] bool Render(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, ColorProduct& color, DepthProduct& depth,
@@ -145,15 +148,20 @@ private:
   MeshCache meshes_;
   std::uint32_t width_ = 0;
   std::uint32_t height_ = 0;
+  // The products, read back: single-sampled, the pass's own attachments;
+  // multisampled, what the pass resolves `color_samples_` and
+  // `depth_samples_` into.
   DeviceImage color_;
   DeviceImage depth_;
+  DeviceImage color_samples_;
+  DeviceImage depth_samples_;
   HostBuffer color_readback_;
   HostBuffer depth_readback_;
   OffscreenStatistics statistics_;
 };
 
 FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
-    std::string& detail) {
+    const RenderOptions& options, std::string& detail) {
   SceneShaderWords words;
   if (!LoadSceneShaders(shaders, words, detail)) {
     return FrameStatus::Fail;
@@ -244,8 +252,10 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     return FrameStatus::Fail;
   }
 
+  const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
+      kColorFormat, kDepthFormat, options.samples);
   if (!CreateScenePipelines(device_, words, kColorFormat, kDepthFormat,
-          pipelines_, detail) ||
+          samples, pipelines_, detail) ||
       !materials_.Initialize(physical_device_, device_,
           pipelines_.material_layout, detail) ||
       !textures_.Initialize(physical_device_, device_,
@@ -255,6 +265,7 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     return FrameStatus::Fail;
   }
   statistics_.pipelines_created += ScenePipelines::kCount;
+  statistics_.samples = static_cast<std::uint32_t>(samples);
 
   VkPhysicalDeviceProperties properties{};
   vkGetPhysicalDeviceProperties(physical_device_, &properties);
@@ -299,27 +310,55 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   }
   textures_.RecordUploads(command_);
 
+  // Every attachment is cleared, so none keeps its contents. Multisampled,
+  // the depth product is written by the resolve, at the colour output stage
+  // as a colour attachment write; single-sampled, by the depth tests.
+  const bool multisampled = color_samples_.image != VK_NULL_HANDLE;
+  const VkPipelineStageFlags2 depth_product_stage =
+      multisampled ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+                   : VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+  const VkAccessFlags2 depth_product_access =
+      multisampled ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+                   : VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  const auto color_to_attachment = [](VkImage image) {
+    return ImageBarrier(image, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  };
+  const auto depth_to_attachment = [](VkImage image,
+                                       VkPipelineStageFlags2 stage,
+                                       VkAccessFlags2 access) {
+    return ImageBarrier(image, VK_IMAGE_ASPECT_DEPTH_BIT,
+        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, stage, access,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+  };
   const VkImageMemoryBarrier2 to_attachment[] = {
-      ImageBarrier(color_.image, VK_IMAGE_ASPECT_COLOR_BIT,
-          VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
-      ImageBarrier(depth_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
-          VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+      color_to_attachment(color_.image),
+      depth_to_attachment(depth_.image, depth_product_stage,
+          depth_product_access),
+      color_to_attachment(color_samples_.image),
+      depth_to_attachment(depth_samples_.image,
           VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
               VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-          VK_IMAGE_LAYOUT_UNDEFINED,
-          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
   };
   VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-  dependency.imageMemoryBarrierCount = 2;
+  dependency.imageMemoryBarrierCount = multisampled ? 4U : 2U;
   dependency.pImageMemoryBarriers = to_attachment;
   vkCmdPipelineBarrier2(command_, &dependency);
 
-  BeginSceneRendering(command_, color_.view, depth_.view, {width_, height_});
+  SceneAttachments attachments{color_.view, depth_.view};
+  if (multisampled) {
+    attachments = {color_samples_.view, depth_samples_.view, color_.view,
+        depth_.view};
+  }
+  BeginSceneRendering(command_, attachments, {width_, height_});
   meshes_.Record(command_, pipelines_, materials_, draws);
   vkCmdEndRendering(command_);
 
@@ -331,12 +370,12 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
       ImageBarrier(depth_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
-          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+          depth_product_stage, depth_product_access,
           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
           VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
   };
+  dependency.imageMemoryBarrierCount = 2;
   dependency.pImageMemoryBarriers = to_transfer;
   vkCmdPipelineBarrier2(command_, &dependency);
 
@@ -455,11 +494,29 @@ bool VulkanOffscreenRenderer::EnsureTargets(std::uint32_t width,
     DestroyTargets();
     return false;
   }
+  // The samples live only within the pass that resolves them.
+  const VkSampleCountFlagBits samples = pipelines_.samples;
+  if (samples != VK_SAMPLE_COUNT_1_BIT &&
+      (!CreateDeviceImage(physical_device_, device_, kColorFormat,
+           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+               VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+           VK_IMAGE_ASPECT_COLOR_BIT, width, height, color_samples_, error, 1,
+           samples) ||
+          !CreateDeviceImage(physical_device_, device_, kDepthFormat,
+              VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                  VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+              VK_IMAGE_ASPECT_DEPTH_BIT, width, height, depth_samples_, error,
+              1, samples))) {
+    DestroyTargets();
+    return false;
+  }
   ++statistics_.target_allocations;
   return true;
 }
 
 void VulkanOffscreenRenderer::DestroyTargets() {
+  DestroyDeviceImage(device_, depth_samples_);
+  DestroyDeviceImage(device_, color_samples_);
   DestroyHostBuffer(device_, depth_readback_);
   DestroyHostBuffer(device_, color_readback_);
   DestroyDeviceImage(device_, depth_);
@@ -489,15 +546,17 @@ void VulkanOffscreenRenderer::Destroy() {
 #endif
 
 std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
-    const SceneShaders& shaders, FrameStatus& status, std::string& detail) {
+    const SceneShaders& shaders, FrameStatus& status, std::string& detail,
+    const RenderOptions& options) {
 #if !defined(TOON_HAS_VULKAN)
   (void)shaders;
+  (void)options;
   status = FrameStatus::Skip;
   detail = "Vulkan backend was not compiled for this configuration";
   return nullptr;
 #else
   auto renderer = std::make_unique<VulkanOffscreenRenderer>();
-  status = renderer->Initialize(shaders, detail);
+  status = renderer->Initialize(shaders, options, detail);
   if (status != FrameStatus::Pass) {
     return nullptr;
   }

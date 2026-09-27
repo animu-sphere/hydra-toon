@@ -17,7 +17,7 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.2.0 | MToon quality: the rest of MToon, anti-aliasing, outline stability, scene lights, Linux and more GPU vendors | [v0.2.0.md](v0.2.0.md) |
+| v0.2.0 | MToon quality: the rest of MToon, outline stability, scene lights, Linux and more GPU vendors | [v0.2.0.md](v0.2.0.md) |
 | v0.3.0 | Avatar animation fast path: GPU morphs, expressions, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
 | v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
 | v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
@@ -28,17 +28,16 @@ repositories' work is planned in their own roadmaps.
 
 Work is taken in this order, across milestones:
 
-1. The anti-aliasing approach
-2. Outline stability and cost
-3. The rest of MToon
-4. Linux and multi-vendor Vulkan
-5. Scene lights
-6. GPU morphs
-7. The expression fast path
-8. Late motion latching
-9. MMD
-10. `UsdPreviewSurface`
-11. WebGPU
+1. Outline stability and cost
+2. The rest of MToon
+3. Linux and multi-vendor Vulkan
+4. Scene lights
+5. GPU morphs
+6. The expression fast path
+7. Late motion latching
+8. MMD
+9. `UsdPreviewSurface`
+10. WebGPU
 
 The avatar path is finished before a new feature family is added.
 

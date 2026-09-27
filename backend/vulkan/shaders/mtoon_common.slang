@@ -15,7 +15,8 @@ struct DrawConstants {
   uint material_slot;
   // kDrawHasUVs when the mesh has texture coordinates, kDrawOrthographic
   // under an orthographic camera, kDrawBlend when the material is
-  // transparent, and the skinning flags (skinning.slang).
+  // transparent, kDrawAlphaToCoverage when mtoon_opaque is multisampled,
+  // and the skinning flags (skinning.slang).
   uint flags;
   // |projection[1][1]|: clip-space y per unit of view-space height at w = 1.
   // Read by mtoon_outline's screen-coordinates width alone. Scalars, not a
@@ -29,6 +30,8 @@ static const uint kDrawHasUVs = 1;
 static const uint kDrawOrthographic = 16;
 // Must match vulkan_internal::kDrawBlend.
 static const uint kDrawBlend = 32;
+// Must match vulkan_internal::kDrawAlphaToCoverage.
+static const uint kDrawAlphaToCoverage = 64;
 // Must match vulkan_internal::kTextureCapacity and kSamplerCount.
 static const uint kTextureCapacity = 128;
 static const uint kSamplerCount = 9;
@@ -253,4 +256,22 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
 // Whether a Mask material cuts this fragment away.
 bool CutAway(MToonParameters material, float alpha) {
   return material.shade_color.a >= 0.0 && alpha < material.shade_color.a;
+}
+
+// The share of a fragment's samples its material keeps: 1 unless it is
+// Mask, which keeps a fragment at or above its cutoff whole and cuts one
+// below it away. Under alpha to coverage, the cut is instead spread over
+// the pixel the alpha takes to cross the cutoff, so the pipeline keeps as
+// many samples as the fragment lies above it and a cutout's edge is
+// anti-aliased like a silhouette. The cutoff and the flag are the draw's,
+// so the derivative is taken in uniform control flow.
+float MaskCoverage(MToonParameters material, float alpha) {
+  const float cutoff = material.shade_color.a;
+  if (cutoff < 0.0) {
+    return 1.0;
+  }
+  if ((draw.flags & kDrawAlphaToCoverage) == 0) {
+    return alpha < cutoff ? 0.0 : 1.0;
+  }
+  return saturate((alpha - cutoff) / max(fwidth(alpha), 1e-4) + 0.5);
 }
