@@ -20,7 +20,7 @@ and the document is a bug. When a summary disagrees with
 | [releases/](releases/) | What shipped in a released version. | [README.md](releases/README.md) |
 | [reports/](reports/) | What was measured or observed. | [README.md](reports/README.md) |
 | [archive/](archive/) | What used to be planned or authoritative and is now superseded. | [README.md](archive/README.md) |
-| [contributing/](contributing/) | How these documents are maintained. | [documentation.md](contributing/documentation.md) |
+| [contributing/](contributing/) | How these documents are maintained, and how release notes are rendered. | [documentation.md](contributing/documentation.md) · [RELEASE_NOTES_TEMPLATE.md](contributing/RELEASE_NOTES_TEMPLATE.md) |
 
 ## Source of truth
 
@@ -32,7 +32,7 @@ and the document is a bug. When a summary disagrees with
 | Targets, names, directories, dependency directions, build intents, install tree | [architecture/PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | Implemented capabilities; measured platforms and runtimes | [reference/](reference/) |
 | Incomplete work, and which release carries it | [roadmap/](roadmap/) |
-| Released history | [releases/](releases/) and the [CHANGELOG](../CHANGELOG.md) |
+| Released history, and how a release is cut | [releases/](releases/) and the [CHANGELOG](../CHANGELOG.md) |
 | How documents here are maintained, and how they cite sibling repositories | [contributing/documentation.md](contributing/documentation.md) |
 
 Where the design documents overlap, the narrower one wins:

@@ -106,6 +106,14 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - Renderer report 12: the VRM Formations pin the `vrmImaging` 0.10.0 that
   `usd-vrm-plugins` published, and each of reports 06–11's runs gives its
   report's numbers.
+- The release workflow, `.github/workflows/release.yml`: a `vX.Y.Z` tag
+  builds, tests, validates and reproducibly packages the `hydra` intent on
+  Windows with the canonical `lookdev` runtime, pushes the package to
+  `ghcr.io/animu-sphere/hydra-toon`, and drafts a GitHub release with the
+  package, the digests a Formation pins, a source archive and checksums.
+  `scripts/release_version.py`, `make_release_notes.py` and
+  `make_package_pins.py` serve it; how a release is cut is in
+  `docs/releases/README.md`.
 
 ### Changed
 

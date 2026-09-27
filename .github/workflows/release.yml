@@ -1,0 +1,472 @@
+# Release workflow (hand-authored). Its shape follows usd-vrm-plugins'
+# release.yml: a preflight, a build that proves and packages, a publish job
+# that pushes the Formation-facing packages to GHCR, and a DRAFT GitHub
+# release.
+#
+# Pushing a tag `vX.Y.Z` -- which must equal the version openstrata.toml and
+# CMakeLists.txt both declare, with a finalized `## [X.Y.Z] - YYYY-MM-DD`
+# changelog section -- builds the `hydra` intent on the canonical CY2026
+# `lookdev` runtime, tests and validates it, packages it twice to prove the
+# archive digest is reproducible, pushes the package to
+# ghcr.io/animu-sphere/hydra-toon, and assembles a draft release: the package
+# with its manifest and SBOM, the pin table a Formation needs, a source
+# archive, SHA256SUMS, and notes rendered from CHANGELOG.md via
+# docs/contributing/RELEASE_NOTES_TEMPLATE.md. Publishing the draft is a
+# human decision.
+#
+# One cell, Windows x86_64: the only configuration that has been measured
+# (docs/reference/SUPPORTED_CONFIGURATIONS.md). The runner has no Vulkan
+# device, so the GPU assertions report an explained SKIP; what the package
+# draws on a GPU is measured on a workstation and recorded as a report.
+# The `core` build is not packaged: nothing consumes it.
+#
+# `workflow_dispatch` is a dry run: the same build, test and packaging, with
+# everything uploaded as workflow artifacts, no registry write and no release
+# object created.
+#
+# Fork-PR safety: runs only on tag push / manual dispatch, never on
+# pull_request; the token stays read-only except in the publish and release
+# jobs.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: preflight (tag = version, changelog finalized)
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_release: ${{ steps.version.outputs.is_release }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Resolve the release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="$(python3 scripts/release_version.py --tag "${GITHUB_REF_NAME}")"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            version="$(python3 scripts/release_version.py)"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Check the changelog section renders (finalized on a real release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "${{ steps.version.outputs.is_release }}" != "true" ]; then
+            extra="--allow-unreleased"
+          fi
+          python3 scripts/make_release_notes.py --version "${{ steps.version.outputs.version }}" $extra > /dev/null
+
+  build:
+    name: ${{ matrix.name }}
+    needs: preflight
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      OST_HOME: ${{ format('{0}/.ost-ci-home', github.workspace) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The canonical `lookdev` runtime's Windows leaf, the one
+          # docs/guides/BUILDING.md adopts and every Formation pins.
+          - name: release-lookdev-windows
+            runtime_artifact: sha256:b982656c07dd9147973e3c7197d9b050ee48dd1ac291988f7e6025c76c4a785b
+            runtime_remote: "oci://ghcr.io/animu-sphere/openstrata-runtime-cy2026-lookdev@sha256:b840ed4690aa39d4582bc03c0a09fa7bab717216635b55a4eb718482dbfb196b"
+            platform: cy2026
+            profile: lookdev
+            intent: hydra
+            runs_on: ["windows-2022"]
+            # The runtime ships no Python; its USD libraries import the host
+            # interpreter's, and testusdview runs on it.
+            host_python: "3.13"
+            # slangc comes with the SDK (since 1.3.296). The digest is the one
+            # LunarG publishes for this installer.
+            vulkan_sdk: "1.4.350.0"
+            vulkan_sdk_sha256: 855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The `hydra` intent stops at configure without a Vulkan 1.3 SDK and
+      # slangc (adapters/hydra2/CMakeLists.txt), so a package without the
+      # backend cannot be produced. The installer also puts the loader in
+      # System32, which hdToon.dll links.
+      - name: Install the Vulkan SDK (pinned installer, checksum-verified)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ matrix.vulkan_sdk }}'
+          $installer = "vulkansdk-windows-X64-$version.exe"
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$version/windows/$installer" -OutFile $installer
+          $actual = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          if ($actual -ne '${{ matrix.vulkan_sdk_sha256 }}') {
+            throw "$installer hashes to $actual, expected ${{ matrix.vulkan_sdk_sha256 }}"
+          }
+          $root = "C:\VulkanSDK\$version"
+          $p = Start-Process -FilePath ".\$installer" -Wait -PassThru -ArgumentList @(
+            '--root', $root, '--accept-licenses', '--default-answer', '--confirm-command', 'install')
+          if ($p.ExitCode -ne 0) { throw "the Vulkan SDK installer exited $($p.ExitCode)" }
+          if (-not (Test-Path "$root\Bin\slangc.exe")) { throw "no slangc.exe under $root\Bin" }
+          if (-not (Test-Path "$env:SystemRoot\System32\vulkan-1.dll")) { throw "no Vulkan loader in System32" }
+          "VULKAN_SDK=$root" >> $env:GITHUB_ENV
+          "$root\Bin" >> $env:GITHUB_PATH
+          & "$root\Bin\slangc.exe" -v
+      - name: Bootstrap ost 0.23.13 (pinned release asset, checksum-verified)
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="ost-cli-x86_64-pc-windows-msvc.zip"
+          base="https://github.com/animu-sphere/open-strata/releases/download/v0.23.13"
+          curl -fsSLo "$asset" "$base/$asset"
+          curl -fsSLo "$asset.sha256" "$base/$asset.sha256"
+          actual="$(sha256sum "$asset" | cut -d' ' -f1)"
+          published="$(cut -d' ' -f1 "$asset.sha256")"
+          if [ "$actual" != "$published" ]; then
+            echo "::error title=ost bootstrap::$asset hashes to $actual but the release publishes $published" ; exit 1
+          fi
+          mkdir -p .ost-ci/bootstrap-bin
+          powershell -NoProfile -Command "Expand-Archive -LiteralPath '$asset' -DestinationPath '.ost-ci/bootstrap-bin' -Force"
+          bin="$(find .ost-ci/bootstrap-bin -type f -name ost.exe | head -n 1)"
+          if [ -z "$bin" ]; then echo "::error title=ost bootstrap::no ost.exe inside $asset" ; exit 1 ; fi
+          # GITHUB_PATH must hold a native path for Windows processes.
+          cygpath -w "$(cd "$(dirname "$bin")" && pwd)" >> "$GITHUB_PATH"
+      - name: Check ost is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(ost --version)"
+          echo "$version"
+          if [ "$version" != "ost 0.23.13" ]; then
+            echo "::error title=ost bootstrap::expected 'ost 0.23.13', got '$version'" ; exit 1
+          fi
+      # Restore and save are split so the cache holds the verified runtime
+      # and nothing this job adds to the registry after it.
+      - name: Restore the artifact registry cache (speed only, never correctness)
+        id: runtime-cache-restore
+        if: ${{ vars.OST_CI_DISABLE_CACHE != 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ost-ci-home/artifacts
+          key: ost-registry-0.23.13-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ matrix.runtime_artifact }}
+      - name: Pull the pinned runtime SDK from its remote reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The cache-hit test is the gate below: a cached record that fails
+          # it is evicted and pulled again, since a pull cannot add evidence
+          # to a digest already in the registry.
+          if ost artifact show "${{ matrix.runtime_artifact }}" --json > /dev/null 2>&1 \
+             && ost artifact verify "${{ matrix.runtime_artifact }}" --minimum-trust local \
+                  --require-sbom --require-provenance --json > /dev/null; then
+            echo "pinned runtime already present and verified (cache hit) -- skipping the remote pull"
+          else
+            rm -rf "${OST_HOME}/artifacts"
+            ost artifact pull "${{ matrix.runtime_remote }}" --expect-artifact "${{ matrix.runtime_artifact }}" --require-kind runtime --json
+          fi
+      - name: Verify and materialize the pinned runtime SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ost artifact verify ${{ matrix.runtime_artifact }} --minimum-trust local --require-sbom --require-provenance
+          ost runtime pull ${{ matrix.platform }} --profile ${{ matrix.profile }} --from-artifact ${{ matrix.runtime_artifact }} --force
+      - name: Remove resumable transfer state before caching
+        if: ${{ vars.OST_CI_DISABLE_CACHE != 'true' && steps.runtime-cache-restore.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: rm -rf .ost-ci-home/artifacts/.partial-blobs
+      - name: Save the verified artifact registry cache
+        if: ${{ vars.OST_CI_DISABLE_CACHE != 'true' && steps.runtime-cache-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ost-ci-home/artifacts
+          key: ost-registry-0.23.13-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ matrix.runtime_artifact }}
+      - name: Set up host Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.host_python }}
+      # After the host Python: `runtime validate` runs a consumer executable,
+      # and the runtime's USD libraries load python313.dll.
+      - name: Validate the materialized runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ost-ci
+          ost runtime validate ${{ matrix.platform }} --profile ${{ matrix.profile }} --json | tee .ost-ci/runtime-validate.json
+      - name: Build the hydra intent
+        shell: bash
+        run: ost build --target ${{ matrix.platform }} --profile ${{ matrix.profile }} --intent ${{ matrix.intent }} --jobs auto --progress plain
+      - name: Test the hydra intent
+        shell: bash
+        run: ost test --target ${{ matrix.platform }} --profile ${{ matrix.profile }} --intent ${{ matrix.intent }} --progress plain
+      - name: Validate the renderer evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ost validate --target ${{ matrix.platform }} --profile ${{ matrix.profile }} --intent ${{ matrix.intent }} --json | tee .ost-ci/validate.json
+          # The hosted runner has no Vulkan device: the GPU checks are SKIP.
+          jq -r '.data.checks[] | "\(.status)\t\(.name)\t\(.detail // "")"' .ost-ci/validate.json
+      # `ost package --json` (0.23.13) prints CMake's install log on stdout
+      # before the JSON document, so the document is cut from its first line.
+      - name: Package twice and stage the package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ost-ci release-stage oci-stage
+          package() {
+            ost package --target ${{ matrix.platform }} --profile ${{ matrix.profile }} --intent ${{ matrix.intent }} --json > "$1.log"
+            sed -n '/^{/,$p' "$1.log" > "$1"
+            jq -e '.ok == true and .data.packaged == true and .data.validation == "passed"' "$1" > /dev/null
+          }
+          package .ost-ci/package.json
+          package .ost-ci/package-second.json
+          first="$(jq -er '.data.archive_digest' .ost-ci/package.json)"
+          second="$(jq -er '.data.archive_digest' .ost-ci/package-second.json)"
+          if [ "$first" != "$second" ]; then
+            echo "::error title=release packaging::two packagings of the same build disagree ($first, $second)" ; exit 1
+          fi
+          archive="$(cygpath -u "$(jq -er '.data.archive' .ost-ci/package.json)")"
+          target="$(jq -er '.data.target' .ost-ci/package.json)"
+          dist_dir="$(dirname "$archive")"
+          stem="$(basename "$archive" .tar.zst)"
+          name="$(jq -er '.name' "$dist_dir/manifest.json")"
+          version="$(jq -er '.version' "$dist_dir/manifest.json")"
+          if [ "$version" != "${{ needs.preflight.outputs.version }}" ]; then
+            echo "::error title=release packaging::packaged $name $version, releasing ${{ needs.preflight.outputs.version }}" ; exit 1
+          fi
+          case "$target" in
+            *-lookdev) ;;
+            *) echo "::error title=release packaging::packaged target $target, expected a lookdev target" ; exit 1 ;;
+          esac
+          # What a Formation needs from the package: the Hydra plugin, its
+          # registration and every scene shader.
+          for path in lib/usd/hdToon/hdToon.dll lib/usd/hdToon/resources/plugInfo.json \
+                      lib/usd/hdToon/shaders/mesh.vert.spv lib/usd/hdToon/shaders/mesh.frag.spv \
+                      lib/usd/hdToon/shaders/mtoon.vert.spv lib/usd/hdToon/shaders/mtoon.frag.spv \
+                      lib/usd/hdToon/shaders/mtoon_outline.vert.spv lib/usd/hdToon/shaders/mtoon_outline.frag.spv; do
+            if ! jq -e --arg p "$path" 'any(.files[]; .path == $p)' "$dist_dir/manifest.json" > /dev/null; then
+              echo "::error title=release packaging::$stem carries no $path" ; exit 1
+            fi
+          done
+          echo "$stem $first"
+          # Flat files join the GitHub release. The import directory
+          # (archive, manifest, SBOM, checksums) is what `ost artifact import`
+          # takes, and goes to the publish job alone.
+          cp "$archive" release-stage/
+          cp "$dist_dir/manifest.json" "release-stage/$stem.manifest.json"
+          cp "$dist_dir/sbom.spdx.json" "release-stage/$stem.sbom.spdx.json"
+          mkdir -p "oci-stage/$stem"
+          cp -R "$dist_dir/." "oci-stage/$stem/"
+          printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$target" "$stem" "$first" > "oci-stage/$stem/publish.tsv"
+          ls -l release-stage/
+      - name: Upload the evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: evidence-${{ matrix.name }}
+          path: |
+            .ost-ci/*.json
+            .ost-ci/*.log
+            build/*/renderer-report.json
+          if-no-files-found: warn
+      - name: Upload the staged artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ matrix.name }}
+          path: release-stage/
+          if-no-files-found: error
+      - name: Upload the package to publish
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: oci-${{ matrix.name }}
+          path: oci-stage/
+          if-no-files-found: error
+
+  # Pushes each package to one GHCR repository, tagged by the archive's name
+  # (`toon-<version>-<target>--<intent>`). The output is a pin table from what
+  # was actually pushed: the archive digest a Formation names as `artifact`,
+  # and the OCI manifest digest to pull it from, which changes on every
+  # republish. It ships as a release asset and in the notes.
+  #
+  # A first push creates the GHCR package PRIVATE. Making it public is a
+  # one-time manual step in the package settings. `ost` does not read the
+  # docker credential store; a push needs user + password.
+  #
+  # A dry run imports the packages, pushes nothing, and writes the table with
+  # no source.
+  publish:
+    name: publish the renderer packages
+    needs: [preflight, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      OST_HOME: ${{ format('{0}/.ost-ci-home', github.workspace) }}
+      OCI_REPOSITORY: "ghcr.io/animu-sphere/hydra-toon"
+      OST_REGISTRY_USER: ${{ github.actor }}
+      OST_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download the packages to publish
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: oci-*
+          path: oci-staged
+      - name: Bootstrap ost 0.23.13 (pinned release asset, checksum-verified)
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="ost-cli-x86_64-unknown-linux-musl.tar.xz"
+          base="https://github.com/animu-sphere/open-strata/releases/download/v0.23.13"
+          curl -fsSLo "$asset" "$base/$asset"
+          curl -fsSLo "$asset.sha256" "$base/$asset.sha256"
+          actual="$(sha256sum "$asset" | cut -d' ' -f1)"
+          published="$(cut -d' ' -f1 "$asset.sha256")"
+          if [ "$actual" != "$published" ]; then
+            echo "::error title=ost bootstrap::$asset hashes to $actual but the release publishes $published" ; exit 1
+          fi
+          mkdir -p .ost-ci/bootstrap-bin
+          tar -xf "$asset" -C .ost-ci/bootstrap-bin
+          bin="$(find .ost-ci/bootstrap-bin -type f -name ost | head -n 1)"
+          chmod +x "$bin"
+          echo "$(cd "$(dirname "$bin")" && pwd)" >> "$GITHUB_PATH"
+      - name: Import every package into the local registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ost-ci
+          : > .ost-ci/artifacts.tsv
+          for dir in oci-staged/*/*/; do
+            [ -f "$dir/manifest.json" ] || { echo "::error title=publish::$dir has no manifest.json" ; exit 1 ; }
+            ost artifact import "$dir" --json > /dev/null
+            cat "$dir/publish.tsv" >> .ost-ci/artifacts.tsv
+          done
+          want="$(ls -d oci-staged/*/*/ | wc -l | tr -d ' ')"
+          have="$(wc -l < .ost-ci/artifacts.tsv | tr -d ' ')"
+          if [ "$want" -eq 0 ] || [ "$have" -ne "$want" ]; then
+            echo "::error title=publish::$want package(s) uploaded, $have row(s) read" ; exit 1
+          fi
+          cat .ost-ci/artifacts.tsv
+      - name: Push each package to the OCI repository
+        if: ${{ needs.preflight.outputs.is_release == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > .ost-ci/pushed.tsv
+          while IFS=$'\t' read -r name ver target tag digest; do
+            out=".ost-ci/push-${tag}.json"
+            ost artifact push "$digest" "oci://${OCI_REPOSITORY}:${tag}" --json > "$out" < /dev/null
+            oci="$(jq -er '.data.oci_digest' "$out")"
+            art="$(jq -er '.data.artifact_digest' "$out")"
+            if [ "$art" != "$digest" ]; then
+              echo "::error title=publish::pushing $tag reported artifact digest $art, expected $digest" ; exit 1
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$ver" "$target" "$tag" "$digest" "$oci" >> .ost-ci/pushed.tsv
+            echo "pushed $tag -> $oci"
+          done < .ost-ci/artifacts.tsv
+      - name: Build the pin table
+        shell: bash
+        run: |
+          set -euo pipefail
+          published=""
+          rows=.ost-ci/artifacts.tsv
+          if [ "${{ needs.preflight.outputs.is_release }}" = "true" ]; then
+            published="--published"
+            rows=.ost-ci/pushed.tsv
+          fi
+          python3 scripts/make_package_pins.py --rows "$rows" \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --repository "${OCI_REPOSITORY}" --out pins $published
+          cat pins/toon-package-pins.md
+      - name: Upload the pin table
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-pins
+          path: pins/
+          if-no-files-found: error
+
+  release:
+    name: assemble release (draft)
+    needs: [preflight, build, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download the staged artifacts and the pin table
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: release-*
+          path: dist-release
+          merge-multiple: true
+      - name: Add the source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.preflight.outputs.version }}"
+          # The Markdown pin table goes into the notes, not the assets.
+          mv dist-release/toon-package-pins.md pins.md
+          git archive --format=tar.gz --prefix="hydra-toon-${version}/" \
+            -o "dist-release/hydra-toon-${version}-src.tar.gz" HEAD
+      - name: Write SHA256SUMS over every release file
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-release
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Render the release notes from the changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "${{ needs.preflight.outputs.is_release }}" != "true" ]; then
+            extra="--allow-unreleased"
+          fi
+          python3 scripts/make_release_notes.py \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --checksums dist-release/SHA256SUMS \
+            --out release-notes.md $extra
+          printf '\n' >> release-notes.md
+          cat pins.md >> release-notes.md
+          cat release-notes.md
+      - name: Create the draft GitHub release
+        if: ${{ needs.preflight.outputs.is_release == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v${{ needs.preflight.outputs.version }}"
+          gh release create "$tag" \
+            --draft \
+            --verify-tag \
+            --title "hydra-toon $tag" \
+            --notes-file release-notes.md \
+            dist-release/*
+      - name: Upload the dry-run bundle (workflow_dispatch only)
+        if: ${{ needs.preflight.outputs.is_release != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-dry-run
+          path: |
+            dist-release/
+            release-notes.md
