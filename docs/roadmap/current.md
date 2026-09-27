@@ -128,7 +128,9 @@ Stand-ins this phase accepts so far:
 
 - ⬜ **CI.** A generated OpenStrata CI lane: the `core` build with its GPU
   checks as capability-gated `SKIP`s on hosted runners, and the `hydra` intent
-  against a digest-pinned runtime.
+  against a digest-pinned runtime. Only a tag runs a build today, through the
+  release workflow ([how a release is cut](../releases/README.md#how-a-release-is-cut)),
+  so a pull request is not built.
 - ⬜ **Documentation check.** A `scripts/check_docs.py` that resolves relative
   links and checks category indexes, as the sibling repositories have.
 - ⬜ **Core boundary check by glob.** The check lists its headers by name
