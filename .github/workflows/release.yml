@@ -271,7 +271,9 @@ jobs:
           cp "$dist_dir/sbom.spdx.json" "release-stage/$stem.sbom.spdx.json"
           mkdir -p "oci-stage/$stem"
           cp -R "$dist_dir/." "oci-stage/$stem/"
-          printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$target" "$stem" "$first" > "oci-stage/$stem/publish.tsv"
+          # The OCI tag is `<package>-<version>-<target>`, as usd-vrm-plugins
+          # and usd-motion-plugins tag theirs (docs/roadmap/vrm-host-session.md).
+          printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$target" "$name-$version-$target" "$first" > "oci-stage/$stem/publish.tsv"
           ls -l release-stage/
       - name: Upload the evidence
         if: ${{ always() }}
@@ -296,8 +298,8 @@ jobs:
           path: oci-stage/
           if-no-files-found: error
 
-  # Pushes each package to one GHCR repository, tagged by the archive's name
-  # (`toon-<version>-<target>--<intent>`). The output is a pin table from what
+  # Pushes each package to one GHCR repository, tagged
+  # `toon-<version>-<target>`. The output is a pin table from what
   # was actually pushed: the archive digest a Formation names as `artifact`,
   # and the OCI manifest digest to pull it from, which changes on every
   # republish. It ships as a release asset and in the notes.

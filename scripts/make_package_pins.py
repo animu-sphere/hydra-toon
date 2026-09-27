@@ -11,8 +11,7 @@ both, from the rows the job actually pushed, as ``toon-package-pins.json``
 and a Markdown section for the release notes.
 
 Rows are tab-separated: ``name version target tag archive_digest
-[oci_digest]``, where ``tag`` is the OCI tag, the archive's name without
-``.tar.zst``. A dry run passes rows without an OCI digest and no
+[oci_digest]``, where ``tag`` is the OCI tag, ``<name>-<version>-<target>``. A dry run passes rows without an OCI digest and no
 ``--published``; the table then names no source and says so.
 
 Usage (what .github/workflows/release.yml runs):

@@ -159,10 +159,14 @@ if(TOON_BUILD_TESTS)
         "-DRENDERER_TESTUSDVIEW=${TOON_TESTUSDVIEW}"
         "-DRENDERER_TEST_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/tests/usdview_smoke_test.py"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_usdview_smoke.cmake")
+    # usdview needs OpenGL 4.5 whatever the renderer. A host without it, such
+    # as a hosted CI runner, cannot run the smoke at all, so HgiGL's refusal
+    # is a SKIP, as a missing display is above; any other failure fails.
     set_tests_properties(toon-renderer-usdview-host PROPERTIES
       LABELS "host-smoke;gpu"
       TIMEOUT 60
-      RUN_SERIAL TRUE)
+      RUN_SERIAL TRUE
+      SKIP_REGULAR_EXPRESSION "HgiGL minimum OpenGL[ \t\r\n]+requirements not met")
   else()
     message(STATUS
       "testusdview, matching Python, or a display is unavailable; usdview host evidence will be SKIP")

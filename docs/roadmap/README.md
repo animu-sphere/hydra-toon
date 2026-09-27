@@ -27,8 +27,8 @@ in.** Other documents name a phase and defer the version here.
 
 | Phase | Status | Target |
 | --- | --- | --- |
-| Renderer Phase 0 — Skeleton | ✅ implemented, unreleased | v0.1.0 |
-| Renderer Phase 1 — Avatar MVP | 🚧 | unscheduled |
+| Renderer Phase 0 — Skeleton | ✅ | [v0.1.0](../releases/v0.1.0.md) |
+| Renderer Phase 1 — Avatar MVP | 🚧 renderer work in v0.1.0; closes with the host session's Formation in this repository | unscheduled |
 | Renderer Phase 2 — MToon completion | ⬜ | unscheduled |
 | Renderer Phase 3 — Animation fast path | ⬜ | unscheduled |
 | Renderer Phase 4 — MMD | ⬜ | unscheduled |
