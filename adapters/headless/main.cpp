@@ -301,6 +301,103 @@ Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+Toon::Matrix4 Translation(float x) {
+  Toon::Matrix4 matrix;
+  matrix.m[12] = x;
+  return matrix;
+}
+
+// GPU skinning (design policy §11): the bootstrap triangle, every point
+// bound to joint 1 alone. Its geometry bind moves it right by 1.2 and joint
+// 1's skinning transform left by as much, so it draws where it is. A pose
+// that drops joint 1's move leaves the centre empty; a skeleton-to-mesh
+// transform left by 1.2 brings it back, drawn through mtoon_opaque this
+// time. Each pose writes one joint buffer and uploads nothing else.
+Check SkinningCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.skinning.gpu";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  world.SetBootstrapTriangle();
+  const Toon::MeshId mesh = world.Commit().meshes.front().id;
+  Toon::ToonSkin skin;
+  skin.influences_per_point = 1;
+  skin.influences = {{1, 1.0F}, {1, 1.0F}, {1, 1.0F}};
+  skin.geom_bind = Translation(1.2F);
+  world.SetMeshSkin(mesh, skin);
+  Toon::ToonSkinPose pose;
+  pose.joints = {Toon::Matrix4{}, Translation(-1.2F)};
+  world.SetMeshSkinPose(mesh, pose);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  const auto render = [&](std::array<std::uint8_t, 4>& pixel,
+                          Toon::OffscreenStatistics& statistics) {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    pixel = CenterPixel(color);
+    statistics = renderer->statistics();
+    return true;
+  };
+  std::array<std::uint8_t, 4> bound{};
+  std::array<std::uint8_t, 4> moved{};
+  std::array<std::uint8_t, 4> returned{};
+  Toon::OffscreenStatistics first;
+  Toon::OffscreenStatistics second;
+  Toon::OffscreenStatistics third;
+  if (!render(bound, first)) {
+    return {id, "fail", detail};
+  }
+  pose.joints[1] = Toon::Matrix4{};
+  world.SetMeshSkinPose(mesh, pose);
+  if (!render(moved, second)) {
+    return {id, "fail", detail};
+  }
+  pose.skeleton_to_mesh = Translation(-1.2F);
+  world.SetMeshSkinPose(mesh, pose);
+  const Toon::MaterialId material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1.0F, 0.0F, 0.0F};
+  toon.mtoon.shade_color = {0.0F, 0.0F, 1.0F};
+  world.SetMaterial(material, toon);
+  world.SetMeshMaterial(mesh, material);
+  if (!render(returned, third)) {
+    return {id, "fail", detail};
+  }
+
+  if (third.validation_message_count != 0) {
+    return {id, "fail", third.validation_detail};
+  }
+  if (bound[0] < 150U || bound[2] > 80U) {
+    return {id, "fail",
+        "a joint undoing the geometry bind must draw the triangle in place"};
+  }
+  if (moved[0] > 80U) {
+    return {id, "fail", "a pose change must move the skinned points"};
+  }
+  if (returned[0] < 200U || returned[2] > 50U) {
+    return {id, "fail",
+        "mtoon_opaque must skin into the mesh's space and light it"};
+  }
+  if (first.skin_uploads != 1 || third.skin_uploads != 1 ||
+      first.pose_writes != 1 || second.pose_writes != 2 ||
+      third.pose_writes != 3 || third.point_uploads != first.point_uploads ||
+      third.topology_uploads != first.topology_uploads ||
+      third.pipelines_created != first.pipelines_created) {
+    return {id, "fail",
+        "a pose change must write one joint buffer and upload nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 std::string Status(Toon::FrameStatus status) {
   switch (status) {
   case Toon::FrameStatus::Pass:
@@ -425,6 +522,7 @@ int main(int argc, char** argv) {
                          "pipelines, one target allocation and mesh upload"});
     checks.push_back(MToonOpaqueCheck(shaders));
     checks.push_back(MToonTexturedCheck(shaders));
+    checks.push_back(SkinningCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
     checks.push_back({"renderer.render_product.color", "skip", dependent});
@@ -432,6 +530,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.frame.persistence", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
+    checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",
       install_tree ? "" : "run the renderer install-tree CTest"});

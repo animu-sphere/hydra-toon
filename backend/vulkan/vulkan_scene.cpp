@@ -72,7 +72,6 @@ struct PipelineDescription {
   const std::vector<std::uint32_t>* vertex_words = nullptr;
   const std::vector<std::uint32_t>* fragment_words = nullptr;
   std::uint32_t push_constant_size = 0;
-  VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
   // Position, then normal and UV when there are three.
   std::uint32_t vertex_streams = 1;
   // Cull mode, front face and vertex strides set per draw rather than baked
@@ -80,18 +79,21 @@ struct PipelineDescription {
   bool dynamic_draw_state = false;
 };
 
+// Every scene pipeline shares the set layouts, material then skin, so a
+// skin set binds at set 1 whichever pipeline draws.
 bool CreateScenePipeline(VkDevice device,
-    const PipelineDescription& description, VkFormat color_format,
-    VkFormat depth_format, ScenePipeline& pipeline, std::string& detail) {
+    const PipelineDescription& description, const ScenePipelines& pipelines,
+    VkFormat color_format, VkFormat depth_format, ScenePipeline& pipeline,
+    std::string& detail) {
   VkPushConstantRange push_range{};
   push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   push_range.size = description.push_constant_size;
+  const VkDescriptorSetLayout set_layouts[] = {pipelines.material_layout,
+      pipelines.skin_layout};
   VkPipelineLayoutCreateInfo layout_create{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-  if (description.set_layout != VK_NULL_HANDLE) {
-    layout_create.setLayoutCount = 1;
-    layout_create.pSetLayouts = &description.set_layout;
-  }
+  layout_create.setLayoutCount = 2;
+  layout_create.pSetLayouts = set_layouts;
   layout_create.pushConstantRangeCount = 1;
   layout_create.pPushConstantRanges = &push_range;
   if (!VulkanOk(vkCreatePipelineLayout(device, &layout_create, nullptr,
@@ -389,6 +391,21 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
           "vkCreateDescriptorSetLayout", detail)) {
     return false;
   }
+  // A mesh's influences and joint buffer, read by the vertex stage alone.
+  VkDescriptorSetLayoutBinding skin_bindings[2]{};
+  for (std::uint32_t binding = 0; binding < 2U; ++binding) {
+    skin_bindings[binding].binding = binding;
+    skin_bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    skin_bindings[binding].descriptorCount = 1;
+    skin_bindings[binding].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  }
+  set_layout_create.bindingCount = 2;
+  set_layout_create.pBindings = skin_bindings;
+  if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
+                    nullptr, &pipelines.skin_layout),
+          "vkCreateDescriptorSetLayout(skin)", detail)) {
+    return false;
+  }
 
   PipelineDescription mesh;
   mesh.vertex_words = &words.mesh_vertex;
@@ -398,19 +415,19 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   mtoon.vertex_words = &words.mtoon_vertex;
   mtoon.fragment_words = &words.mtoon_fragment;
   mtoon.push_constant_size = sizeof(MToonDrawConstants);
-  mtoon.set_layout = pipelines.material_layout;
   mtoon.vertex_streams = 3;
   mtoon.dynamic_draw_state = true;
-  return CreateScenePipeline(device, mesh, color_format, depth_format,
-             pipelines.mesh, detail) &&
-         CreateScenePipeline(device, mtoon, color_format, depth_format,
-             pipelines.mtoon, detail);
+  return CreateScenePipeline(device, mesh, pipelines, color_format,
+             depth_format, pipelines.mesh, detail) &&
+         CreateScenePipeline(device, mtoon, pipelines, color_format,
+             depth_format, pipelines.mtoon, detail);
 }
 
 void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
   DestroyScenePipeline(device, pipelines.mtoon);
   DestroyScenePipeline(device, pipelines.mesh);
   vkDestroyDescriptorSetLayout(device, pipelines.material_layout, nullptr);
+  vkDestroyDescriptorSetLayout(device, pipelines.skin_layout, nullptr);
   for (VkSampler sampler : pipelines.samplers) {
     vkDestroySampler(device, sampler, nullptr);
   }
@@ -940,12 +957,22 @@ bool MaterialCache::Reserve(std::uint32_t slots, std::string& detail) {
 }
 
 bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
-    std::string& detail) {
+    VkDescriptorSetLayout skin_layout, std::string& detail) {
   physical_device_ = physical_device;
   device_ = device;
+  skin_layout_ = skin_layout;
   const Float2 zero;
-  return Upload(zero_uv_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &zero,
-      sizeof(zero), detail);
+  const Matrix4 identity;
+  std::size_t pool = 0;
+  if (!Upload(zero_uv_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &zero,
+          sizeof(zero), detail) ||
+      !Upload(zero_skin_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &identity,
+          sizeof(identity), detail) ||
+      !AllocateSkinSet(unskinned_set_, pool, detail)) {
+    return false;
+  }
+  PointSkinSet(unskinned_set_, zero_skin_.buffer, zero_skin_.buffer);
+  return true;
 }
 
 bool MeshCache::Update(const DrawList& draws, std::string& detail) {
@@ -993,20 +1020,147 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
     // Against this frame's topology, which can reach past UVs that were
     // long enough before, or come back within them.
     entry.has_uvs = uvs_present && mesh.uvs->size() >= mesh.index_bound;
+    if (!UpdateSkin(mesh, entry, detail)) {
+      return false;
+    }
     entry.generation = generation_;
   }
   for (auto entry = entries_.begin(); entry != entries_.end();) {
     if (entry->second.generation != generation_) {
-      DestroyHostBuffer(device_, entry->second.vertices);
-      DestroyHostBuffer(device_, entry->second.normals);
-      DestroyHostBuffer(device_, entry->second.uvs);
-      DestroyHostBuffer(device_, entry->second.indices);
+      Release(entry->second);
       entry = entries_.erase(entry);
     } else {
       ++entry;
     }
   }
   return true;
+}
+
+// A pose change writes the joint buffer and nothing else. A skin change
+// uploads the influences and rewrites the joints too, since each joint's
+// entry carries the geometry bind transform. A mesh whose skin does not
+// cover this frame's topology, or whose pose lacks a joint it names, draws
+// its points unskinned and keeps its buffers for when it is whole again.
+bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
+    std::string& detail) {
+  entry.skinned = IsSkinned(mesh);
+  if (!entry.skinned) {
+    entry.skin_flags = 0;
+    return true;
+  }
+  bool rebind = false;
+  if (entry.skin_set == VK_NULL_HANDLE) {
+    if (!AllocateSkinSet(entry.skin_set, entry.skin_pool, detail)) {
+      return false;
+    }
+    rebind = true;
+  }
+  if (entry.skin_revision != mesh.skin_revision) {
+    const VkBuffer before = entry.influences.buffer;
+    if (!Upload(entry.influences, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            mesh.influences->data(),
+            mesh.influences->size() * sizeof(ToonJointInfluence), detail)) {
+      return false;
+    }
+    rebind = rebind || entry.influences.buffer != before;
+    entry.skin_revision = mesh.skin_revision;
+    entry.pose_revision = 0;
+    ++skin_uploads_;
+  }
+  if (entry.pose_revision != mesh.pose_revision) {
+    joint_scratch_.clear();
+    joint_scratch_.push_back(mesh.skeleton_to_mesh);
+    for (const Matrix4& joint : *mesh.joints) {
+      joint_scratch_.push_back(Multiply(joint, mesh.geom_bind));
+    }
+    const VkBuffer before = entry.joints.buffer;
+    if (!Upload(entry.joints, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            joint_scratch_.data(), joint_scratch_.size() * sizeof(Matrix4),
+            detail)) {
+      return false;
+    }
+    rebind = rebind || entry.joints.buffer != before;
+    entry.pose_revision = mesh.pose_revision;
+    ++pose_writes_;
+  }
+  if (rebind) {
+    PointSkinSet(entry.skin_set, entry.influences.buffer, entry.joints.buffer);
+  }
+  entry.skin_flags = kDrawSkinned |
+                     (mesh.constant_influences ? kDrawConstantInfluences : 0U) |
+                     (mesh.influences_per_point << kInfluenceCountShift);
+  return true;
+}
+
+bool MeshCache::AllocateSkinSet(VkDescriptorSet& set, std::size_t& pool,
+    std::string& detail) {
+  constexpr std::uint32_t kSetsPerPool = 64;
+  VkDescriptorSetAllocateInfo allocate{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  allocate.descriptorSetCount = 1;
+  allocate.pSetLayouts = &skin_layout_;
+  if (!skin_pools_.empty()) {
+    allocate.descriptorPool = skin_pools_.back();
+    const VkResult result = vkAllocateDescriptorSets(device_, &allocate, &set);
+    if (result == VK_SUCCESS) {
+      pool = skin_pools_.size() - 1U;
+      return true;
+    }
+    if (result != VK_ERROR_OUT_OF_POOL_MEMORY &&
+        result != VK_ERROR_FRAGMENTED_POOL) {
+      return VulkanOk(result, "vkAllocateDescriptorSets(skin)", detail);
+    }
+  }
+  VkDescriptorPoolSize size{};
+  size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  size.descriptorCount = kSetsPerPool * 2U;
+  VkDescriptorPoolCreateInfo pool_create{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  pool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_create.maxSets = kSetsPerPool;
+  pool_create.poolSizeCount = 1;
+  pool_create.pPoolSizes = &size;
+  VkDescriptorPool created = VK_NULL_HANDLE;
+  if (!VulkanOk(vkCreateDescriptorPool(device_, &pool_create, nullptr,
+                    &created),
+          "vkCreateDescriptorPool(skin)", detail)) {
+    return false;
+  }
+  skin_pools_.push_back(created);
+  allocate.descriptorPool = created;
+  pool = skin_pools_.size() - 1U;
+  return VulkanOk(vkAllocateDescriptorSets(device_, &allocate, &set),
+      "vkAllocateDescriptorSets(skin)", detail);
+}
+
+void MeshCache::PointSkinSet(VkDescriptorSet set, VkBuffer influences,
+    VkBuffer joints) {
+  VkDescriptorBufferInfo buffers[2]{};
+  buffers[0].buffer = influences;
+  buffers[0].range = VK_WHOLE_SIZE;
+  buffers[1].buffer = joints;
+  buffers[1].range = VK_WHOLE_SIZE;
+  VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  write.dstSet = set;
+  write.dstBinding = 0;
+  write.descriptorCount = 2;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  write.pBufferInfo = buffers;
+  vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+}
+
+void MeshCache::Release(Entry& entry) {
+  DestroyHostBuffer(device_, entry.vertices);
+  DestroyHostBuffer(device_, entry.normals);
+  DestroyHostBuffer(device_, entry.uvs);
+  DestroyHostBuffer(device_, entry.indices);
+  DestroyHostBuffer(device_, entry.influences);
+  DestroyHostBuffer(device_, entry.joints);
+  if (entry.skin_set != VK_NULL_HANDLE) {
+    vkFreeDescriptorSets(device_, skin_pools_[entry.skin_pool], 1,
+        &entry.skin_set);
+    entry.skin_set = VK_NULL_HANDLE;
+  }
 }
 
 void MeshCache::Record(VkCommandBuffer command,
@@ -1032,6 +1186,10 @@ void MeshCache::Record(VkCommandBuffer command,
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(command, 0, 1, &entry.vertices.buffer, &offset);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+    const VkDescriptorSet skin_set =
+        entry.skinned ? entry.skin_set : unskinned_set_;
+    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelines.mesh.layout, 1, 1, &skin_set, 0, nullptr);
     DrawConstants constants{};
     const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
     std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
@@ -1040,6 +1198,7 @@ void MeshCache::Record(VkCommandBuffer command,
     constants.color[1] = mesh.color.y;
     constants.color[2] = mesh.color.z;
     constants.color[3] = 1.0F;
+    constants.flags = entry.skin_flags;
     vkCmdPushConstants(command, pipelines.mesh.layout,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
@@ -1066,6 +1225,10 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
         strides);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+    const VkDescriptorSet skin_set =
+        entry.skinned ? entry.skin_set : unskinned_set_;
+    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelines.mtoon.layout, 1, 1, &skin_set, 0, nullptr);
     MToonDrawConstants constants{};
     const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
     std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
@@ -1073,7 +1236,7 @@ void MeshCache::Record(VkCommandBuffer command,
     const bool mirrored = NormalRows(Multiply(draws.view.view, mesh.transform),
         constants.view_normal_rows);
     constants.material_slot = material->slot;
-    constants.flags = entry.has_uvs ? kDrawHasUVs : 0U;
+    constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | entry.skin_flags;
     vkCmdSetCullMode(command, material->double_sided ? VK_CULL_MODE_NONE
                                                      : VK_CULL_MODE_BACK_BIT);
     vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
@@ -1087,13 +1250,17 @@ void MeshCache::Record(VkCommandBuffer command,
 
 void MeshCache::Destroy() {
   for (auto& entry : entries_) {
-    DestroyHostBuffer(device_, entry.second.vertices);
-    DestroyHostBuffer(device_, entry.second.normals);
-    DestroyHostBuffer(device_, entry.second.uvs);
-    DestroyHostBuffer(device_, entry.second.indices);
+    Release(entry.second);
   }
   entries_.clear();
   DestroyHostBuffer(device_, zero_uv_);
+  DestroyHostBuffer(device_, zero_skin_);
+  // Frees every set with its pool.
+  for (VkDescriptorPool pool : skin_pools_) {
+    vkDestroyDescriptorPool(device_, pool, nullptr);
+  }
+  skin_pools_.clear();
+  unskinned_set_ = VK_NULL_HANDLE;
 }
 
 bool MeshCache::Upload(HostBuffer& buffer, VkBufferUsageFlags usage,

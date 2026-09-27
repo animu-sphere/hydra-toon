@@ -309,9 +309,6 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
   vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
-  if (!meshes_.Initialize(physical_device_, device_, error)) {
-    return PresentSetupStatus::Error;
-  }
 
   VkCommandPoolCreateInfo pool_create{
       VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -338,7 +335,9 @@ PresentSetupStatus VulkanPresentSession::Initialize(
       !materials_.Initialize(physical_device_, device_,
           pipelines_.material_layout, error) ||
       !textures_.Initialize(physical_device_, device_,
-          materials_.descriptor_set(), error)) {
+          materials_.descriptor_set(), error) ||
+      !meshes_.Initialize(physical_device_, device_, pipelines_.skin_layout,
+          error)) {
     return PresentSetupStatus::Error;
   }
 

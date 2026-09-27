@@ -3,7 +3,9 @@
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/gf/matrix4f.h>
 #include <pxr/base/tf/diagnostic.h>
+#include <pxr/base/tf/staticTokens.h>
 #include <pxr/imaging/hd/aov.h>
 #include <pxr/imaging/hd/camera.h>
 #include <pxr/imaging/hd/changeTracker.h>
@@ -31,6 +33,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -99,9 +102,12 @@ void AppendHostEvidence(std::uint64_t frame_index,
       ++mtoon_materials;
     }
   }
-  // And how many of this frame's draws went through mtoon_opaque.
+  // And how many of this frame's draws went through mtoon_opaque, and how
+  // many were skinned on the GPU.
   std::size_t mtoon_draws{};
+  std::size_t skinned_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
+    skinned_draws += Toon::IsSkinned(mesh) ? 1U : 0U;
     const auto material = std::lower_bound(snapshot.materials.begin(),
         snapshot.materials.end(), mesh.material,
         [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
@@ -130,11 +136,14 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " point_uploads=" << statistics.point_uploads
          << " material_writes=" << statistics.material_writes
          << " texture_uploads=" << statistics.texture_uploads
+         << " skin_uploads=" << statistics.skin_uploads
+         << " pose_writes=" << statistics.pose_writes
          << " textures=" << snapshot.textures.size()
          << " materials_preview=" << preview_materials
          << " materials_mtoon=" << mtoon_materials
          << " draws=" << draws.draws.size()
-         << " draws_mtoon=" << mtoon_draws << '\n';
+         << " draws_mtoon=" << mtoon_draws
+         << " draws_skinned=" << skinned_draws << '\n';
 }
 
 // GfMatrix4d is row-major for row vectors, so its storage order is already
@@ -147,6 +156,28 @@ Toon::Matrix4 ToToon(const GfMatrix4d& matrix) {
   }
   return result;
 }
+
+Toon::Matrix4 ToToon(const GfMatrix4f& matrix) {
+  Toon::Matrix4 result;
+  std::copy_n(matrix.data(), result.m.size(), result.m.begin());
+  return result;
+}
+
+// The inputs usdSkelImaging gives its skinning computations, spelled here so
+// the adapter links nothing of UsdSkel imaging.
+TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
+    (restPoints)
+    (geomBindXform)
+    (influences)
+    (numInfluencesPerComponent)
+    (hasConstantInfluences)
+    (blendShapeOffsets)
+    (blendShapeOffsetRanges)
+    (blendShapeWeights)
+    (skinningXforms)
+    (skinningDualQuats)
+    (skelLocalToWorld)
+    (primWorldToLocal));
 
 } // namespace
 
@@ -192,6 +223,21 @@ public:
   void SetMeshVisible(Toon::MeshId mesh, bool visible) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshVisible(mesh, visible);
+  }
+
+  void SetMeshSkin(Toon::MeshId mesh, Toon::ToonSkin skin) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshSkin(mesh, std::move(skin));
+  }
+
+  void SetMeshSkinPose(Toon::MeshId mesh, Toon::ToonSkinPose pose) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshSkinPose(mesh, std::move(pose));
+  }
+
+  Toon::FrameSnapshot Commit() {
+    std::scoped_lock lock(mutex_);
+    return world_.Commit();
   }
 
   // A mesh binds a material by path, and either may be synced first, so a
@@ -420,6 +466,47 @@ private:
 
 namespace {
 
+// An ext computation that counts the syncs that changed its inputs. Sprims
+// sync before Rprims, so a mesh learns from the count whether its skin
+// aggregator's rest points and binding changed, or only its pose did.
+// HdExtComputation leaves DirtySceneInput for whoever consumes the values;
+// a mesh reads them itself during its own sync, so the count consumes it
+// here, or every later sync would count again.
+class HdToonExtComputation final : public HdExtComputation {
+public:
+  explicit HdToonExtComputation(const SdfPath& id) : HdExtComputation(id) {
+  }
+
+  void Sync(HdSceneDelegate* delegate, HdRenderParam* render_param,
+      HdDirtyBits* dirty_bits) override {
+    if ((*dirty_bits & (DirtyInputDesc | DirtySceneInput | DirtyCompInput |
+                           DirtyElementCount)) != 0) {
+      ++input_revision_;
+    }
+    HdExtComputation::Sync(delegate, render_param, dirty_bits);
+    *dirty_bits &= ~DirtySceneInput;
+  }
+
+  // Advances from 1 with every sync that changed an input; 0 before any.
+  std::uint64_t GetInputRevision() const {
+    return input_revision_.load();
+  }
+
+private:
+  std::atomic<std::uint64_t> input_revision_{0};
+};
+
+template <typename T>
+bool ReadInput(HdSceneDelegate* delegate, const SdfPath& computation,
+    const TfToken& name, T& value) {
+  const VtValue input = delegate->GetExtComputationInput(computation, name);
+  if (!input.IsHolding<T>()) {
+    return false;
+  }
+  value = input.UncheckedGet<T>();
+  return true;
+}
+
 class HdToonMesh final : public HdMesh {
 public:
   HdToonMesh(const SdfPath& id, std::shared_ptr<HdToonAdapterState> state)
@@ -450,7 +537,7 @@ public:
       state_->SetMeshTopology(mesh_, Triangulate(GetMeshTopology(delegate)));
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, HdTokens->points)) {
-      state_->SetMeshPoints(mesh_, ReadPoints(PointsValue(delegate)));
+      SyncPoints(delegate);
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, StToken())) {
       state_->SetMeshUVs(mesh_, ReadUVs(delegate));
@@ -509,27 +596,186 @@ private:
     return indices;
   }
 
-  // A skinned mesh's points are the output of UsdSkel's ext computations.
-  // Their CPU kernels run here, as HdEmbree runs them, until Renderer
-  // Phase 1 skins on the GPU.
-  VtValue PointsValue(HdSceneDelegate* delegate) const {
-    HdExtComputationPrimvarDescriptorVector computed;
+  // A mesh UsdSkel skins has its points computed: usdSkelImaging gives it an
+  // aggregator computation, whose inputs are the rest points and the
+  // binding, and a skinning computation, whose scene inputs are the pose.
+  // Linear blend skinning runs on the GPU: the binding becomes the mesh's
+  // skin, uploaded when the aggregator changes, and a pose change sets the
+  // pose alone (design policy §11). Dual quaternion skinning, or inputs of
+  // another shape, run the computation's CPU kernel here instead, as
+  // HdEmbree does.
+  void SyncPoints(HdSceneDelegate* delegate) {
     for (const HdExtComputationPrimvarDescriptor& descriptor :
         delegate->GetExtComputationPrimvarDescriptors(GetId(),
             HdInterpolationVertex)) {
-      if (descriptor.name == HdTokens->points) {
-        computed.push_back(descriptor);
+      if (descriptor.name != HdTokens->points) {
+        continue;
       }
-    }
-    if (!computed.empty()) {
+      if (SyncSkin(delegate, descriptor.sourceComputationId)) {
+        return;
+      }
+      Unskin();
       const HdExtComputationUtils::ValueStore values =
-          HdExtComputationUtils::GetComputedPrimvarValues(computed, delegate);
+          HdExtComputationUtils::GetComputedPrimvarValues({descriptor},
+              delegate);
       const auto found = values.find(HdTokens->points);
-      if (found != values.end()) {
-        return found->second;
+      state_->SetMeshPoints(mesh_, ReadPoints(found == values.end()
+                                                  ? GetPoints(delegate)
+                                                  : found->second));
+      return;
+    }
+    Unskin();
+    state_->SetMeshPoints(mesh_, ReadPoints(GetPoints(delegate)));
+  }
+
+  // False, having set nothing, when the skinning is not linear blend or an
+  // input is not what usdSkelImaging gives.
+  bool SyncSkin(HdSceneDelegate* delegate, const SdfPath& skinning) {
+    const TfTokenVector scene_inputs =
+        delegate->GetExtComputationSceneInputNames(skinning);
+    if (std::find(scene_inputs.begin(), scene_inputs.end(),
+            SkinTokens->skinningDualQuats) != scene_inputs.end()) {
+      return false;
+    }
+    SdfPath aggregator;
+    for (const HdExtComputationInputDescriptor& input :
+        delegate->GetExtComputationInputDescriptors(skinning)) {
+      if (input.name == SkinTokens->restPoints) {
+        aggregator = input.sourceComputationId;
       }
     }
-    return GetPoints(delegate);
+    if (aggregator.IsEmpty()) {
+      return false;
+    }
+
+    VtMatrix4fArray joints;
+    GfMatrix4d skeleton_to_world;
+    GfMatrix4d world_to_mesh;
+    VtFloatArray weights;
+    if (!ReadInput(delegate, skinning, SkinTokens->skinningXforms, joints) ||
+        !ReadInput(delegate, skinning, SkinTokens->skelLocalToWorld,
+            skeleton_to_world) ||
+        !ReadInput(delegate, skinning, SkinTokens->primWorldToLocal,
+            world_to_mesh) ||
+        !ReadInput(delegate, skinning, SkinTokens->blendShapeWeights,
+            weights)) {
+      return false;
+    }
+
+    // An aggregator this delegate did not create reports no revision, and
+    // is read every time.
+    const auto* computation = dynamic_cast<const HdToonExtComputation*>(
+        delegate->GetRenderIndex().GetSprim(HdPrimTypeTokens->extComputation,
+            aggregator));
+    const std::uint64_t revision =
+        computation == nullptr ? 0U : computation->GetInputRevision();
+    const bool rest_changed =
+        revision == 0 || revision != rest_revision_ || aggregator != aggregator_;
+    if (rest_changed) {
+      if (!ReadRest(delegate, aggregator)) {
+        return false;
+      }
+      aggregator_ = aggregator;
+      rest_revision_ = revision;
+    }
+
+    // Blend shapes are applied to the rest points here, so a weight change
+    // uploads the points, until Renderer Phase 3's morph targets.
+    if (rest_changed || weights != weights_) {
+      weights_ = weights;
+      state_->SetMeshPoints(mesh_, RestPoints());
+    }
+
+    Toon::ToonSkinPose pose;
+    pose.joints.reserve(joints.size());
+    for (const GfMatrix4f& joint : joints) {
+      pose.joints.push_back(ToToon(joint));
+    }
+    // Row vectors: skeleton space, to world, to the mesh's own.
+    pose.skeleton_to_mesh = ToToon(skeleton_to_world * world_to_mesh);
+    state_->SetMeshSkinPose(mesh_, std::move(pose));
+    return true;
+  }
+
+  // The aggregator's rest points, blend shapes and binding. On failure the
+  // mesh reads them again next time.
+  bool ReadRest(HdSceneDelegate* delegate, const SdfPath& aggregator) {
+    rest_revision_ = 0;
+    GfMatrix4f geom_bind;
+    VtVec2fArray influences;
+    int influences_per_point = 0;
+    bool constant = false;
+    if (!ReadInput(delegate, aggregator, SkinTokens->restPoints,
+            rest_points_) ||
+        !ReadInput(delegate, aggregator, SkinTokens->geomBindXform,
+            geom_bind) ||
+        !ReadInput(delegate, aggregator, SkinTokens->influences,
+            influences) ||
+        !ReadInput(delegate, aggregator,
+            SkinTokens->numInfluencesPerComponent, influences_per_point) ||
+        !ReadInput(delegate, aggregator, SkinTokens->hasConstantInfluences,
+            constant) ||
+        !ReadInput(delegate, aggregator, SkinTokens->blendShapeOffsets,
+            blend_offsets_) ||
+        !ReadInput(delegate, aggregator, SkinTokens->blendShapeOffsetRanges,
+            blend_ranges_)) {
+      return false;
+    }
+    // No influences draws the rest points, as the CPU kernel returns them.
+    Toon::ToonSkin skin;
+    if (influences_per_point > 0) {
+      skin.influences_per_point =
+          static_cast<std::uint32_t>(influences_per_point);
+      skin.constant = constant;
+      skin.geom_bind = ToToon(geom_bind);
+      skin.influences.reserve(influences.size());
+      for (const GfVec2f& influence : influences) {
+        // A negative joint index pulls nothing.
+        skin.influences.push_back(influence[0] >= 0.0F
+                                      ? Toon::ToonJointInfluence{
+                                            static_cast<std::uint32_t>(
+                                                influence[0]),
+                                            influence[1]}
+                                      : Toon::ToonJointInfluence{});
+      }
+    }
+    state_->SetMeshSkin(mesh_, std::move(skin));
+    skinned_ = true;
+    return true;
+  }
+
+  // The rest points with the current blend shape weights applied, as
+  // usdSkelImaging's kernels apply them before skinning.
+  std::vector<Toon::Float3> RestPoints() const {
+    std::vector<Toon::Float3> points = ReadPoints(VtValue(rest_points_));
+    const std::size_t count = std::min(blend_ranges_.size(), points.size());
+    for (std::size_t point = 0; point < count; ++point) {
+      const GfVec2i range = blend_ranges_[point];
+      for (int offset = std::max(range[0], 0);
+           offset < range[1] &&
+           static_cast<std::size_t>(offset) < blend_offsets_.size();
+           ++offset) {
+        const GfVec4f& shape = blend_offsets_[static_cast<std::size_t>(offset)];
+        const int index = static_cast<int>(shape[3]);
+        if (index < 0 || static_cast<std::size_t>(index) >= weights_.size()) {
+          continue;
+        }
+        const float weight = weights_[static_cast<std::size_t>(index)];
+        points[point].x += shape[0] * weight;
+        points[point].y += shape[1] * weight;
+        points[point].z += shape[2] * weight;
+      }
+    }
+    return points;
+  }
+
+  void Unskin() {
+    if (skinned_) {
+      state_->SetMeshSkin(mesh_, {});
+      skinned_ = false;
+    }
+    rest_revision_ = 0;
+    aggregator_ = SdfPath();
   }
 
   static const TfToken& StToken() {
@@ -592,6 +838,15 @@ private:
 
   std::shared_ptr<HdToonAdapterState> state_;
   Toon::MeshId mesh_;
+  // What the last skinned sync read from the aggregator, and as of which of
+  // its revisions; 0 when it must be read again.
+  SdfPath aggregator_;
+  std::uint64_t rest_revision_ = 0;
+  VtVec3fArray rest_points_;
+  VtVec4fArray blend_offsets_;
+  VtVec2iArray blend_ranges_;
+  VtFloatArray weights_;
+  bool skinned_ = false;
 };
 
 // HdCamera's own Sync reads the camera; the render pass reads its view and
@@ -1012,7 +1267,7 @@ HdSprim* HdToonRenderDelegate::CreateSprim(const TfToken& type_id,
     return new HdToonCamera(sprim_id);
   }
   if (type_id == HdPrimTypeTokens->extComputation) {
-    return new HdExtComputation(sprim_id);
+    return new HdToonExtComputation(sprim_id);
   }
   if (type_id == HdPrimTypeTokens->material) {
     auto* material = new HdToonMaterial(sprim_id, impl_->state);
@@ -1028,7 +1283,7 @@ HdSprim* HdToonRenderDelegate::CreateFallbackSprim(
     return new HdToonCamera(SdfPath("/__toonFallbackCamera"));
   }
   if (type_id == HdPrimTypeTokens->extComputation) {
-    return new HdExtComputation(SdfPath::EmptyPath());
+    return new HdToonExtComputation(SdfPath::EmptyPath());
   }
   // Never synced, so it keeps the fallback material's values.
   if (type_id == HdPrimTypeTokens->material) {
@@ -1091,6 +1346,10 @@ void HdToonRenderDelegate::SetTerminalSceneIndex(
 
 void HdToonRenderDelegate::Update() {
   impl_->SyncValueChanges();
+}
+
+Toon::FrameSnapshot HdToonRenderDelegate::CommitScene() {
+  return impl_->state->Commit();
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

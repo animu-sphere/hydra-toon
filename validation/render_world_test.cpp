@@ -254,5 +254,67 @@ int main() {
           "a removed texture must be gone")) {
     return 1;
   }
+
+  // A skin is structural and a pose is not: each has its own revision, and
+  // neither touches the points (design policy §11, §14).
+  const Toon::MeshSnapshot rigid = world.Commit().meshes[0];
+  if (!Check(!Toon::IsSkinned(rigid), "a new mesh must not be skinned")) {
+    return 1;
+  }
+  Toon::ToonSkin skin;
+  skin.influences_per_point = 2;
+  skin.influences = {{0, 0.5F}, {2, 0.5F}, {0, 1.0F}, {1, 0.0F},
+      {1, 1.0F}, {0, 0.0F}, {2, 1.0F}, {0, 0.0F}};
+  world.SetMeshSkin(quad, skin);
+  Toon::ToonSkinPose pose;
+  pose.joints.resize(2);
+  world.SetMeshSkinPose(quad, pose);
+  const Toon::MeshSnapshot bound_skin = world.Commit().meshes[0];
+  if (!Check(bound_skin.skin_revision != rigid.skin_revision &&
+                 bound_skin.joint_bound == 3 &&
+                 bound_skin.points_revision == rigid.points_revision,
+          "a skin must advance its own revision and bound its joints") ||
+      !Check(!Toon::IsSkinned(bound_skin),
+          "a pose without every joint the skin names must not skin")) {
+    return 1;
+  }
+  pose.joints.resize(3);
+  world.SetMeshSkinPose(quad, pose);
+  const Toon::MeshSnapshot posed = world.Commit().meshes[0];
+  if (!Check(Toon::IsSkinned(posed), "a complete skin and pose must skin") ||
+      !Check(posed.pose_revision != bound_skin.pose_revision &&
+                 posed.skin_revision == bound_skin.skin_revision &&
+                 posed.points_revision == bound_skin.points_revision &&
+                 posed.normals_revision == bound_skin.normals_revision,
+          "a pose edit must advance the pose revision alone")) {
+    return 1;
+  }
+  const std::uint64_t steady = world.Commit().revision;
+  world.SetMeshSkinPose(quad, pose);
+  world.SetMeshSkin(quad, skin);
+  if (!Check(world.Commit().revision == steady,
+          "setting the skin and pose a mesh has must change nothing")) {
+    return 1;
+  }
+  skin.influences.resize(6);
+  world.SetMeshSkin(quad, skin);
+  if (!Check(!Toon::IsSkinned(world.Commit().meshes[0]),
+          "influences that miss a point the topology reaches must not "
+          "skin")) {
+    return 1;
+  }
+  skin.constant = true;
+  skin.influences = {{2, 1.0F}, {0, 0.0F}};
+  world.SetMeshSkin(quad, skin);
+  if (!Check(Toon::IsSkinned(world.Commit().meshes[0]),
+          "one constant set of influences must skin every point")) {
+    return 1;
+  }
+  world.SetMeshSkin(quad, {});
+  const Toon::MeshSnapshot unskinned = world.Commit().meshes[0];
+  if (!Check(!Toon::IsSkinned(unskinned) && unskinned.influences->empty(),
+          "an empty skin must unskin the mesh")) {
+    return 1;
+  }
   return 0;
 }

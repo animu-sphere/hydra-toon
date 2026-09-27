@@ -210,9 +210,6 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     return FrameStatus::Fail;
   }
   vkGetDeviceQueue(device_, *queue_family, 0, &queue_);
-  if (!meshes_.Initialize(physical_device_, device_, detail)) {
-    return FrameStatus::Fail;
-  }
 
   VkCommandPoolCreateInfo pool_create{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   pool_create.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -248,7 +245,9 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
       !materials_.Initialize(physical_device_, device_,
           pipelines_.material_layout, detail) ||
       !textures_.Initialize(physical_device_, device_,
-          materials_.descriptor_set(), detail)) {
+          materials_.descriptor_set(), detail) ||
+      !meshes_.Initialize(physical_device_, device_, pipelines_.skin_layout,
+          detail)) {
     return FrameStatus::Fail;
   }
   statistics_.pipelines_created += ScenePipelines::kCount;
@@ -408,6 +407,8 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   statistics_.point_uploads = meshes_.point_uploads();
   statistics_.material_writes = materials_.writes();
   statistics_.texture_uploads = textures_.uploads();
+  statistics_.skin_uploads = meshes_.skin_uploads();
+  statistics_.pose_writes = meshes_.pose_writes();
   statistics_.validation_message_count = validation_.message_count;
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;

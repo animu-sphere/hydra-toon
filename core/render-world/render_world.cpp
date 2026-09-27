@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace Toon {
@@ -69,6 +70,10 @@ MeshId RenderWorld::CreateMesh() {
   mesh.topology_revision = Stamp();
   mesh.uvs = std::make_shared<const std::vector<Float2>>();
   mesh.uvs_revision = Stamp();
+  mesh.influences = std::make_shared<const std::vector<ToonJointInfluence>>();
+  mesh.skin_revision = Stamp();
+  mesh.joints = std::make_shared<const std::vector<Matrix4>>();
+  mesh.pose_revision = Stamp();
   dirty_ = true;
   return id;
 }
@@ -143,9 +148,70 @@ void RenderWorld::SetMeshMaterial(MeshId mesh, MaterialId material) {
   }
 }
 
+// A skin without influences per point, or without influences, is none.
+void RenderWorld::SetMeshSkin(MeshId mesh, ToonSkin skin) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr) {
+    return;
+  }
+  if (skin.influences_per_point == 0 || skin.influences.empty()) {
+    skin = {};
+  }
+  MeshSnapshot& snapshot = record->snapshot;
+  if (snapshot.influences_per_point == skin.influences_per_point &&
+      snapshot.constant_influences == skin.constant &&
+      snapshot.geom_bind == skin.geom_bind &&
+      *snapshot.influences == skin.influences) {
+    return;
+  }
+  // Wide, so an index at the type's limit still bounds past itself and no
+  // pose can satisfy it.
+  std::uint64_t joint_bound = 0;
+  for (const ToonJointInfluence& influence : skin.influences) {
+    joint_bound = std::max<std::uint64_t>(joint_bound,
+        std::uint64_t{influence.joint} + 1U);
+  }
+  snapshot.influences_per_point = skin.influences_per_point;
+  snapshot.constant_influences = skin.constant;
+  snapshot.geom_bind = skin.geom_bind;
+  snapshot.joint_bound = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+      joint_bound, std::numeric_limits<std::uint32_t>::max()));
+  snapshot.influences =
+      std::make_shared<const std::vector<ToonJointInfluence>>(
+          std::move(skin.influences));
+  snapshot.skin_revision = Stamp();
+  dirty_ = true;
+}
+
+void RenderWorld::SetMeshSkinPose(MeshId mesh, ToonSkinPose pose) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr) {
+    return;
+  }
+  MeshSnapshot& snapshot = record->snapshot;
+  if (snapshot.skeleton_to_mesh == pose.skeleton_to_mesh &&
+      *snapshot.joints == pose.joints) {
+    return;
+  }
+  snapshot.skeleton_to_mesh = pose.skeleton_to_mesh;
+  snapshot.joints =
+      std::make_shared<const std::vector<Matrix4>>(std::move(pose.joints));
+  snapshot.pose_revision = Stamp();
+  dirty_ = true;
+}
+
+bool IsSkinned(const MeshSnapshot& mesh) {
+  if (mesh.influences_per_point == 0 || mesh.influences == nullptr ||
+      mesh.joints == nullptr || mesh.joints->size() < mesh.joint_bound) {
+    return false;
+  }
+  const std::size_t sets = mesh.constant_influences ? 1U : mesh.index_bound;
+  return mesh.influences->size() >=
+         sets * static_cast<std::size_t>(mesh.influences_per_point);
+}
+
 void RenderWorld::SetView(const ToonView& view) {
-  if (view.view.m != view_.view.m ||
-      view.projection.m != view_.projection.m) {
+  if (view.view != view_.view || view.projection != view_.projection) {
     view_ = view;
     view_revision_ = Stamp();
     dirty_ = true;

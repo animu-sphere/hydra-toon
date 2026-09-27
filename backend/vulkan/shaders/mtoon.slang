@@ -5,13 +5,16 @@
 // plus texture table entries, so a new or changed material never compiles
 // or selects a shader.
 
+#include "skinning.slang"
+
 // Must match vulkan_internal::MToonDrawConstants.
 struct DrawConstants {
   float4x4 clip_from_object;
   // Rows of the view-space normal matrix; w is unused.
   float4 view_normal_rows[3];
   uint material_slot;
-  // kDrawHasUVs when the mesh has texture coordinates.
+  // kDrawHasUVs when the mesh has texture coordinates, and the skinning
+  // flags (skinning.slang).
   uint flags;
   // Scalars, not a uint2, which could align past 128 bytes.
   uint padding0;
@@ -62,6 +65,7 @@ struct VertexInput {
   // USD's st: origin at the image's bottom left. (0, 0) when the mesh has
   // none, bound with stride 0.
   float2 st : TEXCOORD0;
+  uint vertex : SV_VulkanVertexID;
 };
 
 struct VertexStageOutput {
@@ -73,10 +77,13 @@ struct VertexStageOutput {
 [shader("vertex")]
 VertexStageOutput vertex_main(VertexInput input) {
   VertexStageOutput output;
-  output.position = mul(draw.clip_from_object, float4(input.position, 1.0));
-  output.view_normal = float3(dot(draw.view_normal_rows[0].xyz, input.normal),
-      dot(draw.view_normal_rows[1].xyz, input.normal),
-      dot(draw.view_normal_rows[2].xyz, input.normal));
+  float3 position = input.position;
+  float3 normal = input.normal;
+  Skin(draw.flags, input.vertex, position, normal);
+  output.position = mul(draw.clip_from_object, float4(position, 1.0));
+  output.view_normal = float3(dot(draw.view_normal_rows[0].xyz, normal),
+      dot(draw.view_normal_rows[1].xyz, normal),
+      dot(draw.view_normal_rows[2].xyz, normal));
   output.st = input.st;
   return output;
 }
