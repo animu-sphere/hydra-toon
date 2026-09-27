@@ -110,7 +110,8 @@ offset in clip space, not by switching to a screen-space outline.
   hull draws right after its surface, as UniVRM and three-vrm draw MToon's
   outline, so a surface that writes depth hides the hull's far side; an
   opaque one's draws before, as [DESIGN_POLICY.md](DESIGN_POLICY.md) §10
-  orders it.
+  orders it. Multisampled, Mask's cut is by alpha to coverage rather than
+  whole fragments ([DESIGN_POLICY.md](DESIGN_POLICY.md) §16).
 - **MMD** draws in material-table order (`mmd:sourceIndex`) with alpha
   blending, because models are authored against that order.
 

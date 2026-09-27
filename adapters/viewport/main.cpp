@@ -30,6 +30,7 @@ struct Arguments {
   std::uint64_t frame_limit = 0;
   bool visible = true;
   bool vsync = true;
+  Toon::RenderOptions options;
 };
 
 std::uint64_t ReadUnsigned(std::string_view value, std::string_view name) {
@@ -69,6 +70,9 @@ Arguments ParseArguments(int argc, char** argv) {
       result.height = static_cast<std::uint32_t>(ReadUnsigned(next(), option));
     } else if (option == "--frames") {
       result.frame_limit = ReadUnsigned(next(), option);
+    } else if (option == "--samples") {
+      result.options.samples =
+          static_cast<std::uint32_t>(ReadUnsigned(next(), option));
     } else if (option == "--hidden") {
       result.visible = false;
     } else if (option == "--vsync") {
@@ -82,6 +86,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --width N --height N     window size (default 1280x720)\n"
                    "  --frames N               exit after N presented frames\n"
                    "  --vsync on|off           FIFO or immediate present\n"
+                   "  --samples N              MSAA samples per pixel (default\n"
+                   "                           4; 1 turns anti-aliasing off)\n"
                    "  --hidden                 do not show the window\n"
                    "Esc or closing the window exits.\n";
       std::exit(0);
@@ -91,6 +97,9 @@ Arguments ParseArguments(int argc, char** argv) {
   }
   if (result.width == 0 || result.height == 0) {
     throw std::invalid_argument("viewport extent must be non-zero");
+  }
+  if (result.options.samples == 0) {
+    throw std::invalid_argument("--samples must be at least 1");
   }
   return result;
 }
@@ -132,7 +141,7 @@ int main(int argc, char** argv) {
     std::string error;
     auto session = Toon::CreatePresentSession(provider,
         Toon::SceneShadersIn(shader_directory.string()), arguments.vsync,
-        status, error);
+        status, error, arguments.options);
     if (session == nullptr) {
       if (status == Toon::PresentSetupStatus::Unavailable) {
         std::cerr << "toon-viewport: skip: " << error << '\n';
@@ -142,7 +151,8 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::cout << "Presenting on: " << session->statistics().device_name
-              << '\n';
+              << ", " << session->statistics().samples
+              << " sample(s) per pixel\n";
 
     bool running = true;
     auto title_update = Clock::now();

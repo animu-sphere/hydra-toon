@@ -36,7 +36,8 @@ struct MToonDrawConstants {
   std::uint32_t material_slot;
   // kDrawHasUVs when the mesh has texture coordinates; kDrawOrthographic
   // under an orthographic camera; kDrawBlend when its material is
-  // transparent; kDrawSkinned, kDrawConstantInfluences and the influences
+  // transparent; kDrawAlphaToCoverage when mtoon_opaque is multisampled;
+  // kDrawSkinned, kDrawConstantInfluences and the influences
   // per point from kInfluenceCountShift up when it is skinned.
   std::uint32_t flags;
   // |projection[1][1]|, for mtoon_outline's screen-coordinates width.
@@ -53,6 +54,9 @@ constexpr std::uint32_t kDrawOrthographic = 16U;
 // The material is transparent: mtoon_outline's hull returns the surface's
 // alpha rather than 1.
 constexpr std::uint32_t kDrawBlend = 32U;
+// mtoon_opaque turns its alpha into samples: a Mask fragment returns its
+// coverage of the cutoff rather than being kept or cut away whole.
+constexpr std::uint32_t kDrawAlphaToCoverage = 64U;
 constexpr std::uint32_t kInfluenceCountShift = 8U;
 
 // An MToon slot's outline width mode, as mtoon_outline reads it; 0 draws
@@ -133,6 +137,12 @@ struct SceneDeviceFeatures {
 // feature; otherwise `detail` names what is missing.
 bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail);
 
+// The highest sample count at or below `requested` that `device` offers for
+// rendering into `color_format` and `depth_format` together; 1 when it
+// offers no other.
+VkSampleCountFlagBits ChooseSampleCount(VkPhysicalDevice device,
+    VkFormat color_format, VkFormat depth_format, std::uint32_t requested);
+
 // Clip-from-world for a ToonView: the view's OpenGL-convention projection,
 // then y flipped and z mapped from [-1, 1] to Vulkan's [0, 1].
 Matrix4 VulkanClipFromWorld(const ToonView& view);
@@ -142,14 +152,15 @@ struct ScenePipeline {
   VkPipeline pipeline = VK_NULL_HANDLE;
 };
 
-// The scene pipelines for one colour/depth format pair: the unlit mesh
-// pipeline, mtoon_opaque, mtoon_transparent and mtoon_outline. The last two
-// blend their source's alpha over the target; the MToon ones read the
-// material parameter buffer, the texture table and the wrap samplers
-// through `material_layout` (set 0), in both stages, since the outline's
-// width is the vertex stage's to apply. Every pipeline skins a mesh in the
-// vertex stage through `skin_layout` (set 1): its influences and its joint
-// buffer. Viewport and scissor are dynamic, and so are the MToon pipelines'
+// The scene pipelines for one colour/depth format pair and sample count:
+// the unlit mesh pipeline, mtoon_opaque, mtoon_transparent and
+// mtoon_outline. The last two blend their source's alpha over the target;
+// multisampled, mtoon_opaque turns its alpha into coverage. The MToon ones
+// read the material parameter buffer, the texture table and the wrap
+// samplers through `material_layout` (set 0), in both stages, since the
+// outline's width is the vertex stage's to apply. Every pipeline skins a
+// mesh in the vertex stage through `skin_layout` (set 1): its influences
+// and its joint buffer. Viewport and scissor are dynamic, and so are the MToon pipelines'
 // cull mode, front face, depth writes and vertex strides, so each pipeline
 // is created once and survives every resize, every material and every mesh
 // with or without UVs or a skin.
@@ -162,6 +173,8 @@ struct ScenePipelines {
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
   VkSampler samplers[kSamplerCount] = {};
+  // What every pipeline rasterizes at; the targets must match it.
+  VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
   static constexpr std::uint32_t kCount = 4;
 };
@@ -182,7 +195,8 @@ struct SceneShaderWords {
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
     std::string& detail);
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
-    VkFormat color_format, VkFormat depth_format, ScenePipelines& pipelines,
+    VkFormat color_format, VkFormat depth_format,
+    VkSampleCountFlagBits samples, ScenePipelines& pipelines,
     std::string& detail);
 void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines);
 
@@ -196,7 +210,8 @@ struct DeviceImage {
 bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
     VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
     std::uint32_t width, std::uint32_t height, DeviceImage& image,
-    std::string& detail, std::uint32_t mip_levels = 1);
+    std::string& detail, std::uint32_t mip_levels = 1,
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
 void DestroyDeviceImage(VkDevice device, DeviceImage& image);
 
 VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkImageAspectFlags aspect,
@@ -205,10 +220,25 @@ VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkImageAspectFlags aspect,
     VkAccessFlags2 destination_access, VkImageLayout old_layout,
     VkImageLayout new_layout);
 
-// Begin dynamic rendering into `color` (cleared to the scene background) and
-// `depth` (cleared to 1), with the viewport and scissor covering `extent`.
-void BeginSceneRendering(VkCommandBuffer command, VkImageView color,
-    VkImageView depth, VkExtent2D extent);
+// What a scene pass draws into. Multisampled, `color` and `depth` hold the
+// samples, which the pass resolves as it ends and does not keep: colour, by
+// averaging, into `color_resolve`, and depth, by taking sample 0, into
+// `depth_resolve` when there is one. A resolve runs at the colour output
+// stage as a colour attachment write, depth's included (the Vulkan
+// specification's multisample resolve operations), which a barrier on a
+// resolve target names.
+struct SceneAttachments {
+  VkImageView color = VK_NULL_HANDLE;
+  VkImageView depth = VK_NULL_HANDLE;
+  VkImageView color_resolve = VK_NULL_HANDLE;
+  VkImageView depth_resolve = VK_NULL_HANDLE;
+};
+
+// Begin dynamic rendering into `attachments`, colour cleared to the scene
+// background and depth to 1, with the viewport and scissor covering
+// `extent`.
+void BeginSceneRendering(VkCommandBuffer command,
+    const SceneAttachments& attachments, VkExtent2D extent);
 
 // A host-visible buffer mapped for its whole life.
 struct HostBuffer {
@@ -390,7 +420,8 @@ public:
   bool Update(const DrawList& draws, std::string& detail);
   // Unlit draws first; then the outline hull of every opaque MToon draw
   // that asks for one (design policy §10's first pass); then every opaque
-  // draw whose material selected MToon. Transparent MToon draws come last,
+  // draw whose material selected MToon, a Mask one by alpha to coverage
+  // when `pipelines` are multisampled. Transparent MToon draws come last,
   // ordered by their material's render queue and then as `draws` lists
   // them, each surface followed by its hull (material policy §6).
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,

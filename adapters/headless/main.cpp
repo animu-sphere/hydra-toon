@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -838,6 +839,199 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// Multisample anti-aliasing, by a renderer asked for 1 sample and one given
+// the default, 4, through SetOrthographicView. The first scene is
+// AddOctahedron's diamond in unlit red under an unlit green world outline
+// of 0.2: at 1 sample every pixel is background, red or green, and
+// multisampled the hull's silhouette and the surface's edge over it
+// resolve to mixtures, while a pixel inside either stays the same. The
+// second is a Mask quad, its edges on pixel boundaries, whose base texture
+// alpha rises from 0 to 1 across the diagonal x + y = 0, where it crosses
+// the cutoff: the cut is a hard step at 1 sample and, by alpha to coverage,
+// a mixture along the diagonal multisampled.
+Check AntiAliasingCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.antialiasing.msaa";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto single = Toon::CreateOffscreenRenderer(shaders, status, detail,
+      Toon::RenderOptions{1});
+  if (single == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+  auto multi = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (multi == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+  const std::uint32_t samples = multi->statistics().samples;
+  if (single->statistics().samples != 1) {
+    return {id, "fail", "a renderer asked for 1 sample must not multisample"};
+  }
+  if (samples < 2) {
+    return {id, "skip",
+        multi->statistics().device_name +
+            " offers no multisampled colour and depth target"};
+  }
+
+  Toon::RenderWorld outlined;
+  const Toon::MeshId octahedron = AddOctahedron(outlined);
+  Toon::ToonMaterial red;
+  red.model = Toon::ToonShadingModel::MToon;
+  red.base_color = {1.0F, 0.0F, 0.0F};
+  red.mtoon.shade_color = {1.0F, 0.0F, 0.0F};
+  Toon::ToonMaterial outline = red;
+  outline.outline = true;
+  outline.outline_width = 0.2F;
+  outline.outline_color = {0.0F, 1.0F, 0.0F};
+  outline.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  outline.mtoon.outline_lighting_mix = 0.0F;
+  const Toon::MaterialId outline_material = outlined.CreateMaterial();
+  outlined.SetMaterial(outline_material, outline);
+  outlined.SetMeshMaterial(octahedron, outline_material);
+  const Toon::DrawList outline_draws = Toon::ExtractDrawList(outlined.Commit());
+
+  // x from -0.75 to 0.75 is columns 8 to 55, y rows 8 to 55. u runs from 0
+  // at the bottom left to 1 at the top right, 0.5 along x + y = 0; the
+  // texture's alpha is 0 at u 0.25 and 1 at 0.75, clamped.
+  Toon::RenderWorld masked;
+  SetOrthographicView(masked);
+  const Toon::MeshId quad = masked.CreateMesh();
+  masked.SetMeshPoints(quad, {{-0.75F, -0.75F, 0.0F}, {0.75F, -0.75F, 0.0F},
+                                 {0.75F, 0.75F, 0.0F}, {-0.75F, 0.75F, 0.0F}});
+  masked.SetMeshTopology(quad, {0, 1, 2, 0, 2, 3});
+  masked.SetMeshUVs(quad,
+      {{0.0F, 0.5F}, {0.5F, 0.5F}, {1.0F, 0.5F}, {0.5F, 0.5F}});
+  const Toon::TextureId ramp = masked.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 2;
+  texels.height = 1;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 0, 0, 255, 0, 0, 255});
+  masked.SetTexture(ramp, texels);
+  Toon::ToonMaterial mask = red;
+  mask.alpha_mode = Toon::ToonAlphaMode::Mask;
+  mask.base_texture.texture = ramp;
+  mask.base_texture.wrap_s = Toon::ToonWrap::ClampToEdge;
+  mask.base_texture.wrap_t = Toon::ToonWrap::ClampToEdge;
+  const Toon::MaterialId mask_material = masked.CreateMaterial();
+  masked.SetMaterial(mask_material, mask);
+  masked.SetMeshMaterial(quad, mask_material);
+  const Toon::DrawList mask_draws = Toon::ExtractDrawList(masked.Commit());
+
+  struct Shot {
+    Toon::ColorProduct color;
+    Toon::DepthProduct depth;
+  };
+  Shot single_outline;
+  Shot multi_outline;
+  Shot single_mask;
+  Shot multi_mask;
+  if (!single->Render(outline_draws, 64, 64, single_outline.color,
+          single_outline.depth, detail) ||
+      !multi->Render(outline_draws, 64, 64, multi_outline.color,
+          multi_outline.depth, detail) ||
+      !single->Render(mask_draws, 64, 64, single_mask.color, single_mask.depth,
+          detail) ||
+      !multi->Render(mask_draws, 64, 64, multi_mask.color, multi_mask.depth,
+          detail)) {
+    return {id, "fail", detail};
+  }
+  for (const Toon::OffscreenRenderer* renderer : {single.get(), multi.get()}) {
+    if (renderer->statistics().validation_message_count != 0) {
+      return {id, "fail", renderer->statistics().validation_detail};
+    }
+  }
+
+  const auto near = [](const std::array<std::uint8_t, 4>& pixel,
+                        std::uint8_t red_value, std::uint8_t green,
+                        std::uint8_t blue) {
+    const auto close = [](std::uint8_t value, std::uint8_t expected) {
+      return value + 3 >= expected && value <= expected + 3;
+    };
+    return close(pixel[0], red_value) && close(pixel[1], green) &&
+           close(pixel[2], blue);
+  };
+  // The background, 0.05, 0.10, 0.15 in UNORM.
+  const auto background = [&](const std::array<std::uint8_t, 4>& pixel) {
+    return near(pixel, 13, 26, 38);
+  };
+  struct Counts {
+    // Neither background, red nor green.
+    std::uint32_t mixed = 0;
+    // Red and green both at least a sixth: the surface's edge over its hull.
+    std::uint32_t surface_edge = 0;
+  };
+  const auto count = [&](const Toon::ColorProduct& color) {
+    Counts counts;
+    for (std::uint32_t row = 0; row < color.height; ++row) {
+      for (std::uint32_t column = 0; column < color.width; ++column) {
+        const std::array<std::uint8_t, 4> pixel = PixelAt(color, column, row);
+        if (!background(pixel) && !near(pixel, 255, 0, 0) &&
+            !near(pixel, 0, 255, 0)) {
+          ++counts.mixed;
+        }
+        if (pixel[0] >= 43U && pixel[1] >= 43U) {
+          ++counts.surface_edge;
+        }
+      }
+    }
+    return counts;
+  };
+  const Counts single_counts = count(single_outline.color);
+  const Counts multi_counts = count(multi_outline.color);
+  const Counts single_cut = count(single_mask.color);
+  const Counts multi_cut = count(multi_mask.color);
+
+  if (single_counts.mixed != 0 || single_cut.mixed != 0) {
+    return {id, "fail",
+        "at 1 sample every pixel must be the background, the surface or the "
+        "outline"};
+  }
+  if (multi_counts.mixed < 32U || multi_counts.surface_edge < 8U) {
+    return {id, "fail",
+        "multisampled, the hull's silhouette and the surface's edge over it "
+        "must resolve to mixtures"};
+  }
+  // The centre is the surface's, x = 0.58 on the centre row the hull's.
+  for (const auto& [column, row] :
+      {std::pair<std::uint32_t, std::uint32_t>{32, 32}, {50, 32}}) {
+    const std::array<std::uint8_t, 4> one =
+        PixelAt(single_outline.color, column, row);
+    const std::array<std::uint8_t, 4> many =
+        PixelAt(multi_outline.color, column, row);
+    if (!near(many, one[0], one[1], one[2])) {
+      return {id, "fail",
+          "a pixel inside a surface must not change with the sample count"};
+    }
+  }
+  const float centre_depth =
+      single_outline.depth.payload[32U * single_outline.depth.width + 32U];
+  const float resolved_depth =
+      multi_outline.depth.payload[32U * multi_outline.depth.width + 32U];
+  // Sample 0 lies within the pixel, where the facet's depth differs from
+  // the centre's by less than 0.016.
+  if (std::fabs(centre_depth - resolved_depth) > 0.02F ||
+      multi_outline.depth.payload.front() < 0.99F) {
+    return {id, "fail",
+        "the resolved depth must be the surface's inside it and 1 outside"};
+  }
+  // Kept above the diagonal, where x + y > 0, and cut below it.
+  if (!near(PixelAt(multi_mask.color, 40, 20), 255, 0, 0) ||
+      !background(PixelAt(multi_mask.color, 20, 40))) {
+    return {id, "fail",
+        "a Mask surface must be kept above its cutoff and cut below it"};
+  }
+  if (multi_cut.mixed < 16U) {
+    return {id, "fail",
+        "multisampled, alpha to coverage must spread a Mask cut over its "
+        "samples"};
+  }
+  return {id, "pass",
+      std::to_string(samples) + " samples: " +
+          std::to_string(multi_counts.mixed) + " mixed pixels around the " +
+          "outlined diamond, " + std::to_string(multi_cut.mixed) +
+          " along the Mask cut; none at 1 sample"};
+}
+
 Toon::Matrix4 Translation(float x) {
   Toon::Matrix4 matrix;
   matrix.m[12] = x;
@@ -1062,6 +1256,7 @@ int main(int argc, char** argv) {
     checks.push_back(MToonOutlineCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
+    checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
@@ -1073,6 +1268,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mtoon_outline", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
+    checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",

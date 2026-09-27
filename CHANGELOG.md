@@ -32,6 +32,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
   `IsTransparent`, `RenderQueue` and `WritesDepth` state the rules; the host
   frame evidence adds `draws_transparent`. The headless check
   `renderer.material.mtoon_transparent`, and renderer report 15.
+- Anti-aliasing: MSAA, 4 samples per pixel by default, resolved as the
+  scene pass ends, colour by averaging and depth by sample 0, in the
+  offscreen renderer and the viewport. A Mask material's cut is spread over
+  its samples by alpha to coverage in `mtoon_opaque`. `RenderOptions` sets
+  the count, `toon-viewport --samples N` and the `hdToon` render setting
+  `toon:msaaSamples` expose it, and the statistics and host frame evidence
+  record it as `samples`. The headless check `renderer.antialiasing.msaa`,
+  and renderer report 16.
 - Documentation: the release milestones. `v0.x.0` versions replace
   Renderer Phase 0–7 as the delivery sequence; the roadmap has a page per
   coming milestone and no status marks, and the capability matrix is the

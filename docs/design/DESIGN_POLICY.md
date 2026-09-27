@@ -295,6 +295,33 @@ optional shadow → opaque toon → outline → transparent → composite / post
 It exists for resource lifetime, dependencies, barriers, transient resources
 and pass ordering — not as a game-engine graph compiler.
 
+**Anti-aliasing is MSAA**, 4 samples per pixel by default, resolved as the
+scene pass ends: colour by averaging, depth by taking sample 0. The samples
+are transient and never leave the pass. A Mask material turns its alpha
+into coverage (alpha to coverage), its cut spread over the pixel the alpha
+takes to cross the cutoff, so a cutout's edge is anti-aliased like a
+silhouette; a hull cuts a Mask fragment away whole, since it blends by the
+same alpha. The count is fixed for a renderer's life: another count is
+another renderer, which uploads the scene again, so it is a setting, not a
+per-frame choice. One sample turns anti-aliasing off.
+
+What aliases most in a toon renderer is geometric — silhouettes, the
+inverted hull's edge, hair strands and eyelashes, facial features — and
+MSAA resolves exactly that, with no history:
+
+- **Not TAA.** It resolves shading as well, but ghosts under exactly what
+  an avatar does: fast motion, pose changes, hair and facial motion, and an
+  outline that moves with them. It needs motion vectors for skinned and
+  morphed geometry, so the previous frame's joints and weights, and its
+  jitter and history are at odds with late motion latching (§12), which
+  wants what is on screen to be the latest sample, not a blend with the last
+  frames. It can come back only as an addition, after a measurement shows
+  shading aliasing MSAA leaves.
+- **Not FXAA or SMAA.** A post-process filter sees only the resolved image:
+  it cannot recover a hull or a strand thinner than a pixel, which MSAA
+  covers by its samples, and it softens the texture line art a toon
+  material is drawn with.
+
 ## 17. Vulkan frame architecture
 
 ```text

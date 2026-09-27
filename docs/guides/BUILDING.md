@@ -131,6 +131,8 @@ ost validate --intent renderer-viewport
 ```
 
 The first run fetches GLFW. Omit the arguments after `--` for an interactive
-window. The viewport builds its own tree, `build/<target>--renderer-viewport`,
+window. `--samples N` sets the MSAA samples per pixel, 4 by default; 1 turns
+anti-aliasing off. In a Hydra host, the render setting `toon:msaaSamples`
+does the same. The viewport builds its own tree, `build/<target>--renderer-viewport`,
 and `ost validate --intent renderer-viewport` validates that tree and its
 launch record.

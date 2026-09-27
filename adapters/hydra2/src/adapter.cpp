@@ -136,6 +136,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " height=" << height
          << " buffers_written=" << buffers_written
          << " pipelines=" << statistics.pipelines_created
+         << " samples=" << statistics.samples
          << " target_allocations=" << statistics.target_allocations
          << " topology_uploads=" << statistics.topology_uploads
          << " point_uploads=" << statistics.point_uploads
@@ -185,6 +186,22 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
     (skinningDualQuats)
     (skelLocalToWorld)
     (primWorldToLocal));
+
+// The delegate's render settings.
+TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
+    ((msaaSamples, "toon:msaaSamples")));
+
+constexpr int kDefaultSamples = static_cast<int>(Toon::RenderOptions{}.samples);
+
+// The MSAA samples per pixel `toon:msaaSamples` asks for: any number a host
+// can set, at least 1.
+std::uint32_t RequestedSamples(const HdRenderDelegate& delegate) {
+  const VtValue value = delegate.GetRenderSetting(SettingTokens->msaaSamples);
+  const VtValue samples = VtValue::Cast<int>(value);
+  const int requested =
+      samples.IsHolding<int>() ? samples.UncheckedGet<int>() : kDefaultSamples;
+  return static_cast<std::uint32_t>(std::max(requested, 1));
+}
 
 } // namespace
 
@@ -337,7 +354,8 @@ public:
     }
   }
 
-  void Render(const HdRenderPassStateSharedPtr& pass_state) {
+  void Render(const HdRenderPassStateSharedPtr& pass_state,
+      std::uint32_t samples) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
         pass_state->GetAovBindings();
@@ -353,7 +371,7 @@ public:
         height = buffer->GetHeight();
       }
     }
-    if (width == 0 || height == 0 || !EnsureRendererLocked()) {
+    if (width == 0 || height == 0 || !EnsureRendererLocked(samples)) {
       SetConvergedLocked(bindings, false);
       return;
     }
@@ -422,7 +440,14 @@ private:
 
   // The renderer is created on the first frame, not with the delegate, so a
   // delegate that never renders (discovery, probing) never creates a device.
-  bool EnsureRendererLocked() {
+  // A new sample count takes a new renderer, which uploads the scene again:
+  // a settings change, not a per-frame one.
+  bool EnsureRendererLocked(std::uint32_t samples) {
+    if (samples != samples_) {
+      renderer_.reset();
+      renderer_failed_ = false;
+      samples_ = samples;
+    }
     if (renderer_ != nullptr) {
       return true;
     }
@@ -433,7 +458,8 @@ private:
     Toon::FrameStatus status = Toon::FrameStatus::Fail;
     std::string detail;
     renderer_ = Toon::CreateOffscreenRenderer(
-        Toon::SceneShadersIn(shaders.string()), status, detail);
+        Toon::SceneShadersIn(shaders.string()), status, detail,
+        Toon::RenderOptions{samples});
     if (renderer_ == nullptr) {
       renderer_failed_ = true;
       TF_RUNTIME_ERROR("Toon could not create its Vulkan renderer: %s",
@@ -467,6 +493,8 @@ private:
   Toon::ColorProduct color_;
   Toon::DepthProduct depth_;
   std::unique_ptr<Toon::OffscreenRenderer> renderer_;
+  // What `renderer_` was, or failed to be, created for.
+  std::uint32_t samples_{};
   bool renderer_failed_{};
   std::uint64_t frame_index_{};
 };
@@ -877,7 +905,8 @@ private:
   void _Execute(const HdRenderPassStateSharedPtr& render_pass_state,
       const TfTokenVector& render_tags) override {
     (void)render_tags;
-    state_->Render(render_pass_state);
+    state_->Render(render_pass_state,
+        RequestedSamples(*GetRenderIndex()->GetRenderDelegate()));
   }
 
   std::shared_ptr<HdToonAdapterState> state_;
@@ -1218,6 +1247,13 @@ HdToonRenderDelegate::HdToonRenderDelegate(
     : HdRenderDelegate(settings),
       impl_(std::make_unique<Impl>()),
       resources_(std::make_shared<HdResourceRegistry>()) {
+  _PopulateDefaultSettings(GetRenderSettingDescriptors());
+}
+
+HdRenderSettingDescriptorList
+HdToonRenderDelegate::GetRenderSettingDescriptors() const {
+  return {{"MSAA samples per pixel", SettingTokens->msaaSamples,
+      VtValue(kDefaultSamples)}};
 }
 
 HdToonRenderDelegate::~HdToonRenderDelegate() = default;

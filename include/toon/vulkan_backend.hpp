@@ -39,6 +39,14 @@ struct SceneShaders {
 // and `<module>.frag.spv` in one directory.
 [[nodiscard]] SceneShaders SceneShadersIn(const std::string& directory);
 
+// How a renderer rasterizes, fixed for its life.
+struct RenderOptions {
+  // Multisample anti-aliasing: samples per pixel, resolved to one before a
+  // frame's products are read or presented. The device's highest count at
+  // or below this is used; 1 turns it off.
+  std::uint32_t samples = 4;
+};
+
 enum class FrameStatus {
   Pass,
   Fail,
@@ -71,6 +79,8 @@ struct OffscreenStatistics {
   // The last completed frame's timeline value.
   std::uint64_t completion = 0;
   std::uint32_t pipelines_created = 0;
+  // Samples per pixel: RenderOptions' count, as far as the device offers it.
+  std::uint32_t samples = 1;
   std::uint32_t target_allocations = 0;
   std::uint64_t topology_uploads = 0;
   std::uint64_t point_uploads = 0;
@@ -125,7 +135,8 @@ public:
 // Vulkan build, loader, or a 1.3 device with the features the renderer
 // needs) and Fail on a real error; `detail` says which.
 [[nodiscard]] std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
-    const SceneShaders& shaders, FrameStatus& status, std::string& detail);
+    const SceneShaders& shaders, FrameStatus& status, std::string& detail,
+    const RenderOptions& options = {});
 
 // Render `frame_count` frames of `draws` at 64 x 64 on one persistent
 // renderer and return the last frame's products: the headless evidence run.

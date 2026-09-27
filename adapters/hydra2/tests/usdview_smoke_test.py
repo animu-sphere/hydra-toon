@@ -54,3 +54,13 @@ def testUsdviewInputFunction(appController):
     assert updated["target_allocations"] == first["target_allocations"]
     assert updated["topology_uploads"] == first["topology_uploads"]
     assert updated["point_uploads"] > first["point_uploads"]
+
+    # 4x MSAA by default, which every Vulkan device offers. toon:msaaSamples
+    # 1 turns it off; a new sample count takes a new renderer, which creates
+    # its pipelines and uploads the scene again.
+    assert first["samples"] == 4 and updated["samples"] == 4
+    appController._stageView.SetRendererSetting("toon:msaaSamples", 1)
+    single = _render(appController, "single-sample")
+    assert single["samples"] == 1
+    assert single["pipelines"] == 4 and single["target_allocations"] == 1
+    assert single["topology_uploads"] == 1 and single["point_uploads"] == 1

@@ -33,6 +33,7 @@ validation:
     - renderer.material.mtoon_outline
     - renderer.material.mtoon_rim
     - renderer.material.mtoon_transparent
+    - renderer.antialiasing.msaa
     - renderer.skinning.gpu
     - renderer.install_tree
     - renderer.plugin.discovery

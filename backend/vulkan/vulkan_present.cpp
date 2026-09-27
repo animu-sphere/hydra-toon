@@ -28,10 +28,12 @@ namespace Toon {
 
 std::unique_ptr<PresentSession> CreatePresentSession(
     const PresentSurfaceProvider& surface, const SceneShaders& shaders,
-    bool vsync, PresentSetupStatus& status, std::string& error) {
+    bool vsync, PresentSetupStatus& status, std::string& error,
+    const RenderOptions& options) {
   (void)surface;
   (void)shaders;
   (void)vsync;
+  (void)options;
   status = PresentSetupStatus::Unavailable;
   error = "Vulkan backend was not compiled for this configuration";
   return nullptr;
@@ -42,6 +44,7 @@ std::unique_ptr<PresentSession> CreatePresentSession(
 namespace {
 
 using vulkan_internal::BeginSceneRendering;
+using vulkan_internal::ChooseSampleCount;
 using vulkan_internal::CreateDeviceImage;
 using vulkan_internal::CreateInstanceWithValidation;
 using vulkan_internal::CreateScenePipelines;
@@ -54,6 +57,7 @@ using vulkan_internal::InstanceState;
 using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
+using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
 using vulkan_internal::SceneShaderWords;
 using vulkan_internal::ScenePipelines;
@@ -133,7 +137,8 @@ public:
   }
 
   PresentSetupStatus Initialize(const PresentSurfaceProvider& provider,
-      const SceneShaders& shaders, bool vsync, std::string& error);
+      const SceneShaders& shaders, bool vsync, const RenderOptions& options,
+      std::string& error);
 
   [[nodiscard]] bool RenderFrame(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, bool& presented,
@@ -173,6 +178,9 @@ private:
   VkExtent2D extent_{};
   std::vector<VkImage> images_;
   std::vector<VkImageView> views_;
+  // Multisampled, the pass draws into `color_samples_` and resolves it into
+  // the swapchain image; `depth_` then holds samples too.
+  DeviceImage color_samples_;
   DeviceImage depth_;
   // Present-wait semaphores are per swapchain image: a single semaphore may
   // still be in use by an outstanding present when the next frame needs it.
@@ -183,7 +191,7 @@ private:
 
 PresentSetupStatus VulkanPresentSession::Initialize(
     const PresentSurfaceProvider& provider, const SceneShaders& shaders,
-    bool vsync, std::string& error) {
+    bool vsync, const RenderOptions& options, std::string& error) {
   if (provider.create_surface == nullptr) {
     error = "the surface provider carries no create_surface callback";
     return PresentSetupStatus::Error;
@@ -330,8 +338,11 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
 
+  const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
+      surface_format_.format, kDepthFormat, options.samples);
+  statistics_.samples = static_cast<std::uint32_t>(samples);
   if (!CreateScenePipelines(device_, words, surface_format_.format,
-          kDepthFormat, pipelines_, error) ||
+          kDepthFormat, samples, pipelines_, error) ||
       !materials_.Initialize(physical_device_, device_,
           pipelines_.material_layout, error) ||
       !textures_.Initialize(physical_device_, device_,
@@ -459,9 +470,22 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
     }
   }
 
+  // Only the resolved colour outlives the pass.
+  const VkSampleCountFlagBits samples = pipelines_.samples;
+  const VkImageUsageFlags transient =
+      samples != VK_SAMPLE_COUNT_1_BIT ? VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT
+                                       : 0U;
   if (!CreateDeviceImage(physical_device_, device_, kDepthFormat,
-          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
-          extent.width, extent.height, depth_, error)) {
+          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | transient,
+          VK_IMAGE_ASPECT_DEPTH_BIT, extent.width, extent.height, depth_, error,
+          1, samples)) {
+    return false;
+  }
+  if (samples != VK_SAMPLE_COUNT_1_BIT &&
+      !CreateDeviceImage(physical_device_, device_, surface_format_.format,
+          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | transient,
+          VK_IMAGE_ASPECT_COLOR_BIT, extent.width, extent.height,
+          color_samples_, error, 1, samples)) {
     return false;
   }
 
@@ -520,7 +544,9 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     return false;
   }
   textures_.RecordUploads(command_);
-  // The colour transition waits at the stage the acquire semaphore gates.
+  // The colour transitions wait at the stage the acquire semaphore gates;
+  // a resolve into the swapchain image writes it at that stage too.
+  const bool multisampled = color_samples_.image != VK_NULL_HANDLE;
   const VkImageMemoryBarrier2 to_attachment[] = {
       ImageBarrier(images_[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
@@ -536,12 +562,22 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
           VK_IMAGE_LAYOUT_UNDEFINED,
           VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+      ImageBarrier(color_samples_.image, VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
   };
   VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-  dependency.imageMemoryBarrierCount = 2;
+  dependency.imageMemoryBarrierCount = multisampled ? 3U : 2U;
   dependency.pImageMemoryBarriers = to_attachment;
   vkCmdPipelineBarrier2(command_, &dependency);
-  BeginSceneRendering(command_, views_[image_index], depth_.view, extent_);
+  SceneAttachments attachments{views_[image_index], depth_.view};
+  if (multisampled) {
+    attachments = {color_samples_.view, depth_.view, views_[image_index]};
+  }
+  BeginSceneRendering(command_, attachments, extent_);
   meshes_.Record(command_, pipelines_, materials_, draws);
   vkCmdEndRendering(command_);
   const VkImageMemoryBarrier2 to_present = ImageBarrier(images_[image_index],
@@ -630,6 +666,7 @@ void VulkanPresentSession::DestroySwapchainObjects() {
   }
   render_finished_.clear();
   DestroyDeviceImage(device_, depth_);
+  DestroyDeviceImage(device_, color_samples_);
   for (VkImageView view : views_) {
     vkDestroyImageView(device_, view, nullptr);
   }
@@ -667,9 +704,10 @@ void VulkanPresentSession::Destroy() {
 
 std::unique_ptr<PresentSession> CreatePresentSession(
     const PresentSurfaceProvider& surface, const SceneShaders& shaders,
-    bool vsync, PresentSetupStatus& status, std::string& error) {
+    bool vsync, PresentSetupStatus& status, std::string& error,
+    const RenderOptions& options) {
   auto session = std::make_unique<VulkanPresentSession>();
-  status = session->Initialize(surface, shaders, vsync, error);
+  status = session->Initialize(surface, shaders, vsync, options, error);
   if (status != PresentSetupStatus::Ready) {
     return nullptr;
   }
