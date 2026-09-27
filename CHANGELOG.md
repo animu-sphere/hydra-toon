@@ -57,13 +57,28 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - The VRM `usdview` session runs as an OpenStrata Formation of the canonical
   `lookdev` runtime, `vrmImaging` and the `toon` package; renderer report 06
   and `ost` report 05, which re-verifies report 04 against `ost` 0.23.11.
+- The first Renderer Phase 1 slice: meshes bind their material, and a mesh
+  whose material selected MToon draws through `mtoon_opaque`
+  (`shaders/mtoon.slang`): lit and shade colours with shading shift and
+  toony, GI equalization and emission, untextured, under a stand-in camera
+  key light. Each material is a slot in one parameter buffer, rewritten only
+  when its values change. `RenderWorld` binds a material per mesh and
+  derives smooth vertex normals from the points and topology. `hdToon` syncs
+  a mesh's material binding and reverses a left-handed mesh's winding.
+- The headless assertion `renderer.material.mtoon_opaque`, and
+  `material_writes`, `draws` and `draws_mtoon` in the host frame evidence;
+  renderer report 07.
 
 ### Changed
 
 - The bootstrap triangle is a scene mesh drawn by `shaders/mesh.slang`
   through the same pipeline on every host; `triangle.slang` is gone.
 - `renderer.frame.persistence` also requires one pipeline, one target
-  allocation and one mesh upload across its 1,000 frames.
+  allocation and one mesh upload across its 1,000 frames. With
+  `mtoon_opaque` it requires the two scene pipelines, each created once.
+- `CreateOffscreenRenderer`, `RenderOffscreen` and `CreatePresentSession`
+  take a `SceneShaders` set, which `SceneShadersIn` fills from a shader
+  directory, instead of one vertex and fragment shader path.
 - The swapchain path renders with dynamic rendering and a depth attachment,
   and tracks its frame on a timeline semaphore instead of a fence.
 - The device must be Vulkan 1.3 with `dynamicRendering`, `synchronization2`

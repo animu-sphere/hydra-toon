@@ -49,15 +49,32 @@ Matrix4 VulkanClipFromWorld(const ToonView& view) {
   return Multiply(vulkan_clip, Multiply(view.projection, view.view));
 }
 
+namespace {
+
+// What distinguishes the scene pipelines; everything else they share.
+struct PipelineDescription {
+  const std::vector<std::uint32_t>* vertex_words = nullptr;
+  const std::vector<std::uint32_t>* fragment_words = nullptr;
+  std::uint32_t push_constant_size = 0;
+  VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+  // Position, then normal when there are two.
+  std::uint32_t vertex_streams = 1;
+  // Cull mode and front face set per draw rather than baked in.
+  bool dynamic_culling = false;
+};
+
 bool CreateScenePipeline(VkDevice device,
-    const std::vector<std::uint32_t>& vertex_words,
-    const std::vector<std::uint32_t>& fragment_words, VkFormat color_format,
+    const PipelineDescription& description, VkFormat color_format,
     VkFormat depth_format, ScenePipeline& pipeline, std::string& detail) {
   VkPushConstantRange push_range{};
   push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  push_range.size = sizeof(DrawConstants);
+  push_range.size = description.push_constant_size;
   VkPipelineLayoutCreateInfo layout_create{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  if (description.set_layout != VK_NULL_HANDLE) {
+    layout_create.setLayoutCount = 1;
+    layout_create.pSetLayouts = &description.set_layout;
+  }
   layout_create.pushConstantRangeCount = 1;
   layout_create.pPushConstantRanges = &push_range;
   if (!VulkanOk(vkCreatePipelineLayout(device, &layout_create, nullptr,
@@ -66,8 +83,10 @@ bool CreateScenePipeline(VkDevice device,
     return false;
   }
 
-  VkShaderModule vertex_module = CreateShader(device, vertex_words, detail);
-  VkShaderModule fragment_module = CreateShader(device, fragment_words, detail);
+  VkShaderModule vertex_module =
+      CreateShader(device, *description.vertex_words, detail);
+  VkShaderModule fragment_module =
+      CreateShader(device, *description.fragment_words, detail);
   if (vertex_module == VK_NULL_HANDLE || fragment_module == VK_NULL_HANDLE) {
     vkDestroyShaderModule(device, vertex_module, nullptr);
     vkDestroyShaderModule(device, fragment_module, nullptr);
@@ -82,21 +101,24 @@ bool CreateScenePipeline(VkDevice device,
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = fragment_module;
   stages[1].pName = "main";
-  VkVertexInputBindingDescription binding{};
-  binding.binding = 0;
-  binding.stride = sizeof(Float3);
-  binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-  VkVertexInputAttributeDescription position{};
-  position.location = 0;
-  position.binding = 0;
-  position.format = VK_FORMAT_R32G32B32_SFLOAT;
-  position.offset = 0;
+  VkVertexInputBindingDescription bindings[2]{};
+  VkVertexInputAttributeDescription attributes[2]{};
+  for (std::uint32_t stream = 0; stream < description.vertex_streams;
+       ++stream) {
+    bindings[stream].binding = stream;
+    bindings[stream].stride = sizeof(Float3);
+    bindings[stream].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    attributes[stream].location = stream;
+    attributes[stream].binding = stream;
+    attributes[stream].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[stream].offset = 0;
+  }
   VkPipelineVertexInputStateCreateInfo vertex_input{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-  vertex_input.vertexBindingDescriptionCount = 1;
-  vertex_input.pVertexBindingDescriptions = &binding;
-  vertex_input.vertexAttributeDescriptionCount = 1;
-  vertex_input.pVertexAttributeDescriptions = &position;
+  vertex_input.vertexBindingDescriptionCount = description.vertex_streams;
+  vertex_input.pVertexBindingDescriptions = bindings;
+  vertex_input.vertexAttributeDescriptionCount = description.vertex_streams;
+  vertex_input.pVertexAttributeDescriptions = attributes;
   VkPipelineInputAssemblyStateCreateInfo input_assembly{
       VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
   input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -108,6 +130,8 @@ bool CreateScenePipeline(VkDevice device,
       VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
   raster.polygonMode = VK_POLYGON_MODE_FILL;
   raster.cullMode = VK_CULL_MODE_NONE;
+  // The Vulkan clip transform flips y, so a triangle counter-clockwise on
+  // screen under OpenGL's convention stays counter-clockwise here.
   raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   raster.lineWidth = 1.0F;
   VkPipelineMultisampleStateCreateInfo multisample{
@@ -126,11 +150,13 @@ bool CreateScenePipeline(VkDevice device,
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   blend.attachmentCount = 1;
   blend.pAttachments = &blend_attachment;
+  // Cull mode and front face are core dynamic state in Vulkan 1.3.
   const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
-      VK_DYNAMIC_STATE_SCISSOR};
+      VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE,
+      VK_DYNAMIC_STATE_FRONT_FACE};
   VkPipelineDynamicStateCreateInfo dynamic{
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic.dynamicStateCount = 2;
+  dynamic.dynamicStateCount = description.dynamic_culling ? 4U : 2U;
   dynamic.pDynamicStates = dynamic_states;
   VkPipelineRenderingCreateInfo rendering{
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -162,6 +188,107 @@ void DestroyScenePipeline(VkDevice device, ScenePipeline& pipeline) {
   vkDestroyPipeline(device, pipeline.pipeline, nullptr);
   vkDestroyPipelineLayout(device, pipeline.layout, nullptr);
   pipeline = {};
+}
+
+Float3 Cross(const Float3& a, const Float3& b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// Writes the rows of the inverse transpose of `matrix`'s upper 3x3, each
+// padded to four floats, and returns whether the 3x3 mirrors, which turns a
+// counter-clockwise triangle clockwise. The inverse transpose's columns are
+// the cross products of the matrix's columns over its determinant.
+bool NormalRows(const Matrix4& matrix, float rows[12]) {
+  const Float3 a0{matrix.m[0], matrix.m[1], matrix.m[2]};
+  const Float3 a1{matrix.m[4], matrix.m[5], matrix.m[6]};
+  const Float3 a2{matrix.m[8], matrix.m[9], matrix.m[10]};
+  const Float3 c0 = Cross(a1, a2);
+  const Float3 c1 = Cross(a2, a0);
+  const Float3 c2 = Cross(a0, a1);
+  const float determinant = a0.x * c0.x + a0.y * c0.y + a0.z * c0.z;
+  const float scale = determinant == 0.0F ? 1.0F : 1.0F / determinant;
+  const Float3 columns[3] = {c0, c1, c2};
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      const Float3& source = columns[column];
+      const float value = row == 0 ? source.x : row == 1 ? source.y : source.z;
+      rows[row * 4 + column] = value * scale;
+    }
+    rows[row * 4 + 3] = 0.0F;
+  }
+  return determinant < 0.0F;
+}
+
+void WriteParameters(const ToonMaterial& material, MToonParameters& slot) {
+  slot = {};
+  slot.base_color[0] = material.base_color.x;
+  slot.base_color[1] = material.base_color.y;
+  slot.base_color[2] = material.base_color.z;
+  slot.base_color[3] = material.alpha;
+  slot.shade_color[0] = material.mtoon.shade_color.x;
+  slot.shade_color[1] = material.mtoon.shade_color.y;
+  slot.shade_color[2] = material.mtoon.shade_color.z;
+  slot.shade_color[3] = material.alpha_mode == ToonAlphaMode::Mask
+                            ? material.alpha_cutoff
+                            : -1.0F;
+  slot.emissive[0] = material.emissive.x;
+  slot.emissive[1] = material.emissive.y;
+  slot.emissive[2] = material.emissive.z;
+  slot.shading[0] = material.mtoon.shading_shift;
+  slot.shading[1] = material.mtoon.shading_toony;
+  slot.shading[2] = material.mtoon.gi_equalization;
+}
+
+} // namespace
+
+bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
+    std::string& detail) {
+  return LoadSpirv(shaders.mesh_vertex, words.mesh_vertex, detail) &&
+         LoadSpirv(shaders.mesh_fragment, words.mesh_fragment, detail) &&
+         LoadSpirv(shaders.mtoon_vertex, words.mtoon_vertex, detail) &&
+         LoadSpirv(shaders.mtoon_fragment, words.mtoon_fragment, detail);
+}
+
+bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
+    VkFormat color_format, VkFormat depth_format, ScenePipelines& pipelines,
+    std::string& detail) {
+  VkDescriptorSetLayoutBinding material_binding{};
+  material_binding.binding = 0;
+  material_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  material_binding.descriptorCount = 1;
+  material_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutCreateInfo set_layout_create{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  set_layout_create.bindingCount = 1;
+  set_layout_create.pBindings = &material_binding;
+  if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
+                    nullptr, &pipelines.material_layout),
+          "vkCreateDescriptorSetLayout", detail)) {
+    return false;
+  }
+
+  PipelineDescription mesh;
+  mesh.vertex_words = &words.mesh_vertex;
+  mesh.fragment_words = &words.mesh_fragment;
+  mesh.push_constant_size = sizeof(DrawConstants);
+  PipelineDescription mtoon;
+  mtoon.vertex_words = &words.mtoon_vertex;
+  mtoon.fragment_words = &words.mtoon_fragment;
+  mtoon.push_constant_size = sizeof(MToonDrawConstants);
+  mtoon.set_layout = pipelines.material_layout;
+  mtoon.vertex_streams = 2;
+  mtoon.dynamic_culling = true;
+  return CreateScenePipeline(device, mesh, color_format, depth_format,
+             pipelines.mesh, detail) &&
+         CreateScenePipeline(device, mtoon, color_format, depth_format,
+             pipelines.mtoon, detail);
+}
+
+void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
+  DestroyScenePipeline(device, pipelines.mtoon);
+  DestroyScenePipeline(device, pipelines.mesh);
+  vkDestroyDescriptorSetLayout(device, pipelines.material_layout, nullptr);
+  pipelines = {};
 }
 
 bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
@@ -339,6 +466,122 @@ bool InvalidateIfNeeded(VkDevice device, const HostBuffer& buffer,
       "vkInvalidateMappedMemoryRanges", detail);
 }
 
+bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
+    VkDevice device, VkDescriptorSetLayout layout, std::string& detail) {
+  physical_device_ = physical_device;
+  device_ = device;
+  VkDescriptorPoolSize pool_size{};
+  pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  pool_size.descriptorCount = 1;
+  VkDescriptorPoolCreateInfo pool_create{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  pool_create.maxSets = 1;
+  pool_create.poolSizeCount = 1;
+  pool_create.pPoolSizes = &pool_size;
+  if (!VulkanOk(vkCreateDescriptorPool(device_, &pool_create, nullptr, &pool_),
+          "vkCreateDescriptorPool", detail)) {
+    return false;
+  }
+  VkDescriptorSetAllocateInfo allocate{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  allocate.descriptorPool = pool_;
+  allocate.descriptorSetCount = 1;
+  allocate.pSetLayouts = &layout;
+  if (!VulkanOk(vkAllocateDescriptorSets(device_, &allocate, &set_),
+          "vkAllocateDescriptorSets", detail)) {
+    return false;
+  }
+  // The set is valid before any material exists.
+  return Reserve(64, detail);
+}
+
+bool MaterialCache::Update(const DrawList& draws, std::string& detail) {
+  ++generation_;
+  bool written = false;
+  for (const MaterialSnapshot& material : draws.materials) {
+    auto found = entries_.find(material.id);
+    if (found == entries_.end()) {
+      std::uint32_t slot = 0;
+      if (!free_slots_.empty()) {
+        slot = free_slots_.back();
+        free_slots_.pop_back();
+      } else {
+        if (next_slot_ == capacity_ && !Reserve(capacity_ * 2U, detail)) {
+          return false;
+        }
+        slot = next_slot_++;
+      }
+      found = entries_.emplace(material.id, Entry{slot}).first;
+    }
+    Entry& entry = found->second;
+    if (entry.parameters_revision != material.parameters_revision) {
+      auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
+      WriteParameters(material.material, slots[entry.slot]);
+      entry.parameters_revision = material.parameters_revision;
+      entry.model = material.material.model;
+      entry.double_sided = material.material.double_sided;
+      ++writes_;
+      written = true;
+    }
+    entry.generation = generation_;
+  }
+  for (auto entry = entries_.begin(); entry != entries_.end();) {
+    if (entry->second.generation != generation_) {
+      free_slots_.push_back(entry->second.slot);
+      entry = entries_.erase(entry);
+    } else {
+      ++entry;
+    }
+  }
+  return !written || FlushIfNeeded(device_, buffer_, detail);
+}
+
+const MaterialCache::Entry* MaterialCache::Find(MaterialId material) const {
+  const auto found = entries_.find(material);
+  return found == entries_.end() ? nullptr : &found->second;
+}
+
+void MaterialCache::Destroy() {
+  DestroyHostBuffer(device_, buffer_);
+  // Frees the set with it.
+  vkDestroyDescriptorPool(device_, pool_, nullptr);
+  pool_ = VK_NULL_HANDLE;
+  set_ = VK_NULL_HANDLE;
+  entries_.clear();
+  free_slots_.clear();
+  capacity_ = 0;
+  next_slot_ = 0;
+}
+
+bool MaterialCache::Reserve(std::uint32_t slots, std::string& detail) {
+  HostBuffer grown;
+  if (!CreateHostBuffer(physical_device_, device_,
+          static_cast<VkDeviceSize>(slots) * sizeof(MToonParameters),
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, grown, detail)) {
+    DestroyHostBuffer(device_, grown);
+    return false;
+  }
+  // Every slot moves with its contents, so growing rewrites no material.
+  if (buffer_.mapped != nullptr) {
+    std::memcpy(grown.mapped, buffer_.mapped,
+        static_cast<std::size_t>(capacity_) * sizeof(MToonParameters));
+  }
+  DestroyHostBuffer(device_, buffer_);
+  buffer_ = grown;
+  capacity_ = slots;
+  VkDescriptorBufferInfo buffer_info{};
+  buffer_info.buffer = buffer_.buffer;
+  buffer_info.range = VK_WHOLE_SIZE;
+  VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  write.dstSet = set_;
+  write.dstBinding = 0;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  write.pBufferInfo = &buffer_info;
+  vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+  return FlushIfNeeded(device_, buffer_, detail);
+}
+
 void MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device) {
   physical_device_ = physical_device;
   device_ = device;
@@ -367,11 +610,21 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
       entry.points_revision = mesh.points_revision;
       ++point_uploads_;
     }
+    // Normals follow the points, so they are not counted apart from them.
+    if (entry.normals_revision != mesh.normals_revision) {
+      if (!Upload(entry.normals, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+              mesh.normals->data(), mesh.normals->size() * sizeof(Float3),
+              detail)) {
+        return false;
+      }
+      entry.normals_revision = mesh.normals_revision;
+    }
     entry.generation = generation_;
   }
   for (auto entry = entries_.begin(); entry != entries_.end();) {
     if (entry->second.generation != generation_) {
       DestroyHostBuffer(device_, entry->second.vertices);
+      DestroyHostBuffer(device_, entry->second.normals);
       DestroyHostBuffer(device_, entry->second.indices);
       entry = entries_.erase(entry);
     } else {
@@ -381,12 +634,23 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
   return true;
 }
 
-void MeshCache::Record(VkCommandBuffer command, const ScenePipeline& pipeline,
-    const DrawList& draws, const Matrix4& clip_from_world) const {
-  vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
+void MeshCache::Record(VkCommandBuffer command,
+    const ScenePipelines& pipelines, const MaterialCache& materials,
+    const DrawList& draws) const {
+  const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
+  const auto mtoon_material =
+      [&materials](const MeshSnapshot& mesh) -> const MaterialCache::Entry* {
+    const MaterialCache::Entry* material = materials.Find(mesh.material);
+    return material != nullptr && material->model == ToonShadingModel::MToon
+               ? material
+               : nullptr;
+  };
+
+  vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      pipelines.mesh.pipeline);
   for (const MeshSnapshot& mesh : draws.draws) {
     const auto found = entries_.find(mesh.id);
-    if (found == entries_.end()) {
+    if (found == entries_.end() || mtoon_material(mesh) != nullptr) {
       continue;
     }
     const Entry& entry = found->second;
@@ -401,7 +665,40 @@ void MeshCache::Record(VkCommandBuffer command, const ScenePipeline& pipeline,
     constants.color[1] = mesh.color.y;
     constants.color[2] = mesh.color.z;
     constants.color[3] = 1.0F;
-    vkCmdPushConstants(command, pipeline.layout,
+    vkCmdPushConstants(command, pipelines.mesh.layout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+        sizeof(constants), &constants);
+    vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
+  }
+
+  vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      pipelines.mtoon.pipeline);
+  const VkDescriptorSet material_set = materials.descriptor_set();
+  vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      pipelines.mtoon.layout, 0, 1, &material_set, 0, nullptr);
+  for (const MeshSnapshot& mesh : draws.draws) {
+    const auto found = entries_.find(mesh.id);
+    const MaterialCache::Entry* material = mtoon_material(mesh);
+    if (found == entries_.end() || material == nullptr) {
+      continue;
+    }
+    const Entry& entry = found->second;
+    const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer};
+    const VkDeviceSize offsets[] = {0, 0};
+    vkCmdBindVertexBuffers(command, 0, 2, streams, offsets);
+    vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+    MToonDrawConstants constants{};
+    const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
+    std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
+        sizeof(constants.clip_from_object));
+    const bool mirrored = NormalRows(Multiply(draws.view.view, mesh.transform),
+        constants.view_normal_rows);
+    constants.material_slot = material->slot;
+    vkCmdSetCullMode(command, material->double_sided ? VK_CULL_MODE_NONE
+                                                     : VK_CULL_MODE_BACK_BIT);
+    vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
+                                        : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdPushConstants(command, pipelines.mtoon.layout,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
     vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
@@ -411,6 +708,7 @@ void MeshCache::Record(VkCommandBuffer command, const ScenePipeline& pipeline,
 void MeshCache::Destroy() {
   for (auto& entry : entries_) {
     DestroyHostBuffer(device_, entry.second.vertices);
+    DestroyHostBuffer(device_, entry.second.normals);
     DestroyHostBuffer(device_, entry.second.indices);
   }
   entries_.clear();

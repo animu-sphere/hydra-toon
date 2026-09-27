@@ -2,9 +2,48 @@
 #include <toon/render_world.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace Toon {
+
+namespace {
+
+// Area-weighted face normals summed at each corner's point, the smooth
+// normals Storm computes for a mesh without authored ones. A point no
+// triangle reaches, or whose triangles cancel, gets +z.
+std::vector<Float3> SmoothNormals(const std::vector<Float3>& points,
+    const std::vector<std::uint32_t>& indices) {
+  std::vector<Float3> normals(points.size());
+  for (std::size_t corner = 0; corner + 2U < indices.size(); corner += 3U) {
+    const Float3& a = points[indices[corner]];
+    const Float3& b = points[indices[corner + 1U]];
+    const Float3& c = points[indices[corner + 2U]];
+    const Float3 ab{b.x - a.x, b.y - a.y, b.z - a.z};
+    const Float3 ac{c.x - a.x, c.y - a.y, c.z - a.z};
+    // Twice the triangle's area, along its counter-clockwise normal.
+    const Float3 face{ab.y * ac.z - ab.z * ac.y, ab.z * ac.x - ab.x * ac.z,
+        ab.x * ac.y - ab.y * ac.x};
+    for (std::size_t offset = 0; offset < 3U; ++offset) {
+      Float3& normal = normals[indices[corner + offset]];
+      normal.x += face.x;
+      normal.y += face.y;
+      normal.z += face.z;
+    }
+  }
+  for (Float3& normal : normals) {
+    const float length = std::sqrt(
+        normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    if (length > 0.0F && std::isfinite(length)) {
+      normal = {normal.x / length, normal.y / length, normal.z / length};
+    } else {
+      normal = {0.0F, 0.0F, 1.0F};
+    }
+  }
+  return normals;
+}
+
+} // namespace
 
 Matrix4 Multiply(const Matrix4& left, const Matrix4& right) {
   Matrix4 result;
@@ -22,7 +61,7 @@ Matrix4 Multiply(const Matrix4& left, const Matrix4& right) {
 
 MeshId RenderWorld::CreateMesh() {
   const MeshId id = next_mesh_++;
-  MeshSnapshot& mesh = meshes_[id];
+  MeshSnapshot& mesh = meshes_[id].snapshot;
   mesh.id = id;
   mesh.points = std::make_shared<const std::vector<Float3>>();
   mesh.points_revision = Stamp();
@@ -40,44 +79,55 @@ void RenderWorld::RemoveMesh(MeshId mesh) {
 
 void RenderWorld::SetMeshTopology(MeshId mesh,
     std::vector<std::uint32_t> triangles) {
-  if (MeshSnapshot* record = Find(mesh)) {
+  if (MeshRecord* record = Find(mesh)) {
     triangles.resize(triangles.size() - triangles.size() % 3U);
     const auto largest = std::max_element(triangles.begin(), triangles.end());
-    record->index_bound = largest == triangles.end() ? 0U : *largest + 1U;
-    record->indices =
+    MeshSnapshot& snapshot = record->snapshot;
+    snapshot.index_bound = largest == triangles.end() ? 0U : *largest + 1U;
+    snapshot.indices =
         std::make_shared<const std::vector<std::uint32_t>>(std::move(triangles));
-    record->topology_revision = Stamp();
+    snapshot.topology_revision = Stamp();
+    record->normals_stale = true;
     dirty_ = true;
   }
 }
 
 void RenderWorld::SetMeshPoints(MeshId mesh, std::vector<Float3> points) {
-  if (MeshSnapshot* record = Find(mesh)) {
-    record->points =
+  if (MeshRecord* record = Find(mesh)) {
+    record->snapshot.points =
         std::make_shared<const std::vector<Float3>>(std::move(points));
-    record->points_revision = Stamp();
+    record->snapshot.points_revision = Stamp();
+    record->normals_stale = true;
     dirty_ = true;
   }
 }
 
 void RenderWorld::SetMeshTransform(MeshId mesh, const Matrix4& transform) {
-  if (MeshSnapshot* record = Find(mesh)) {
-    record->transform = transform;
+  if (MeshRecord* record = Find(mesh)) {
+    record->snapshot.transform = transform;
     dirty_ = true;
   }
 }
 
 void RenderWorld::SetMeshColor(MeshId mesh, Float3 color) {
-  if (MeshSnapshot* record = Find(mesh)) {
-    record->color = color;
+  if (MeshRecord* record = Find(mesh)) {
+    record->snapshot.color = color;
     dirty_ = true;
   }
 }
 
 void RenderWorld::SetMeshVisible(MeshId mesh, bool visible) {
-  MeshSnapshot* record = Find(mesh);
-  if (record != nullptr && record->visible != visible) {
-    record->visible = visible;
+  MeshRecord* record = Find(mesh);
+  if (record != nullptr && record->snapshot.visible != visible) {
+    record->snapshot.visible = visible;
+    dirty_ = true;
+  }
+}
+
+void RenderWorld::SetMeshMaterial(MeshId mesh, MaterialId material) {
+  MeshRecord* record = Find(mesh);
+  if (record != nullptr && record->snapshot.material != material) {
+    record->snapshot.material = material;
     dirty_ = true;
   }
 }
@@ -149,8 +199,18 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   snapshot.view = view_;
   snapshot.view_revision = view_revision_;
   snapshot.meshes.clear();
-  for (const auto& entry : meshes_) {
-    snapshot.meshes.push_back(entry.second);
+  for (auto& entry : meshes_) {
+    MeshRecord& record = entry.second;
+    if (record.normals_stale) {
+      MeshSnapshot& mesh = record.snapshot;
+      mesh.normals = mesh.points->size() < mesh.index_bound
+                         ? std::make_shared<const std::vector<Float3>>()
+                         : std::make_shared<const std::vector<Float3>>(
+                               SmoothNormals(*mesh.points, *mesh.indices));
+      mesh.normals_revision = Stamp();
+      record.normals_stale = false;
+    }
+    snapshot.meshes.push_back(record.snapshot);
   }
   snapshot.materials.clear();
   for (const auto& entry : materials_) {
@@ -164,7 +224,7 @@ FrameSnapshot RenderWorld::Commit() {
   return snapshot;
 }
 
-MeshSnapshot* RenderWorld::Find(MeshId mesh) {
+RenderWorld::MeshRecord* RenderWorld::Find(MeshId mesh) {
   const auto found = meshes_.find(mesh);
   return found == meshes_.end() ? nullptr : &found->second;
 }

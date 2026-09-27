@@ -1,7 +1,8 @@
 # Current
 
-The work around Renderer Phase 0 and before Renderer Phase 1. Which release
-carries a phase is the [status table](README.md#status-at-a-glance).
+Renderer Phase 0's stand-ins, the work that precedes Renderer Phase 1's
+MToon path, and Renderer Phase 1 itself. Which release carries a phase is the
+[status table](README.md#status-at-a-glance).
 
 Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️ accepted workaround
 
@@ -58,6 +59,33 @@ Before Renderer Phase 4:
 - ⬜ **MAT-Q1 for MMD.** Propose to `usd-mmd-plugins` that `mmdImaging`
   expose `MmdMaterialAPI` in the shape `vrmImaging` froze, so one read path
   serves both models.
+
+## Renderer Phase 1 — Avatar MVP
+
+[Design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases):
+a VRM character displays in real time.
+
+- ✅ **Material binding and `mtoon_opaque`, untextured.** Meshes bind their
+  material; MToon's lit / shade split, shading shift and toony, GI
+  equalization and emission from a parameter slot
+  ([renderer report 07](../reports/renderer/07-2026-09-27-mtoon-opaque.md)).
+- ⬜ **Basic textures.** The base and shade colour textures, with UVs from
+  the mesh; a texture's identity is structural
+  ([material policy §8](../design/MATERIAL_POLICY.md#8-values-that-change-at-run-time)).
+  Next: without them a VRM avatar is nearly white.
+- ⬜ **GPU skinning**, replacing the CPU ext computations.
+- ⬜ **Inverted-hull outline** (`mtoon_outline`,
+  [material policy §5](../design/MATERIAL_POLICY.md#5-outline)).
+
+Stand-ins this phase accepts so far:
+
+- ⚠️ **Lighting is fixed in the shader**: one white key light attached to
+  the camera and a uniform ambient. Replace when `hdToon` reads the scene's
+  lights.
+- ⚠️ **Blend materials draw opaque** through `mtoon_opaque`, until
+  `mtoon_transparent` (Renderer Phase 2's alpha mode).
+- ⚠️ **Normals are derived, never read**: smooth normals from the points,
+  so an authored hard edge is lost.
 
 ## Project infrastructure
 

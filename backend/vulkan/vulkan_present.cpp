@@ -2,7 +2,7 @@
 // Swapchain presentation of a scene's DrawList. The backend owns the
 // VkSurfaceKHR and every swapchain object; the window layer only supplies the
 // surface-creation callback and the platform instance extensions. One frame
-// in flight, tracked by a timeline semaphore; the mesh pipeline uses dynamic
+// in flight, tracked by a timeline semaphore; the scene pipelines use dynamic
 // rendering, so a resize rebuilds only the swapchain and its depth image.
 #include <toon/vulkan_present.hpp>
 
@@ -27,12 +27,10 @@ namespace Toon {
 #if !defined(TOON_HAS_VULKAN)
 
 std::unique_ptr<PresentSession> CreatePresentSession(
-    const PresentSurfaceProvider& surface, const std::string& vertex_shader,
-    const std::string& fragment_shader, bool vsync, PresentSetupStatus& status,
-    std::string& error) {
+    const PresentSurfaceProvider& surface, const SceneShaders& shaders,
+    bool vsync, PresentSetupStatus& status, std::string& error) {
   (void)surface;
-  (void)vertex_shader;
-  (void)fragment_shader;
+  (void)shaders;
   (void)vsync;
   status = PresentSetupStatus::Unavailable;
   error = "Vulkan backend was not compiled for this configuration";
@@ -46,20 +44,21 @@ namespace {
 using vulkan_internal::BeginSceneRendering;
 using vulkan_internal::CreateDeviceImage;
 using vulkan_internal::CreateInstanceWithValidation;
-using vulkan_internal::CreateScenePipeline;
+using vulkan_internal::CreateScenePipelines;
 using vulkan_internal::DestroyDeviceImage;
 using vulkan_internal::DestroyInstance;
-using vulkan_internal::DestroyScenePipeline;
+using vulkan_internal::DestroyScenePipelines;
 using vulkan_internal::DeviceImage;
 using vulkan_internal::ImageBarrier;
 using vulkan_internal::InstanceState;
-using vulkan_internal::LoadSpirv;
+using vulkan_internal::LoadSceneShaders;
+using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
 using vulkan_internal::SceneDeviceFeatures;
-using vulkan_internal::ScenePipeline;
+using vulkan_internal::SceneShaderWords;
+using vulkan_internal::ScenePipelines;
 using vulkan_internal::SupportsSceneFeatures;
 using vulkan_internal::ValidationState;
-using vulkan_internal::VulkanClipFromWorld;
 using vulkan_internal::VulkanOk;
 
 constexpr std::uint64_t kFrameTimeoutNs = 10'000'000'000ULL;
@@ -133,9 +132,7 @@ public:
   }
 
   PresentSetupStatus Initialize(const PresentSurfaceProvider& provider,
-      const std::string& vertex_shader,
-      const std::string& fragment_shader, bool vsync,
-      std::string& error);
+      const SceneShaders& shaders, bool vsync, std::string& error);
 
   [[nodiscard]] bool RenderFrame(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, bool& presented,
@@ -163,7 +160,8 @@ private:
   VkCommandBuffer command_ = VK_NULL_HANDLE;
   VkSurfaceFormatKHR surface_format_{};
   VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_FIFO_KHR;
-  ScenePipeline pipeline_;
+  ScenePipelines pipelines_;
+  MaterialCache materials_;
   MeshCache meshes_;
   VkSemaphore image_available_ = VK_NULL_HANDLE;
   // Frame N signals value N; one frame is in flight.
@@ -182,16 +180,14 @@ private:
 };
 
 PresentSetupStatus VulkanPresentSession::Initialize(
-    const PresentSurfaceProvider& provider, const std::string& vertex_shader,
-    const std::string& fragment_shader, bool vsync, std::string& error) {
+    const PresentSurfaceProvider& provider, const SceneShaders& shaders,
+    bool vsync, std::string& error) {
   if (provider.create_surface == nullptr) {
     error = "the surface provider carries no create_surface callback";
     return PresentSetupStatus::Error;
   }
-  std::vector<std::uint32_t> vertex_words;
-  std::vector<std::uint32_t> fragment_words;
-  if (!LoadSpirv(vertex_shader, vertex_words, error) ||
-      !LoadSpirv(fragment_shader, fragment_words, error)) {
+  SceneShaderWords words;
+  if (!LoadSceneShaders(shaders, words, error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -333,8 +329,10 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
 
-  if (!CreateScenePipeline(device_, vertex_words, fragment_words,
-          surface_format_.format, kDepthFormat, pipeline_, error)) {
+  if (!CreateScenePipelines(device_, words, surface_format_.format,
+          kDepthFormat, pipelines_, error) ||
+      !materials_.Initialize(physical_device_, device_,
+          pipelines_.material_layout, error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -501,7 +499,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
     return VulkanOk(acquire, "vkAcquireNextImageKHR", error);
   }
-  if (!meshes_.Update(draws, error)) {
+  if (!meshes_.Update(draws, error) || !materials_.Update(draws, error)) {
     return false;
   }
 
@@ -537,7 +535,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   dependency.pImageMemoryBarriers = to_attachment;
   vkCmdPipelineBarrier2(command_, &dependency);
   BeginSceneRendering(command_, views_[image_index], depth_.view, extent_);
-  meshes_.Record(command_, pipeline_, draws, VulkanClipFromWorld(draws.view));
+  meshes_.Record(command_, pipelines_, materials_, draws);
   vkCmdEndRendering(command_);
   const VkImageMemoryBarrier2 to_present = ImageBarrier(images_[image_index],
       VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -642,9 +640,10 @@ void VulkanPresentSession::Destroy() {
     vkDeviceWaitIdle(device_);
     DestroySwapchainObjects();
     meshes_.Destroy();
+    materials_.Destroy();
     vkDestroySemaphore(device_, timeline_, nullptr);
     vkDestroySemaphore(device_, image_available_, nullptr);
-    DestroyScenePipeline(device_, pipeline_);
+    DestroyScenePipelines(device_, pipelines_);
     vkDestroyCommandPool(device_, command_pool_, nullptr);
     vkDestroyDevice(device_, nullptr);
     device_ = VK_NULL_HANDLE;
@@ -659,12 +658,10 @@ void VulkanPresentSession::Destroy() {
 } // namespace
 
 std::unique_ptr<PresentSession> CreatePresentSession(
-    const PresentSurfaceProvider& surface, const std::string& vertex_shader,
-    const std::string& fragment_shader, bool vsync, PresentSetupStatus& status,
-    std::string& error) {
+    const PresentSurfaceProvider& surface, const SceneShaders& shaders,
+    bool vsync, PresentSetupStatus& status, std::string& error) {
   auto session = std::make_unique<VulkanPresentSession>();
-  status = session->Initialize(surface, vertex_shader, fragment_shader, vsync,
-      error);
+  status = session->Initialize(surface, shaders, vsync, error);
   if (status != PresentSetupStatus::Ready) {
     return nullptr;
   }

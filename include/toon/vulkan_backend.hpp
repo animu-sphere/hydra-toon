@@ -15,6 +15,22 @@ struct BackendCapability {
   std::string detail;
 };
 
+// The SPIR-V of every scene pipeline. Paths are explicit so build-tree and
+// install-tree layouts exercise the same backend code without source-tree
+// fallbacks.
+struct SceneShaders {
+  // Unlit, one colour per draw: meshes that bind no MToon material.
+  std::string mesh_vertex;
+  std::string mesh_fragment;
+  // mtoon_opaque (material policy §7).
+  std::string mtoon_vertex;
+  std::string mtoon_fragment;
+};
+
+// The shaders as the build and install trees lay them out: `<module>.vert.spv`
+// and `<module>.frag.spv` in one directory.
+[[nodiscard]] SceneShaders SceneShadersIn(const std::string& directory);
+
 enum class FrameStatus {
   Pass,
   Fail,
@@ -50,6 +66,8 @@ struct OffscreenStatistics {
   std::uint32_t target_allocations = 0;
   std::uint64_t topology_uploads = 0;
   std::uint64_t point_uploads = 0;
+  // Material parameter slots written: one per new or changed material.
+  std::uint64_t material_writes = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;
@@ -90,17 +108,13 @@ public:
 
 // Returns nullptr with `status` Skip when this environment cannot render (no
 // Vulkan build, loader, or a 1.3 device with the features the renderer
-// needs) and Fail on a real error; `detail` says which. Shader paths are
-// explicit so build-tree and install-tree layouts exercise the same backend
-// code without source-tree fallbacks.
+// needs) and Fail on a real error; `detail` says which.
 [[nodiscard]] std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
-    const std::string& vertex_shader, const std::string& fragment_shader,
-    FrameStatus& status, std::string& detail);
+    const SceneShaders& shaders, FrameStatus& status, std::string& detail);
 
 // Render `frame_count` frames of `draws` at 64 x 64 on one persistent
 // renderer and return the last frame's products: the headless evidence run.
 [[nodiscard]] GpuFrameEvidence RenderOffscreen(const DrawList& draws,
-    const std::string& vertex_shader, const std::string& fragment_shader,
-    std::uint32_t frame_count);
+    const SceneShaders& shaders, std::uint32_t frame_count);
 
 } // namespace Toon

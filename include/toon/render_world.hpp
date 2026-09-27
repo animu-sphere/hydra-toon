@@ -37,6 +37,7 @@ struct ToonView {
 };
 
 using MeshId = std::uint32_t;
+using MaterialId = std::uint32_t;
 
 // Geometry is immutable once committed, so a snapshot shares it with the
 // world instead of copying it.
@@ -50,13 +51,21 @@ struct MeshSnapshot {
   MeshId id = 0;
   PointArray points;
   std::uint64_t points_revision = 0;
-  // Triangle list, three indices per triangle.
+  // Triangle list, three indices per triangle, counter-clockwise seen from
+  // the front.
   IndexArray indices;
   std::uint64_t topology_revision = 0;
   // One past the largest index; a draw needs at least this many points.
   std::uint32_t index_bound = 0;
+  // Smooth vertex normals, one per point, derived from the points and
+  // topology at commit, as Storm derives them for a mesh that is skinned or
+  // authors none. Empty while the topology indexes past the points.
+  PointArray normals;
+  std::uint64_t normals_revision = 0;
   Matrix4 transform;
   Float3 color{0.5F, 0.5F, 0.5F};
+  // 0 when the mesh binds no material; it then draws its colour, unlit.
+  MaterialId material = 0;
   bool visible = true;
 };
 
@@ -116,8 +125,6 @@ struct ToonMaterial {
 [[nodiscard]] bool IsStructuralChange(const ToonMaterial& before,
     const ToonMaterial& after);
 
-using MaterialId = std::uint32_t;
-
 // One material as of a commit. `parameters_revision` advances on any change
 // and `structure_revision` only on a structural one, so a consumer rewrites
 // a parameter slot without rebuilding what draws it (design policy §14).
@@ -150,6 +157,8 @@ public:
   void SetMeshTransform(MeshId mesh, const Matrix4& transform);
   void SetMeshColor(MeshId mesh, Float3 color);
   void SetMeshVisible(MeshId mesh, bool visible);
+  // Binds a material by id; 0, or an id no material has, draws unlit.
+  void SetMeshMaterial(MeshId mesh, MaterialId material);
   void SetView(const ToonView& view);
 
   // A new material is the default `ToonMaterial`: the fallback material.
@@ -167,7 +176,13 @@ public:
   [[nodiscard]] FrameSnapshot Commit();
 
 private:
-  MeshSnapshot* Find(MeshId mesh);
+  struct MeshRecord {
+    MeshSnapshot snapshot;
+    // Set by a points or topology edit; the next commit recomputes normals.
+    bool normals_stale = true;
+  };
+
+  MeshRecord* Find(MeshId mesh);
   std::uint64_t Stamp();
 
   std::uint64_t revision_ = 0;
@@ -176,7 +191,7 @@ private:
   MeshId next_mesh_ = 1;
   ToonView view_;
   std::uint64_t view_revision_ = 0;
-  std::map<MeshId, MeshSnapshot> meshes_;
+  std::map<MeshId, MeshRecord> meshes_;
   MaterialId next_material_ = 1;
   std::map<MaterialId, MaterialSnapshot> materials_;
 };

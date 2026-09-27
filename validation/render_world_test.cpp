@@ -124,5 +124,55 @@ int main() {
           "a removed material must be gone")) {
     return 1;
   }
+
+  // Smooth normals follow the points and topology, counter-clockwise
+  // triangles facing their normal, and nothing else advances them.
+  const Toon::MeshId quad = world.CreateMesh();
+  world.SetMeshTopology(quad, {0, 1, 2, 0, 2, 3});
+  world.SetMeshPoints(quad, {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}});
+  const Toon::MeshSnapshot flat = world.Commit().meshes[0];
+  bool facing = flat.normals != nullptr && flat.normals->size() == 4;
+  for (std::size_t point = 0; facing && point < 4; ++point) {
+    const Toon::Float3& normal = (*flat.normals)[point];
+    facing = normal.x == 0.0F && normal.y == 0.0F && normal.z == 1.0F;
+  }
+  if (!Check(facing, "a flat quad's normals must face +z")) {
+    return 1;
+  }
+  world.SetMeshColor(quad, {1, 0, 0});
+  const Toon::MeshSnapshot recoloured = world.Commit().meshes[0];
+  if (!Check(recoloured.normals_revision == flat.normals_revision &&
+                 recoloured.normals == flat.normals,
+          "a colour edit must not recompute normals")) {
+    return 1;
+  }
+  world.SetMeshTopology(quad, {0, 2, 1, 0, 3, 2});
+  const Toon::MeshSnapshot flipped = world.Commit().meshes[0];
+  if (!Check(flipped.normals_revision != flat.normals_revision &&
+                 (*flipped.normals)[0].z == -1.0F,
+          "reversed winding must reverse the normals")) {
+    return 1;
+  }
+
+  // A mesh binds a material by id; unbinding or an unknown id draws unlit.
+  const Toon::MaterialId bound = world.CreateMaterial();
+  world.SetMeshMaterial(quad, bound);
+  const Toon::FrameSnapshot binding = world.Commit();
+  if (!Check(binding.meshes[0].material == bound,
+          "a bound material must reach the snapshot") ||
+      !Check(Toon::ExtractDrawList(binding).materials.size() == 1,
+          "extraction must carry the materials")) {
+    return 1;
+  }
+  world.SetMeshMaterial(quad, bound);
+  if (!Check(world.Commit().revision == binding.revision,
+          "rebinding the same material must not commit")) {
+    return 1;
+  }
+  world.SetMeshMaterial(quad, 0);
+  if (!Check(world.Commit().meshes[0].material == 0,
+          "unbinding must reach the snapshot")) {
+    return 1;
+  }
   return 0;
 }

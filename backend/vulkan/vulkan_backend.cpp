@@ -2,6 +2,7 @@
 #include <toon/vulkan_backend.hpp>
 
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -15,6 +16,12 @@
 #endif
 
 namespace Toon {
+
+SceneShaders SceneShadersIn(const std::string& directory) {
+  const std::filesystem::path root(directory);
+  return {(root / "mesh.vert.spv").string(), (root / "mesh.frag.spv").string(),
+      (root / "mtoon.vert.spv").string(), (root / "mtoon.frag.spv").string()};
+}
 
 BackendCapability ProbeVulkanBackend() {
 #if defined(TOON_HAS_VULKAN)
@@ -39,23 +46,24 @@ using vulkan_internal::BeginSceneRendering;
 using vulkan_internal::CreateDeviceImage;
 using vulkan_internal::CreateHostBuffer;
 using vulkan_internal::CreateInstanceWithValidation;
-using vulkan_internal::CreateScenePipeline;
+using vulkan_internal::CreateScenePipelines;
 using vulkan_internal::DestroyDeviceImage;
 using vulkan_internal::DestroyHostBuffer;
 using vulkan_internal::DestroyInstance;
-using vulkan_internal::DestroyScenePipeline;
+using vulkan_internal::DestroyScenePipelines;
 using vulkan_internal::DeviceImage;
 using vulkan_internal::HostBuffer;
 using vulkan_internal::ImageBarrier;
 using vulkan_internal::InstanceState;
 using vulkan_internal::InvalidateIfNeeded;
-using vulkan_internal::LoadSpirv;
+using vulkan_internal::LoadSceneShaders;
+using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
 using vulkan_internal::SceneDeviceFeatures;
-using vulkan_internal::ScenePipeline;
+using vulkan_internal::SceneShaderWords;
+using vulkan_internal::ScenePipelines;
 using vulkan_internal::SupportsSceneFeatures;
 using vulkan_internal::ValidationState;
-using vulkan_internal::VulkanClipFromWorld;
 using vulkan_internal::VulkanOk;
 
 constexpr VkFormat kColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -98,8 +106,7 @@ public:
     Destroy();
   }
 
-  FrameStatus Initialize(const std::string& vertex_shader,
-      const std::string& fragment_shader, std::string& detail);
+  FrameStatus Initialize(const SceneShaders& shaders, std::string& detail);
 
   [[nodiscard]] bool Render(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, ColorProduct& color, DepthProduct& depth,
@@ -127,7 +134,8 @@ private:
   // value N.
   VkSemaphore timeline_ = VK_NULL_HANDLE;
   std::uint64_t submitted_ = 0;
-  ScenePipeline pipeline_;
+  ScenePipelines pipelines_;
+  MaterialCache materials_;
   MeshCache meshes_;
   std::uint32_t width_ = 0;
   std::uint32_t height_ = 0;
@@ -138,13 +146,10 @@ private:
   OffscreenStatistics statistics_;
 };
 
-FrameStatus VulkanOffscreenRenderer::Initialize(
-    const std::string& vertex_shader, const std::string& fragment_shader,
+FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     std::string& detail) {
-  std::vector<std::uint32_t> vertex_words;
-  std::vector<std::uint32_t> fragment_words;
-  if (!LoadSpirv(vertex_shader, vertex_words, detail) ||
-      !LoadSpirv(fragment_shader, fragment_words, detail)) {
+  SceneShaderWords words;
+  if (!LoadSceneShaders(shaders, words, detail)) {
     return FrameStatus::Fail;
   }
 
@@ -234,11 +239,13 @@ FrameStatus VulkanOffscreenRenderer::Initialize(
     return FrameStatus::Fail;
   }
 
-  if (!CreateScenePipeline(device_, vertex_words, fragment_words, kColorFormat,
-          kDepthFormat, pipeline_, detail)) {
+  if (!CreateScenePipelines(device_, words, kColorFormat, kDepthFormat,
+          pipelines_, detail) ||
+      !materials_.Initialize(physical_device_, device_,
+          pipelines_.material_layout, detail)) {
     return FrameStatus::Fail;
   }
-  ++statistics_.pipelines_created;
+  statistics_.pipelines_created += ScenePipelines::kCount;
 
   VkPhysicalDeviceProperties properties{};
   vkGetPhysicalDeviceProperties(physical_device_, &properties);
@@ -263,10 +270,10 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
     error = "the render extent must be non-zero";
     return false;
   }
-  // One frame in flight: the previous frame has completed before its targets
-  // or geometry are touched.
+  // One frame in flight: the previous frame has completed before its
+  // targets, geometry or material slots are touched.
   if (!WaitForCompletion(error) || !EnsureTargets(width, height, error) ||
-      !meshes_.Update(draws, error)) {
+      !meshes_.Update(draws, error) || !materials_.Update(draws, error)) {
     return false;
   }
 
@@ -302,7 +309,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   vkCmdPipelineBarrier2(command_, &dependency);
 
   BeginSceneRendering(command_, color_.view, depth_.view, {width_, height_});
-  meshes_.Record(command_, pipeline_, draws, VulkanClipFromWorld(draws.view));
+  meshes_.Record(command_, pipelines_, materials_, draws);
   vkCmdEndRendering(command_);
 
   const VkImageMemoryBarrier2 to_transfer[] = {
@@ -391,6 +398,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   statistics_.completion = submitted_;
   statistics_.topology_uploads = meshes_.topology_uploads();
   statistics_.point_uploads = meshes_.point_uploads();
+  statistics_.material_writes = materials_.writes();
   statistics_.validation_message_count = validation_.message_count;
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;
@@ -451,8 +459,9 @@ void VulkanOffscreenRenderer::Destroy() {
     // Teardown, not an ordinary frame: waiting for the device is allowed here.
     vkDeviceWaitIdle(device_);
     meshes_.Destroy();
+    materials_.Destroy();
     DestroyTargets();
-    DestroyScenePipeline(device_, pipeline_);
+    DestroyScenePipelines(device_, pipelines_);
     vkDestroySemaphore(device_, timeline_, nullptr);
     vkDestroyCommandPool(device_, command_pool_, nullptr);
     vkDestroyDevice(device_, nullptr);
@@ -465,17 +474,15 @@ void VulkanOffscreenRenderer::Destroy() {
 #endif
 
 std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
-    const std::string& vertex_shader, const std::string& fragment_shader,
-    FrameStatus& status, std::string& detail) {
+    const SceneShaders& shaders, FrameStatus& status, std::string& detail) {
 #if !defined(TOON_HAS_VULKAN)
-  (void)vertex_shader;
-  (void)fragment_shader;
+  (void)shaders;
   status = FrameStatus::Skip;
   detail = "Vulkan backend was not compiled for this configuration";
   return nullptr;
 #else
   auto renderer = std::make_unique<VulkanOffscreenRenderer>();
-  status = renderer->Initialize(vertex_shader, fragment_shader, detail);
+  status = renderer->Initialize(shaders, detail);
   if (status != FrameStatus::Pass) {
     return nullptr;
   }
@@ -484,16 +491,15 @@ std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
 }
 
 GpuFrameEvidence RenderOffscreen(const DrawList& draws,
-    const std::string& vertex_shader, const std::string& fragment_shader,
-    std::uint32_t frame_count) {
+    const SceneShaders& shaders, std::uint32_t frame_count) {
   GpuFrameEvidence evidence;
   if (frame_count == 0) {
     evidence.status = FrameStatus::Fail;
     evidence.detail = "frame_count must be at least 1";
     return evidence;
   }
-  auto renderer = CreateOffscreenRenderer(vertex_shader, fragment_shader,
-      evidence.status, evidence.detail);
+  auto renderer =
+      CreateOffscreenRenderer(shaders, evidence.status, evidence.detail);
   if (renderer == nullptr) {
 #if !defined(TOON_HAS_VULKAN)
     evidence.statistics.validation_detail =

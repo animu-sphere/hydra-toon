@@ -12,7 +12,7 @@ function(toon_install_renderer)
   install(TARGETS toon-headless
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
   if(TOON_WITH_VULKAN)
-    install(FILES "${TOON_VERTEX_SPV}" "${TOON_FRAGMENT_SPV}"
+    install(FILES ${TOON_SHADER_SPVS}
       DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders")
   endif()
   install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
