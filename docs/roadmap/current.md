@@ -18,7 +18,9 @@ Stand-ins Phase 0 accepted, each replaced by the phase named:
 
 - ⚠️ **Geometry is written on the render thread** into host-visible buffers,
   not staged off-thread ([§20](../design/DESIGN_POLICY.md#20-asset-upload)).
-  Replace before avatar-sized uploads are measured, no later than Renderer
+  Textures, since Renderer Phase 1, are staged, but decoded during material
+  sync and copied on the graphics queue at the start of a frame. Replace
+  both before avatar-sized uploads are measured, no later than Renderer
   Phase 1.
 - ⚠️ **Skinned points come from Hydra's CPU ext computations.** Renderer
   Phase 1's GPU skinning replaces them.
@@ -69,11 +71,11 @@ a VRM character displays in real time.
   material; MToon's lit / shade split, shading shift and toony, GI
   equalization and emission from a parameter slot
   ([renderer report 07](../reports/renderer/07-2026-09-27-mtoon-opaque.md)).
-- ⬜ **Basic textures.** The base and shade colour textures, with UVs from
-  the mesh; a texture's identity is structural
-  ([material policy §8](../design/MATERIAL_POLICY.md#8-values-that-change-at-run-time)).
-  Next: without them a VRM avatar is nearly white.
-- ⬜ **GPU skinning**, replacing the CPU ext computations.
+- ✅ **Basic textures.** The base and shade colour textures, with UVs from
+  the mesh's `st`, each with its wrap and texture transform; a texture's
+  identity is structural
+  ([renderer report 08](../reports/renderer/08-2026-09-27-basic-textures.md)).
+- ⬜ **GPU skinning**, replacing the CPU ext computations. Next.
 - ⬜ **Inverted-hull outline** (`mtoon_outline`,
   [material policy §5](../design/MATERIAL_POLICY.md#5-outline)).
 
@@ -86,6 +88,14 @@ Stand-ins this phase accepts so far:
   `mtoon_transparent` (Renderer Phase 2's alpha mode).
 - ⚠️ **Normals are derived, never read**: smooth normals from the points,
   so an authored hard edge is lost.
+- ⚠️ **Only a vertex or varying `st` is read.** The VRM importer writes
+  TEXCOORD_0 there and no other set; a face-varying `st` needs split
+  vertices, which the core does not make.
+- ⚠️ **The texture table has 128 entries**, a fixed array indexed per draw,
+  not bindless ([design policy §22](../design/DESIGN_POLICY.md#22-gpu-driven-rendering)).
+  Past 128 images, a texture samples white until an entry frees.
+- ⚠️ **Every texture is sampled trilinearly**, because glTF's sampler filters
+  are not on the stage.
 
 ## Project infrastructure
 

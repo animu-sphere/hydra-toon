@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -207,6 +208,99 @@ Check MToonOpaqueCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// mtoon_opaque's textures: the bootstrap triangle, every corner at st
+// (0.25, 0.75), samples a 2x2 sRGB texture whose top left is red, top right
+// green, bottom left blue and bottom right white. Red shows that st's
+// bottom-left origin reaches the image's top-left rows; an offset of
+// (0.5, 0), a value-only edit, moves the lit side to green with no upload;
+// the same texture as the shade texture, lit fully from behind by a shading
+// shift of -1 and offset (0, 0.5), draws blue without a second upload.
+Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_textured";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  world.SetBootstrapTriangle();
+  const Toon::MeshId mesh = world.Commit().meshes.front().id;
+  world.SetMeshUVs(mesh, {{0.25F, 0.75F}, {0.25F, 0.75F}, {0.25F, 0.75F}});
+  const Toon::TextureId texture = world.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 2;
+  texels.height = 2;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255,
+          255, 255, 255, 255, 255});
+  world.SetTexture(texture, texels);
+  const Toon::MaterialId material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_texture.texture = texture;
+  world.SetMaterial(material, toon);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  const auto render = [&](std::array<std::uint8_t, 4>& pixel,
+                          Toon::OffscreenStatistics& statistics) {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    pixel = CenterPixel(color);
+    statistics = renderer->statistics();
+    return true;
+  };
+  std::array<std::uint8_t, 4> red{};
+  std::array<std::uint8_t, 4> green{};
+  std::array<std::uint8_t, 4> blue{};
+  Toon::OffscreenStatistics first;
+  Toon::OffscreenStatistics second;
+  Toon::OffscreenStatistics third;
+  if (!render(red, first)) {
+    return {id, "fail", detail};
+  }
+  toon.base_texture.offset = {0.5F, 0.0F};
+  world.SetMaterial(material, toon);
+  if (!render(green, second)) {
+    return {id, "fail", detail};
+  }
+  toon.mtoon.shading_shift = -1.0F;
+  toon.mtoon.shade_texture.texture = texture;
+  toon.mtoon.shade_texture.offset = {0.0F, 0.5F};
+  world.SetMaterial(material, toon);
+  if (!render(blue, third)) {
+    return {id, "fail", detail};
+  }
+
+  if (third.validation_message_count != 0) {
+    return {id, "fail", third.validation_detail};
+  }
+  if (red[0] < 200U || red[1] > 50U || red[2] > 50U) {
+    return {id, "fail", "st (0.25, 0.75) did not sample the top-left texel"};
+  }
+  if (green[1] < 200U || green[0] > 50U || green[2] > 50U) {
+    return {id, "fail", "a UV offset of (0.5, 0) did not sample the top right"};
+  }
+  if (blue[2] < 200U || blue[0] > 50U) {
+    return {id, "fail", "the shade texture did not draw the shade side"};
+  }
+  if (first.texture_uploads != 1 || third.texture_uploads != 1 ||
+      second.material_writes != first.material_writes + 1U ||
+      third.pipelines_created != first.pipelines_created ||
+      third.point_uploads != first.point_uploads ||
+      third.topology_uploads != first.topology_uploads) {
+    return {id, "fail",
+        "a texture must upload once however it is sampled, and a UV edit "
+        "must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 std::string Status(Toon::FrameStatus status) {
   switch (status) {
   case Toon::FrameStatus::Pass:
@@ -330,12 +424,14 @@ int main(int argc, char** argv) {
                        : "1,000 frames did not complete on the scene "
                          "pipelines, one target allocation and mesh upload"});
     checks.push_back(MToonOpaqueCheck(shaders));
+    checks.push_back(MToonTexturedCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
     checks.push_back({"renderer.render_product.color", "skip", dependent});
     checks.push_back({"renderer.render_product.depth", "skip", dependent});
     checks.push_back({"renderer.frame.persistence", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
   }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",
       install_tree ? "" : "run the renderer install-tree CTest"});

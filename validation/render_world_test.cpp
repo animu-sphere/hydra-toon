@@ -4,7 +4,10 @@
 #include <toon/extraction.hpp>
 #include <toon/render_world.hpp>
 
+#include <cstdint>
 #include <iostream>
+#include <memory>
+#include <vector>
 
 namespace {
 
@@ -172,6 +175,83 @@ int main() {
   world.SetMeshMaterial(quad, 0);
   if (!Check(world.Commit().meshes[0].material == 0,
           "unbinding must reach the snapshot")) {
+    return 1;
+  }
+
+  // Texture coordinates have their own revision.
+  const Toon::MeshSnapshot untextured = world.Commit().meshes[0];
+  world.SetMeshUVs(quad, {{0, 0}, {1, 0}, {1, 1}, {0, 1}});
+  const Toon::MeshSnapshot mapped = world.Commit().meshes[0];
+  if (!Check(untextured.uvs != nullptr && untextured.uvs->empty(),
+          "a mesh without texture coordinates must carry none") ||
+      !Check(mapped.uvs_revision != untextured.uvs_revision &&
+                 mapped.uvs->size() == 4,
+          "a texture coordinate edit must advance its revision") ||
+      !Check(mapped.points_revision == untextured.points_revision &&
+                 mapped.normals_revision == untextured.normals_revision,
+          "a texture coordinate edit must not touch the points")) {
+    return 1;
+  }
+
+  // A texture's pixels have their own revision; a material that starts or
+  // stops sampling one changes structurally, one that only moves its UV
+  // transform does not (material policy §8).
+  const Toon::TextureId texture = world.CreateTexture();
+  const Toon::TextureSnapshot blank = world.Commit().textures[0];
+  if (!Check(blank.texture.width == 0 && blank.texture.pixels->empty(),
+          "a new texture must have no pixels")) {
+    return 1;
+  }
+  Toon::ToonTexture texels;
+  texels.width = 1;
+  texels.height = 2;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255});
+  world.SetTexture(texture, texels);
+  const Toon::FrameSnapshot painted = world.Commit();
+  if (!Check(painted.textures[0].revision != blank.revision &&
+                 painted.textures[0].texture.height == 2,
+          "a pixel edit must advance the texture revision") ||
+      !Check(Toon::ExtractDrawList(painted).textures.size() == 1,
+          "extraction must carry the textures")) {
+    return 1;
+  }
+  texels.height = 3;
+  world.SetTexture(texture, texels);
+  if (!Check(world.Commit().textures[0].texture.pixels->empty(),
+          "pixels that do not fill the size must be dropped")) {
+    return 1;
+  }
+  Toon::ToonMaterial textured;
+  textured.model = Toon::ToonShadingModel::MToon;
+  world.SetMaterial(bound, textured);
+  const Toon::MaterialSnapshot plain = world.Commit().materials[0];
+  textured.base_texture.texture = texture;
+  world.SetMaterial(bound, textured);
+  const Toon::MaterialSnapshot sampling = world.Commit().materials[0];
+  if (!Check(sampling.structure_revision != plain.structure_revision,
+          "sampling a texture must be structural")) {
+    return 1;
+  }
+  textured.base_texture.offset = {0.5F, 0.0F};
+  textured.base_texture.wrap_s = Toon::ToonWrap::ClampToEdge;
+  world.SetMaterial(bound, textured);
+  const Toon::MaterialSnapshot moved_uv = world.Commit().materials[0];
+  if (!Check(moved_uv.parameters_revision != sampling.parameters_revision &&
+                 moved_uv.structure_revision == sampling.structure_revision,
+          "a UV transform or wrap edit must not be structural")) {
+    return 1;
+  }
+  textured.mtoon.shade_texture.texture = texture;
+  world.SetMaterial(bound, textured);
+  if (!Check(world.Commit().materials[0].structure_revision !=
+                 moved_uv.structure_revision,
+          "sampling a shade texture must be structural")) {
+    return 1;
+  }
+  world.RemoveTexture(texture);
+  if (!Check(world.Commit().textures.empty(),
+          "a removed texture must be gone")) {
     return 1;
   }
   return 0;

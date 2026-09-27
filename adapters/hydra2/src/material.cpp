@@ -1,14 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Material selection and normalization from a Hydra material prim's data
-// sources. Kept apart from Windows.h, whose OPAQUE macro would collide.
+// sources, and the decoding of the images a material samples. Kept apart
+// from Windows.h, whose OPAQUE macro would collide.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/staticTokens.h>
 #include <pxr/imaging/hd/materialSchema.h>
+#include <pxr/imaging/hio/image.h>
+#include <pxr/imaging/hio/types.h>
+#include <pxr/usd/sdf/assetPath.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -50,7 +64,21 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (uvAnimationScrollYSpeedFactor)
     (uvAnimationRotationSpeedFactor)
     (renderQueueOffsetNumber)
-    (transparentWithZWrite));
+    (transparentWithZWrite)
+
+    (textureInfo)
+    (baseColor)
+    (shadeMultiply)
+    (file)
+    (texCoord)
+    (wrapS)
+    (wrapT)
+    (transform)
+    (offset)
+    (rotation)
+    (scale)
+    ((wrapClampToEdge, "clampToEdge"))
+    ((wrapMirroredRepeat, "mirroredRepeat")));
 
 HdContainerDataSourceHandle Group(const HdContainerDataSourceHandle& parent,
     const TfToken& name) {
@@ -75,6 +103,69 @@ void Read(const HdContainerDataSourceHandle& group, const TfToken& name,
   GfVec3f color;
   if (Read(group, name, color)) {
     value = {color[0], color[1], color[2]};
+  }
+}
+
+void Read(const HdContainerDataSourceHandle& group, const TfToken& name,
+    Toon::Float2& value) {
+  GfVec2f pair;
+  if (Read(group, name, pair)) {
+    value = {pair[0], pair[1]};
+  }
+}
+
+Toon::ToonWrap ToWrap(const TfToken& wrap) {
+  return wrap == _tokens->wrapClampToEdge ? Toon::ToonWrap::ClampToEdge
+         : wrap == _tokens->wrapMirroredRepeat
+             ? Toon::ToonWrap::MirroredRepeat
+             : Toon::ToonWrap::Repeat;
+}
+
+// Once per authored path, so a material that syncs again stays quiet.
+void WarnUnresolved(const std::string& authored) {
+  static std::mutex mutex;
+  static std::set<std::string> warned;
+  std::scoped_lock lock(mutex);
+  if (warned.insert(authored).second) {
+    TF_WARN("Toon: texture '%s' does not resolve; the material samples "
+            "without it", authored.c_str());
+  }
+}
+
+// VrmTextureInfoAPI:<role>: the image and how it is sampled. `file` is
+// present only when authored, and is the path the session's resolver gave
+// it (vrmImaging §29). Only TEXCOORD_0 reaches a mesh, as `st`, so a role
+// that samples another set is read as sampling nothing.
+void ReadTexture(const HdContainerDataSourceHandle& group,
+    Toon::ToonTextureEncoding encoding, HdToonTextureKey& key,
+    Toon::ToonTextureRef& texture) {
+  if (!group) {
+    return;
+  }
+  SdfAssetPath file;
+  int tex_coord = 0;
+  Read(group, _tokens->texCoord, tex_coord);
+  if (!Read(group, _tokens->file, file) || tex_coord != 0) {
+    return;
+  }
+  if (file.GetResolvedPath().empty()) {
+    WarnUnresolved(file.GetAssetPath());
+    return;
+  }
+  key.path = file.GetResolvedPath();
+  key.encoding = encoding;
+  TfToken wrap;
+  if (Read(group, _tokens->wrapS, wrap)) {
+    texture.wrap_s = ToWrap(wrap);
+  }
+  if (Read(group, _tokens->wrapT, wrap)) {
+    texture.wrap_t = ToWrap(wrap);
+  }
+  if (const HdContainerDataSourceHandle transform =
+          Group(group, _tokens->transform)) {
+    Read(transform, _tokens->offset, texture.offset);
+    Read(transform, _tokens->rotation, texture.rotation);
+    Read(transform, _tokens->scale, texture.scale);
   }
 }
 
@@ -151,12 +242,14 @@ bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
 // Rule 2 of the selection, MMD, waits for `mmdImaging`'s Hydra view
 // (MAT-Q1). Rule 3's surface network is read in Renderer Phase 5; until then
 // a PreviewSurface material has the fallback material's values.
-Toon::ToonMaterial HdToonReadMaterial(const HdContainerDataSourceHandle& prim) {
-  Toon::ToonMaterial result;
+HdToonMaterialSource HdToonReadMaterial(
+    const HdContainerDataSourceHandle& prim) {
+  HdToonMaterialSource source;
+  Toon::ToonMaterial& result = source.values;
   const HdContainerDataSourceHandle vrm = Group(prim, _tokens->vrm);
   const HdContainerDataSourceHandle mtoon = Group(vrm, _tokens->mtoon);
   if (!mtoon) {
-    return result;
+    return source;
   }
   result.model = Toon::ToonShadingModel::MToon;
   if (const HdContainerDataSourceHandle material =
@@ -164,7 +257,74 @@ Toon::ToonMaterial HdToonReadMaterial(const HdContainerDataSourceHandle& prim) {
     ReadCommon(material, result);
   }
   ReadMToon(mtoon, result);
-  return result;
+  // Both roles are colour (the schema fixes colour or data by role).
+  const HdContainerDataSourceHandle textures =
+      Group(vrm, _tokens->textureInfo);
+  ReadTexture(Group(textures, _tokens->baseColor),
+      Toon::ToonTextureEncoding::Srgb, source.base_texture,
+      result.base_texture);
+  ReadTexture(Group(textures, _tokens->shadeMultiply),
+      Toon::ToonTextureEncoding::Srgb, source.shade_texture,
+      result.mtoon.shade_texture);
+  return source;
+}
+
+// HioImage opens the path through Ar, so a path inside a package (a .usdz)
+// reads as a file does. 8- and 16-bit images of one to four channels are
+// read; a 16-bit channel keeps its high byte.
+bool HdToonLoadTexture(const std::string& path,
+    Toon::ToonTextureEncoding encoding, Toon::ToonTexture& texture) {
+  const HioImageSharedPtr image = HioImage::OpenForReading(path, 0, 0,
+      HioImage::SourceColorSpace::Raw, /*suppressErrors=*/true);
+  if (!image || image->GetWidth() <= 0 || image->GetHeight() <= 0) {
+    return false;
+  }
+  const HioFormat format = image->GetFormat();
+  const HioType type = HioGetHioType(format);
+  const int channels = HioGetComponentCount(format);
+  const std::size_t channel_size = HioGetDataSizeOfType(type);
+  if ((type != HioTypeUnsignedByte && type != HioTypeUnsignedByteSRGB &&
+          type != HioTypeUnsignedShort) ||
+      channels < 1 || channels > 4) {
+    return false;
+  }
+  const auto width = static_cast<std::uint32_t>(image->GetWidth());
+  const auto height = static_cast<std::uint32_t>(image->GetHeight());
+  const std::size_t pixels = static_cast<std::size_t>(width) * height;
+  std::vector<std::uint8_t> source(pixels * channels * channel_size);
+  HioImage::StorageSpec storage;
+  storage.width = static_cast<int>(width);
+  storage.height = static_cast<int>(height);
+  storage.depth = 1;
+  storage.format = format;
+  storage.flipped = false;
+  storage.data = source.data();
+  if (!image->Read(storage)) {
+    return false;
+  }
+  // One channel is grey, two grey and alpha, as glTF reads PNG.
+  std::vector<std::uint8_t> rgba(pixels * 4U);
+  for (std::size_t pixel = 0; pixel < pixels; ++pixel) {
+    std::uint8_t values[4] = {0, 0, 0, 255};
+    for (int channel = 0; channel < channels; ++channel) {
+      const std::size_t offset =
+          (pixel * channels + channel) * channel_size + (channel_size - 1U);
+      values[channel] = source[offset];
+    }
+    std::uint8_t* target = rgba.data() + pixel * 4U;
+    if (channels <= 2) {
+      target[0] = target[1] = target[2] = values[0];
+      target[3] = channels == 2 ? values[1] : std::uint8_t{255};
+    } else {
+      std::memcpy(target, values, 4);
+    }
+  }
+  texture.width = width;
+  texture.height = height;
+  texture.encoding = encoding;
+  texture.pixels =
+      std::make_shared<const std::vector<std::uint8_t>>(std::move(rgba));
+  return true;
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

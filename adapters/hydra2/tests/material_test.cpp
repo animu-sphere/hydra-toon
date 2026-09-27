@@ -12,6 +12,7 @@
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/imaging/hd/changeTracker.h>
@@ -19,14 +20,19 @@
 #include <pxr/imaging/hd/retainedDataSource.h>
 #include <pxr/imaging/hd/retainedSceneIndex.h>
 #include <pxr/imaging/hd/tokens.h>
+#include <pxr/imaging/hio/image.h>
+#include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
+#include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -123,8 +129,132 @@ const HdToonMaterial* FindMaterial(HdRenderIndex& index, const SdfPath& id) {
       index.GetSprim(HdPrimTypeTokens->material, id));
 }
 
+HdContainerDataSourceHandle TexturedPrim(
+    const std::vector<Field>& texture_roles) {
+  return Prim({
+      {"mtoon", Container({})},
+      {"textureInfo", Container(texture_roles)},
+  });
+}
+
+// vrm/textureInfo/<role> (vrmImaging §29): a 2x2 image written here, named
+// by a resolved asset path, is decoded top row first and shared by every
+// role and material that names it; its sampling fields are read; a path
+// that does not resolve, or another TEXCOORD set, samples nothing; and the
+// texture goes when its last material does.
+int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
+  const std::filesystem::path image_path =
+      std::filesystem::temp_directory_path() / "toon-material-test.png";
+  const std::string image = image_path.generic_string();
+  std::vector<std::uint8_t> written{255, 0, 0, 255, 0, 255, 0, 255, 0, 0,
+      255, 255, 255, 255, 255, 128};
+  HioImage::StorageSpec storage;
+  storage.width = 2;
+  storage.height = 2;
+  storage.depth = 1;
+  storage.format = HioFormatUNorm8Vec4;
+  storage.data = written.data();
+  const HioImageSharedPtr writer = HioImage::OpenForWriting(image);
+  if (!Check(writer != nullptr && writer->Write(storage),
+          "the test image must be written")) {
+    return 1;
+  }
+  Toon::ToonTexture decoded;
+  if (!Check(HdToonLoadTexture(image, Toon::ToonTextureEncoding::Srgb,
+                 decoded) &&
+                 decoded.width == 2 && decoded.height == 2 &&
+                 decoded.pixels != nullptr && *decoded.pixels == written,
+          "an image must decode to RGBA8, top row first")) {
+    return 1;
+  }
+
+  const SdfAssetPath file(image, image);
+  const auto role = [&file](const std::vector<Field>& fields) {
+    std::vector<Field> all{{"file", Value(file)}, {"texCoord", Value(0)}};
+    all.insert(all.end(), fields.begin(), fields.end());
+    return Container(all);
+  };
+  const SdfPath a_id("/Looks/TexturedA");
+  const SdfPath b_id("/Looks/TexturedB");
+  const SdfPath unresolved_id("/Looks/Unresolved");
+  const SdfPath other_set_id("/Looks/OtherSet");
+  scene.AddPrims({
+      {a_id, HdPrimTypeTokens->material, TexturedPrim({
+          {"baseColor", role({
+              {"wrapS", Value(TfToken("clampToEdge"))},
+              {"wrapT", Value(TfToken("mirroredRepeat"))},
+              {"transform", Container({
+                  {"offset", Value(GfVec2f(0.5F, 0.25F))},
+                  {"rotation", Value(0.5F)},
+                  {"scale", Value(GfVec2f(2.0F, 3.0F))},
+              })},
+          })},
+          {"shadeMultiply", role({})},
+      })},
+      {b_id, HdPrimTypeTokens->material,
+          TexturedPrim({{"baseColor", role({})}})},
+      {unresolved_id, HdPrimTypeTokens->material,
+          TexturedPrim({{"baseColor", Container({
+              {"file", Value(SdfAssetPath("missing.png"))},
+          })}})},
+      {other_set_id, HdPrimTypeTokens->material,
+          TexturedPrim({{"baseColor", Container({
+              {"file", Value(file)},
+              {"texCoord", Value(1)},
+          })}})},
+  });
+  HdTaskSharedPtrVector tasks;
+  HdTaskContext context;
+  index.SyncAll(&tasks, &context);
+
+  const HdToonMaterial* a = FindMaterial(index, a_id);
+  const HdToonMaterial* b = FindMaterial(index, b_id);
+  const HdToonMaterial* unresolved = FindMaterial(index, unresolved_id);
+  const HdToonMaterial* other_set = FindMaterial(index, other_set_id);
+  if (!Check(a != nullptr && b != nullptr && unresolved != nullptr &&
+                 other_set != nullptr,
+          "textured material prims must become Toon materials")) {
+    return 1;
+  }
+  const Toon::ToonTextureRef& base = a->GetToonMaterial().base_texture;
+  const Toon::TextureId shared = base.texture;
+  if (!Check(shared != 0, "a resolved base colour texture must be sampled") ||
+      !Check(a->GetToonMaterial().mtoon.shade_texture.texture == shared &&
+                 b->GetToonMaterial().base_texture.texture == shared,
+          "one image must be one texture across roles and materials") ||
+      !Check(base.wrap_s == Toon::ToonWrap::ClampToEdge &&
+                 base.wrap_t == Toon::ToonWrap::MirroredRepeat &&
+                 base.offset == Toon::Float2{0.5F, 0.25F} &&
+                 base.rotation == 0.5F &&
+                 base.scale == Toon::Float2{2.0F, 3.0F},
+          "a texture's wrap and transform must be read") ||
+      !Check(unresolved->GetToonMaterial().base_texture.texture == 0,
+          "a path that does not resolve must sample nothing") ||
+      !Check(other_set->GetToonMaterial().base_texture.texture == 0,
+          "another TEXCOORD set must sample nothing")) {
+    return 1;
+  }
+
+  // Once no material names the image, its texture is gone, and naming it
+  // again decodes a new one.
+  scene.RemovePrims({{a_id}, {b_id}});
+  scene.AddPrims({{a_id, HdPrimTypeTokens->material,
+      TexturedPrim({{"baseColor", role({})}})}});
+  index.SyncAll(&tasks, &context);
+  a = FindMaterial(index, a_id);
+  if (!Check(a != nullptr && a->GetToonMaterial().base_texture.texture != 0 &&
+                 a->GetToonMaterial().base_texture.texture != shared,
+          "a texture no material samples must be released")) {
+    return 1;
+  }
+  scene.RemovePrims({{a_id}, {unresolved_id}, {other_set_id}});
+  std::error_code ignored;
+  std::filesystem::remove(image_path, ignored);
+  return 0;
+}
+
 int RunRetained() {
-  if (!Check(HdToonReadMaterial(nullptr) == Toon::ToonMaterial{},
+  if (!Check(HdToonReadMaterial(nullptr).values == Toon::ToonMaterial{},
           "a material with nothing readable must be the fallback material")) {
     return 1;
   }
@@ -240,6 +370,9 @@ int RunRetained() {
   scene->RemovePrims({{plain_id}});
   if (!Check(FindMaterial(*index, plain_id) == nullptr,
           "a removed material prim must be gone")) {
+    return 1;
+  }
+  if (RunTextures(*scene, *index) != 0) {
     return 1;
   }
   index.reset();

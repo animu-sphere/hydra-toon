@@ -58,6 +58,7 @@ using vulkan_internal::SceneDeviceFeatures;
 using vulkan_internal::SceneShaderWords;
 using vulkan_internal::ScenePipelines;
 using vulkan_internal::SupportsSceneFeatures;
+using vulkan_internal::TextureCache;
 using vulkan_internal::ValidationState;
 using vulkan_internal::VulkanOk;
 
@@ -162,6 +163,7 @@ private:
   VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_FIFO_KHR;
   ScenePipelines pipelines_;
   MaterialCache materials_;
+  TextureCache textures_;
   MeshCache meshes_;
   VkSemaphore image_available_ = VK_NULL_HANDLE;
   // Frame N signals value N; one frame is in flight.
@@ -307,7 +309,9 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
   vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
-  meshes_.Initialize(physical_device_, device_);
+  if (!meshes_.Initialize(physical_device_, device_, error)) {
+    return PresentSetupStatus::Error;
+  }
 
   VkCommandPoolCreateInfo pool_create{
       VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -332,7 +336,9 @@ PresentSetupStatus VulkanPresentSession::Initialize(
   if (!CreateScenePipelines(device_, words, surface_format_.format,
           kDepthFormat, pipelines_, error) ||
       !materials_.Initialize(physical_device_, device_,
-          pipelines_.material_layout, error)) {
+          pipelines_.material_layout, error) ||
+      !textures_.Initialize(physical_device_, device_,
+          materials_.descriptor_set(), error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -499,7 +505,8 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
     return VulkanOk(acquire, "vkAcquireNextImageKHR", error);
   }
-  if (!meshes_.Update(draws, error) || !materials_.Update(draws, error)) {
+  if (!meshes_.Update(draws, error) || !textures_.Update(draws, error) ||
+      !materials_.Update(draws, textures_, error)) {
     return false;
   }
 
@@ -513,6 +520,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
           error)) {
     return false;
   }
+  textures_.RecordUploads(command_);
   // The colour transition waits at the stage the acquire semaphore gates.
   const VkImageMemoryBarrier2 to_attachment[] = {
       ImageBarrier(images_[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
@@ -640,6 +648,7 @@ void VulkanPresentSession::Destroy() {
     vkDeviceWaitIdle(device_);
     DestroySwapchainObjects();
     meshes_.Destroy();
+    textures_.Destroy();
     materials_.Destroy();
     vkDestroySemaphore(device_, timeline_, nullptr);
     vkDestroySemaphore(device_, image_available_, nullptr);

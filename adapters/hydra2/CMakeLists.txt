@@ -14,6 +14,7 @@ target_include_directories(toon-hydra2-runtime PUBLIC
 target_link_libraries(toon-hydra2-runtime
   PUBLIC hd Toon::RenderWorld
   PRIVATE
+    hio
     Toon::RenderExtraction
     Toon::Vulkan
     ${CMAKE_DL_LIBS})
@@ -73,7 +74,7 @@ if(TOON_BUILD_TESTS)
   add_executable(toon-hydra2-material-test tests/material_test.cpp)
   toon_configure_warnings(toon-hydra2-material-test)
   target_link_libraries(toon-hydra2-material-test
-    PRIVATE toon-hydra2-runtime usdImaging usd)
+    PRIVATE toon-hydra2-runtime usdImaging usd hio)
   target_compile_features(toon-hydra2-material-test PRIVATE cxx_std_20)
   target_compile_definitions(toon-hydra2-material-test PRIVATE
     NOMINMAX

@@ -68,6 +68,8 @@ struct OffscreenStatistics {
   std::uint64_t point_uploads = 0;
   // Material parameter slots written: one per new or changed material.
   std::uint64_t material_writes = 0;
+  // Textures uploaded: one per new texture or pixel change.
+  std::uint64_t texture_uploads = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;

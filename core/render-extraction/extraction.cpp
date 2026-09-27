@@ -20,6 +20,7 @@ void ExtractDrawList(const FrameSnapshot& snapshot, DrawList& draws) {
     draws.triangle_count += mesh.indices->size() / 3U;
   }
   draws.materials = snapshot.materials;
+  draws.textures = snapshot.textures;
 }
 
 DrawList ExtractDrawList(const FrameSnapshot& snapshot) {
