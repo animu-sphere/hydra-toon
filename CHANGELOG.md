@@ -7,6 +7,16 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- `formations/vrm-host-session/`: the VRM `usdview` session as a committed
+  OpenStrata Formation of the canonical `lookdev` runtime, `vrmImaging`
+  0.10.0 and `toon` 0.1.0, each pinned by its published digest. Its declared
+  command runs `vrm_material_check.py` in `testusdview` on the probe stage
+  and needs no environment. This closes Renderer Phase 1 on Windows.
+- Renderer report 13: the published `toon` 0.1.0 draws the avatar in that
+  Formation with the numbers of the workstation's packages.
+
 ## [0.1.0] - 2026-09-28
 
 The first release: Renderer Phase 0 and Renderer Phase 1's renderer work,

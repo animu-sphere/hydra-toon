@@ -1,0 +1,157 @@
+{
+  "schema": "openstrata.formation-lock/v1alpha1",
+  "resolution": {
+    "schema": "openstrata.formation-resolved/v1alpha1",
+    "name": "hydra-toon-vrm-host-session",
+    "manifest_digest": "sha256:9bf87ea72b40362c7465c22ec86cab9846bbe04cdf153c0546f35efd261eb90a",
+    "target": "cy2026-windows-x86_64-msvc143-py313-lookdev",
+    "runtime": {
+      "kind": "runtime",
+      "name": "openstrata-cy2026-windows-x86_64-py313-lookdev",
+      "version": "26.08",
+      "digest": "sha256:b982656c07dd9147973e3c7197d9b050ee48dd1ac291988f7e6025c76c4a785b",
+      "target": "windows-x86_64-msvc143-py313",
+      "profile": "lookdev",
+      "runtime_id": "openstrata-cy2026-windows-x86_64-py313-lookdev",
+      "runtime_digest": "sha256:330d3e83f9d79b3fb28d541e776dfa0db68f2ca2e953677748b0f78126d036c6"
+    },
+    "components": [
+      {
+        "id": "vrmImaging",
+        "declared_kind": "plugin",
+        "kind": "plugin",
+        "name": "vrmImaging",
+        "version": "0.10.0",
+        "digest": "sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667",
+        "target": "cy2026-windows-x86_64-py313-lookdev",
+        "profile": "lookdev",
+        "runtime_id": "openstrata-cy2026-windows-x86_64-py313-lookdev",
+        "runtime_digest": "sha256:330d3e83f9d79b3fb28d541e776dfa0db68f2ca2e953677748b0f78126d036c6",
+        "bundles": [
+          {
+            "name": "vrmImaging",
+            "version": "0.10.0",
+            "kind": "usd-imaging"
+          }
+        ]
+      },
+      {
+        "id": "toon",
+        "declared_kind": "renderer",
+        "kind": "package",
+        "name": "toon",
+        "version": "0.1.0",
+        "digest": "sha256:265328f06d0fcbdc718b459011f321c769dcf423881f8b67a12321254d728c29",
+        "target": "cy2026-windows-x86_64-py313-lookdev",
+        "profile": "lookdev",
+        "runtime_id": "openstrata-cy2026-windows-x86_64-py313-lookdev",
+        "runtime_digest": "sha256:330d3e83f9d79b3fb28d541e776dfa0db68f2ca2e953677748b0f78126d036c6",
+        "bundles": []
+      }
+    ],
+    "environment": [
+      {
+        "key": "PATH",
+        "operation": "prepend",
+        "source": "runtime",
+        "paths": [
+          "runtime/bin"
+        ]
+      },
+      {
+        "key": "PATH",
+        "operation": "prepend",
+        "source": "runtime",
+        "paths": [
+          "runtime/lib"
+        ]
+      },
+      {
+        "key": "PYTHONPATH",
+        "operation": "prepend",
+        "source": "runtime",
+        "paths": [
+          "runtime/lib/python"
+        ]
+      },
+      {
+        "key": "CMAKE_PREFIX_PATH",
+        "operation": "prepend",
+        "source": "runtime",
+        "paths": [
+          "runtime"
+        ]
+      },
+      {
+        "key": "PXR_PLUGINPATH_NAME",
+        "operation": "prepend",
+        "source": "runtime",
+        "paths": [
+          "runtime/plugin/usd"
+        ]
+      },
+      {
+        "key": "PXR_PLUGINPATH_NAME",
+        "operation": "prepend",
+        "source": "vrmImaging",
+        "paths": [
+          "components/vrmImaging/plugin/resources/vrmImaging",
+          "components/vrmImaging/runtime/bundles/vrmSchema/plugin/resources/vrmSchema"
+        ]
+      },
+      {
+        "key": "PATH",
+        "operation": "prepend",
+        "source": "vrmImaging",
+        "paths": [
+          "components/vrmImaging/lib",
+          "components/vrmImaging/runtime/bundles/vrmSchema/lib"
+        ]
+      },
+      {
+        "key": "PYTHONPATH",
+        "operation": "prepend",
+        "source": "vrmImaging",
+        "paths": [
+          "components/vrmImaging/python"
+        ]
+      },
+      {
+        "key": "PXR_PLUGINPATH_NAME",
+        "operation": "prepend",
+        "source": "toon",
+        "paths": [
+          "components/toon/lib/usd/hdToon/resources"
+        ]
+      },
+      {
+        "key": "PATH",
+        "operation": "prepend",
+        "source": "toon",
+        "paths": [
+          "components/toon/lib"
+        ]
+      },
+      {
+        "key": "PATH",
+        "operation": "prepend",
+        "source": "toon",
+        "paths": [
+          "components/toon/bin",
+          "components/toon/lib"
+        ]
+      }
+    ],
+    "command": {
+      "program": "testusdview",
+      "args": [
+        "../../adapters/hydra2/tests/material-probe.usda",
+        "--renderer",
+        "Toon",
+        "--testScript",
+        "vrm_material_check.py"
+      ]
+    },
+    "conflicts": []
+  }
+}

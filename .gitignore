@@ -14,8 +14,11 @@
 /strata.lock
 /strata.*.lock
 # Local Formations for the VRM usdview session; they pin this workstation's
-# unpublished packages (renderer report 06).
-/formations/
+# unpublished packages (renderer report 06). vrm-host-session pins only
+# published digests and is tracked; its run records are not.
+/formations/*
+!/formations/vrm-host-session/
+/formations/vrm-host-session/.strata/
 
 # Accidental in-source CMake and Ninja products.
 /CMakeCache.txt

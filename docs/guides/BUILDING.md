@@ -94,6 +94,35 @@ as a `renderer` component, which an OpenStrata Formation composes into a
 `ost renderer view` opens `usdview` interactively on the same install. It has
 not been run in this repository yet.
 
+## The VRM host session
+
+[`formations/vrm-host-session/`](../../formations/vrm-host-session/) is the
+`usdview` session that draws a VRM stage with MToon: the `lookdev` runtime
+above, `usd-vrm-plugins`' `vrmImaging` and this repository's published `toon`
+package, each pinned by digest. Nothing is built. On Windows x86_64, with the
+runtime pulled as above and a host Python 3.13:
+
+```sh
+ost artifact pull oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:84dbb7e550c55d249798f7288066de3589c383a75a35a6268328a497f147dda8     --expect-artifact sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667
+ost artifact pull oci://ghcr.io/animu-sphere/hydra-toon@sha256:a14c583fcd7a6b29c07b955808cbfc631820786589567618a3156182dbc91a93     --expect-artifact sha256:265328f06d0fcbdc718b459011f321c769dcf423881f8b67a12321254d728c29
+cd formations/vrm-host-session
+ost formation doctor formation.toml
+ost formation run formation.toml
+```
+
+The declared command opens `testusdview` on the committed
+`material-probe.usda` and asserts that its VRM material selected MToon; it
+fails if `vrmImaging` is missing. To draw an avatar instead, override the
+command and give the avatar's MToon material count:
+
+```sh
+TOON_EXPECT_MTOON=12 ost formation run formation.toml --     testusdview <avatar.usdz> --renderer Toon --testScript vrm_material_check.py
+```
+
+`TOON_HYDRA_EVIDENCE` and `TOON_HYDRA_IMAGE` keep the frame evidence and the
+image; unset, they go to a temporary directory the check prints
+([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)).
+
 ## The standalone viewport
 
 ```sh

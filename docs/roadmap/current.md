@@ -47,9 +47,9 @@ changes reach it from the terminal scene index
 ([capability matrix](../reference/CAPABILITY_MATRIX.md#hydra-adapter-hdtoon);
 renderer reports [03](../reports/renderer/03-2026-09-26-material-sprim.md),
 [04](../reports/renderer/04-2026-09-26-material-value-route.md)).
-What is left for Renderer Phase 1's MToon path:
+The one item Renderer Phase 1's MToon path still needed is done on Windows:
 
-- 🚧 **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
+- ✅ **`vrmSchema` and `vrmImaging` in the `usdview` host session.** Without
   either, a VRM material silently draws as PreviewSurface. The session
   composes them as bundles; nothing links them. On Windows it runs as a
   Formation of the canonical runtime and the two packages, and selects MToon
@@ -57,10 +57,10 @@ What is left for Renderer Phase 1's MToon path:
   ([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md)),
   from the Formation's own command
   ([ost report 06](../reports/ost/06-2026-09-27-v0.23.13-report-05-reverified.md)).
-  `vrmImaging` is published and the Formations pin it
-  ([renderer report 12](../reports/renderer/12-2026-09-28-published-vrmimaging.md));
-  the renderer package is not published yet. Per platform:
-  [vrm-host-session.md](vrm-host-session.md).
+  With `vrmImaging` 0.10.0 and `toon` 0.1.0 published, the Formation is in
+  the repository, pinning published digests only
+  ([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)).
+  Linux and macOS: [vrm-host-session.md](vrm-host-session.md).
 
 Before Renderer Phase 4:
 
@@ -92,8 +92,9 @@ a VRM character displays in real time.
   ([renderer report 10](../reports/renderer/10-2026-09-27-mtoon-outline.md)).
 
 Every item of [design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)
-Phase 1 now draws on the avatar; the phase waits on the VRM packages its
-host session composes (above).
+Phase 1 draws on the avatar, and the host session that composes the VRM
+packages is a Formation in the repository (above), so the phase is complete
+on Windows.
 
 Stand-ins this phase accepts so far:
 
