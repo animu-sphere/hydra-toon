@@ -12,7 +12,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️
 | Member | Kind | Package name when published |
 | --- | --- | --- |
 | a CY2026 `lookdev` runtime with `usdview` | runtime | `ghcr.io/animu-sphere/openstrata-runtime-cy2026-lookdev:26.08-gl-<os>-<arch>` |
-| `vrmImaging`, carrying `vrmSchema` | plugin | owned by `usd-vrm-plugins` |
+| `vrmImaging`, carrying `vrmSchema` | plugin | `ghcr.io/animu-sphere/usd-vrm-plugins:vrmImaging-<version>-cy2026-<os>-<arch>-py313-lookdev`, owned by `usd-vrm-plugins` |
 | `toon` (`hdToon`) | renderer | `ghcr.io/animu-sphere/hydra-toon:toon-<version>-cy2026-<os>-<arch>-py313-lookdev` |
 
 The names follow the organization's existing packages:
@@ -38,12 +38,16 @@ CY2026 names (2022.x) is what a managed build pins.
   ([ost report 06](../reports/ost/06-2026-09-27-v0.23.13-report-05-reverified.md);
   `ost` 0.23.13). The host Python 3.13 stays a prerequisite: the runtime
   ships none.
+- ✅ **`vrmImaging` published.** `usd-vrm-plugins` v0.10.0 publishes it
+  with the digests a Formation pins (its release's
+  `lookdev-package-pins.json`); the Formations pin archive
+  `sha256:894fd616…`, and every run gives its report's numbers
+  ([renderer report 12](../reports/renderer/12-2026-09-28-published-vrmimaging.md)).
 - ⬜ **A Formation in the repository** and its `testusdview` check. It pins
   published digests only, so it waits on the next item.
 - ⬜ **Publish the renderer package** as
-  `ghcr.io/animu-sphere/hydra-toon:toon-<version>-cy2026-windows-x86_64-py313-lookdev`,
-  and `vrmImaging` from `usd-vrm-plugins`. The runtime is published
-  (`sha256:b982656c…`).
+  `ghcr.io/animu-sphere/hydra-toon:toon-<version>-cy2026-windows-x86_64-py313-lookdev`.
+  The runtime (`sha256:b982656c…`) and `vrmImaging` are published.
 
 ## Linux x86_64
 
@@ -56,11 +60,9 @@ CY2026 names (2022.x) is what a managed build pins.
   ost runtime pull cy2026 --profile lookdev       --from-artifact sha256:7b41fe89f1c4b868ac6af73bc0593a24aa3ce4952fcf4fe4d96d0ae1724f3f34
   ost runtime validate cy2026 --profile lookdev
 
-  # In usd-vrm-plugins: vrmImaging and the vrmSchema it carries.
-  ost plugin build plugins/vrmSchema --profile lookdev
-  ost plugin build plugins/vrmImaging --profile lookdev
-  ost plugin package plugins/vrmImaging --profile lookdev
-  ost artifact import plugins/vrmImaging/dist/plugins/vrmImaging/0.9.0/cy2026-linux-x86_64-py313-lookdev
+  # vrmImaging 0.10.0 and the vrmSchema it carries, published by
+  # usd-vrm-plugins (its v0.10.0 release's lookdev-package-pins.json).
+  ost artifact pull oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:85955418443f1fae6b9612059784812a3cffb2c8a849dc7340d2eb43cbf05360       --expect-artifact sha256:cd4b08df5ba0cba7eee1265995fa36fe687ee57a480aefc68d953cb7171a44de
 
   # Here: the renderer package, from the hydra intent.
   ost build --profile lookdev --intent hydra --jobs auto
@@ -89,11 +91,11 @@ CY2026 names (2022.x) is what a managed build pins.
   ost runtime validate cy2026 --profile lookdev
   ost runtime export cy2026 --profile lookdev --slim
 
-  # In usd-vrm-plugins, as on Linux.
+  # In usd-vrm-plugins; it publishes no macOS lookdev package.
   ost plugin build plugins/vrmSchema --profile lookdev
   ost plugin build plugins/vrmImaging --profile lookdev
   ost plugin package plugins/vrmImaging --profile lookdev
-  ost artifact import plugins/vrmImaging/dist/plugins/vrmImaging/0.9.0/cy2026-macos-arm64-py313-lookdev
+  ost artifact import plugins/vrmImaging/dist/plugins/vrmImaging/0.10.0/cy2026-macos-arm64-py313-lookdev
   ```
 
   With those, `usdview` can show whether `vrmImaging` contributes its
