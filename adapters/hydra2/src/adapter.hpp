@@ -11,6 +11,7 @@
 
 #include <toon/render_world.hpp>
 
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -78,21 +79,27 @@ struct HdToonTextureKey {
       const HdToonTextureKey&) = default;
 };
 
+// The roles a material samples a texture in: base colour, shade multiply,
+// outline width multiply, MatCap and rim multiply.
+constexpr std::size_t kHdToonTextureRoles = 5;
+
+// A material's texture references, one per role, in role order.
+std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
+    Toon::ToonMaterial& material);
+
 // A material as its prim states it: the normalized values, whose texture
 // references hold no texture id yet, and the image each reference names.
 struct HdToonMaterialSource {
   Toon::ToonMaterial values;
-  HdToonTextureKey base_texture;
-  HdToonTextureKey shade_texture;
-  HdToonTextureKey outline_width_texture;
+  // In role order, as HdToonTextureRefs(values) lists the references.
+  std::array<HdToonTextureKey, kHdToonTextureRoles> textures;
 };
 
 // Selects a material's model and normalizes its values from its Hydra prim's
 // own data sources (material policy §2–§4): a `vrm/mtoon` container is
-// MToon, read in the locator hierarchy `vrmImaging` froze, with its base
-// and shade colour textures and its outline width texture; anything else is
-// PreviewSurface. A null
-// container is the fallback material.
+// MToon, read in the locator hierarchy `vrmImaging` froze, with a texture in
+// every role; anything else is PreviewSurface. A null container is the
+// fallback material.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim);
 
@@ -130,10 +137,8 @@ private:
   std::shared_ptr<HdToonAdapterState> state_;
   Toon::MaterialId material_;
   Toon::ToonMaterial values_;
-  // Held while this material samples them.
-  Toon::TextureId base_texture_ = 0;
-  Toon::TextureId shade_texture_ = 0;
-  Toon::TextureId outline_width_texture_ = 0;
+  // Held while this material samples them, in role order.
+  std::array<Toon::TextureId, kHdToonTextureRoles> textures_{};
 };
 
 class HdToonRenderDelegate final : public HdRenderDelegate {

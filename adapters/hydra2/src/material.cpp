@@ -70,6 +70,8 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (baseColor)
     (shadeMultiply)
     (outlineWidthMultiply)
+    (matcap)
+    (rimMultiply)
     (file)
     (texCoord)
     (wrapS)
@@ -136,17 +138,18 @@ void WarnUnresolved(const std::string& authored) {
 // VrmTextureInfoAPI:<role>: the image and how it is sampled. `file` is
 // present only when authored, and is the path the session's resolver gave
 // it (vrmImaging §29). Only TEXCOORD_0 reaches a mesh, as `st`, so a role
-// that samples another set is read as sampling nothing.
+// that samples at a mesh's UVs from another set is read as sampling
+// nothing; MatCap samples where the normal points, whatever its set.
 void ReadTexture(const HdContainerDataSourceHandle& group,
-    Toon::ToonTextureEncoding encoding, HdToonTextureKey& key,
-    Toon::ToonTextureRef& texture) {
+    Toon::ToonTextureEncoding encoding, bool samples_st,
+    HdToonTextureKey& key, Toon::ToonTextureRef& texture) {
   if (!group) {
     return;
   }
   SdfAssetPath file;
   int tex_coord = 0;
   Read(group, _tokens->texCoord, tex_coord);
-  if (!Read(group, _tokens->file, file) || tex_coord != 0) {
+  if (!Read(group, _tokens->file, file) || (samples_st && tex_coord != 0)) {
     return;
   }
   if (file.GetResolvedPath().empty()) {
@@ -234,6 +237,13 @@ void ReadMToon(const HdContainerDataSourceHandle& group,
 
 } // namespace
 
+std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
+    Toon::ToonMaterial& material) {
+  return {&material.base_texture, &material.mtoon.shade_texture,
+      &material.mtoon.outline_width_texture, &material.mtoon.matcap_texture,
+      &material.mtoon.rim_multiply_texture};
+}
+
 bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
   static const HdDataSourceLocator vrm(_tokens->vrm);
   return locators.Intersects(vrm) &&
@@ -258,19 +268,27 @@ HdToonMaterialSource HdToonReadMaterial(
     ReadCommon(material, result);
   }
   ReadMToon(mtoon, result);
-  // The schema fixes colour or data by role: the base and shade textures
-  // are colour, the outline width a factor in G.
+  // The schema fixes colour or data by role: every role here is colour but
+  // the outline width, a factor in G.
+  struct Role {
+    TfToken name;
+    Toon::ToonTextureEncoding encoding;
+    bool samples_st;
+  };
+  const Role roles[kHdToonTextureRoles] = {
+      {_tokens->baseColor, Toon::ToonTextureEncoding::Srgb, true},
+      {_tokens->shadeMultiply, Toon::ToonTextureEncoding::Srgb, true},
+      {_tokens->outlineWidthMultiply, Toon::ToonTextureEncoding::Linear,
+          true},
+      {_tokens->matcap, Toon::ToonTextureEncoding::Srgb, false},
+      {_tokens->rimMultiply, Toon::ToonTextureEncoding::Srgb, true}};
   const HdContainerDataSourceHandle textures =
       Group(vrm, _tokens->textureInfo);
-  ReadTexture(Group(textures, _tokens->baseColor),
-      Toon::ToonTextureEncoding::Srgb, source.base_texture,
-      result.base_texture);
-  ReadTexture(Group(textures, _tokens->shadeMultiply),
-      Toon::ToonTextureEncoding::Srgb, source.shade_texture,
-      result.mtoon.shade_texture);
-  ReadTexture(Group(textures, _tokens->outlineWidthMultiply),
-      Toon::ToonTextureEncoding::Linear, source.outline_width_texture,
-      result.mtoon.outline_width_texture);
+  const auto references = HdToonTextureRefs(result);
+  for (std::size_t role = 0; role < kHdToonTextureRoles; ++role) {
+    ReadTexture(Group(textures, roles[role].name), roles[role].encoding,
+        roles[role].samples_st, source.textures[role], *references[role]);
+  }
   return source;
 }
 

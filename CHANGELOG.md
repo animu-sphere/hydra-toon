@@ -16,6 +16,18 @@ version has a record in [docs/releases/](docs/releases/README.md).
   and needs no environment. This closes Renderer Phase 1 on Windows.
 - Renderer report 13: the published `toon` 0.1.0 draws the avatar in that
   Formation with the numbers of the workstation's packages.
+- MToon's rim, the first Renderer Phase 2 item: MatCap, the parametric rim
+  and the rim multiply texture, mixed with the light by
+  `rimLightingMixFactor`, in `mtoon_opaque` and `mtoon_outline`. `hdToon`
+  reads the `matcap` and `rimMultiply` texture roles; a material's slot grew
+  to 352 bytes. The headless check `renderer.material.mtoon_rim`, and
+  renderer report 14.
+
+### Changed
+
+- The MToon pipelines' push constants carry view-from-object's top three
+  rows in place of the normal matrix, which the shaders now derive, so a
+  fragment knows its view-space position.
 
 ## [0.1.0] - 2026-09-28
 

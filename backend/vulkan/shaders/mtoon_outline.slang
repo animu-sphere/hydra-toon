@@ -15,7 +15,8 @@ VertexStageOutput vertex_main(VertexInput input) {
   float3 normal = input.normal;
   Skin(draw.flags, input.vertex, position, normal);
   const MToonParameters material = materials[draw.material_slot];
-  const float3 view_normal = ViewNormal(normal);
+  const float3x3 normal_matrix = NormalMatrix();
+  const float3 view_normal = mul(normal_matrix, normal);
 
   // outlineWidthFactor times the G channel of outlineWidthMultiplyTexture,
   // which is white when the material has none. Mip 0: the vertex stage has
@@ -39,15 +40,13 @@ VertexStageOutput vertex_main(VertexInput input) {
   const float view_length = length(view_normal);
   if (view_length > 0.0) {
     const float3 direction = view_normal / view_length;
-    const float3 offset = direction.x * draw.view_normal_rows[0].xyz +
-                          direction.y * draw.view_normal_rows[1].xyz +
-                          direction.z * draw.view_normal_rows[2].xyz;
-    position += offset * width;
+    position += mul(direction, normal_matrix) * width;
   }
 
   output.position = mul(draw.clip_from_object, float4(position, 1.0));
   output.view_normal = view_normal;
   output.st = input.st;
+  output.view_position = ViewPosition(position);
   return output;
 }
 
@@ -56,9 +55,11 @@ VertexStageOutput vertex_main(VertexInput input) {
 // faces, lit from their own side.
 [shader("fragment")]
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    bool front : SV_IsFrontFace) : SV_Target {
+    float3 view_position : TEXCOORD1, bool front : SV_IsFrontFace)
+    : SV_Target {
   const MToonParameters material = materials[draw.material_slot];
-  const MToonSurface surface = ShadeSurface(material, view_normal, st, front);
+  const MToonSurface surface =
+      ShadeSurface(material, view_normal, view_position, st, front);
   if (CutAway(material, surface.alpha)) {
     discard;
   }

@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // What mtoon_opaque and mtoon_outline share (material policy §7): the draw
 // constants, the material parameter slot and texture table, the stand-in
-// lighting and MToon's surface shading. Included, not compiled on its own.
+// lighting and MToon's surface shading, rim included. Included, not compiled on its own.
 
 #include "skinning.slang"
 
 // Must match vulkan_internal::MToonDrawConstants.
 struct DrawConstants {
   float4x4 clip_from_object;
-  // Rows of the view-space normal matrix; w is unused.
-  float4 view_normal_rows[3];
+  // The top three rows of view-from-object: its 3x3 in xyz, the
+  // translation in w.
+  float4 view_from_object_rows[3];
   uint material_slot;
-  // kDrawHasUVs when the mesh has texture coordinates, and the skinning
-  // flags (skinning.slang).
+  // kDrawHasUVs when the mesh has texture coordinates, kDrawOrthographic
+  // under an orthographic camera, and the skinning flags (skinning.slang).
   uint flags;
   // |projection[1][1]|: clip-space y per unit of view-space height at w = 1.
   // Read by mtoon_outline's screen-coordinates width alone. Scalars, not a
@@ -22,6 +23,8 @@ struct DrawConstants {
 };
 
 static const uint kDrawHasUVs = 1;
+// Must match vulkan_internal::kDrawOrthographic.
+static const uint kDrawOrthographic = 16;
 // Must match vulkan_internal::kTextureCapacity and kSamplerCount.
 static const uint kTextureCapacity = 128;
 static const uint kSamplerCount = 9;
@@ -54,6 +57,17 @@ struct MToonParameters {
   // kOutlineWorld or kOutlineScreen (0 draws no outline); w unused.
   uint4 outline_texture;
   float4 outline_uv[2];
+  // rgb the parametric rim colour, linear; a the rim lighting mix.
+  float4 rim_color;
+  // x the parametric rim's fresnel power, y its lift; zw unused.
+  float4 rim;
+  // rgb matcapFactor, linear; a unused.
+  float4 matcap;
+  // x MatCap texture entry, y its sampler; z rim multiply texture entry,
+  // w its sampler. A MatCap entry of 0 adds no MatCap.
+  uint4 rim_textures;
+  float4 matcap_uv[2];
+  float4 rim_uv[2];
 };
 
 [[vk::push_constant]] ConstantBuffer<DrawConstants> draw;
@@ -83,14 +97,38 @@ struct VertexStageOutput {
   float4 position : SV_Position;
   float3 view_normal : NORMAL;
   float2 st : TEXCOORD0;
+  float3 view_position : TEXCOORD1;
 };
 
-// The view-space normal of an object-space one: the inverse transpose of
-// the model-view 3x3, row by row.
+float3 ViewPosition(float3 position) {
+  const float4 point = float4(position, 1.0);
+  return float3(dot(draw.view_from_object_rows[0], point),
+      dot(draw.view_from_object_rows[1], point),
+      dot(draw.view_from_object_rows[2], point));
+}
+
+// The inverse transpose of view-from-object's 3x3, which takes normals to
+// view space. Its rows are the cross products of the 3x3's rows over its
+// determinant, and they are the inverse's columns.
+float3x3 NormalMatrix() {
+  const float3 row0 = draw.view_from_object_rows[0].xyz;
+  const float3 row1 = draw.view_from_object_rows[1].xyz;
+  const float3 row2 = draw.view_from_object_rows[2].xyz;
+  const float3 cross0 = cross(row1, row2);
+  const float determinant = dot(row0, cross0);
+  const float scale = determinant == 0.0 ? 1.0 : 1.0 / determinant;
+  return float3x3(cross0 * scale, cross(row2, row0) * scale,
+      cross(row0, row1) * scale);
+}
+
 float3 ViewNormal(float3 normal) {
-  return float3(dot(draw.view_normal_rows[0].xyz, normal),
-      dot(draw.view_normal_rows[1].xyz, normal),
-      dot(draw.view_normal_rows[2].xyz, normal));
+  return mul(NormalMatrix(), normal);
+}
+
+// The unit vector from a view-space point toward the eye.
+float3 ViewDirection(float3 view_position) {
+  return (draw.flags & kDrawOrthographic) != 0 ? float3(0.0, 0.0, 1.0)
+                                                : normalize(-view_position);
 }
 
 // st in glTF's UV space, through a texture's KHR_texture_transform. glTF's
@@ -120,21 +158,42 @@ struct MToonSurface {
   float alpha;
 };
 
-// MToon 1.0's surface under the stand-in lights. Both samples come first,
+// Where MToon's MatCap samples, as st: the normal seen in a frame whose x
+// is horizontal across the view direction and whose y is up across it.
+// Up is the camera's, as three-vrm takes it; MToon's pseudocode takes the
+// world's, and the two agree while the camera is level. The texture's
+// transform applies after, as for any other.
+float2 MatcapST(float3 normal, float3 view) {
+  const float3 across = cross(float3(0.0, 1.0, 0.0), view);
+  const float3 x = dot(across, across) > 1e-12 ? normalize(across)
+                                                : float3(1.0, 0.0, 0.0);
+  const float3 y = cross(view, x);
+  return float2(dot(x, normal), dot(y, normal)) * 0.495 + 0.5;
+}
+
+// MToon 1.0's surface under the stand-in lights. Every sample comes first,
 // in uniform control flow, so the implicit derivatives that pick a mip
 // level are defined before a caller discards. A back face is lit from its
 // own side: the back of a double-sided surface, or the hull an outline
 // draws with front faces culled.
 MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
-    float2 st, bool front) {
-  const float4 base_texel = SampleTexture(material.textures.x,
-      material.textures.y, material.base_uv, st);
-  const float3 shade_texel = SampleTexture(material.textures.z,
-      material.textures.w, material.shade_uv, st).rgb;
+    float3 view_position, float2 st, bool front) {
   float3 normal = normalize(view_normal);
   if (!front) {
     normal = -normal;
   }
+  const float3 view = ViewDirection(view_position);
+  const float4 base_texel = SampleTexture(material.textures.x,
+      material.textures.y, material.base_uv, st);
+  const float3 shade_texel = SampleTexture(material.textures.z,
+      material.textures.w, material.shade_uv, st).rgb;
+  // The MatCap texture needs no UVs, and a material without one adds none,
+  // so its entry is not replaced by white.
+  const float3 matcap_texel = textures[material.rim_textures.x].Sample(
+      samplers[material.rim_textures.y],
+      TransformUV(material.matcap_uv, MatcapST(normal, view))).rgb;
+  const float3 rim_texel = SampleTexture(material.rim_textures.z,
+      material.rim_textures.w, material.rim_uv, st).rgb;
   const float3 light = normalize(kViewLightDirection);
 
   // The shading term, shifted, then made toony.
@@ -149,8 +208,23 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   // average over up and down.
   const float3 raw_gi = kAmbientColor;
   const float3 uniformed_gi = kAmbientColor;
-  color += lerp(raw_gi, uniformed_gi, material.shading.z) * lit;
+  const float3 gi = lerp(raw_gi, uniformed_gi, material.shading.z);
+  color += gi * lit;
   color += material.emissive.rgb;
+
+  // The rim: MatCap and the parametric rim, masked by the rim multiply
+  // texture, then lit as far as rimLightingMixFactor asks. The light it
+  // mixes in is what reaches the surface, the direct light's colour and the
+  // GI, as three-vrm sums them.
+  float3 rim = material.rim_textures.x == 0
+                   ? float3(0.0)
+                   : material.matcap.rgb * matcap_texel;
+  const float parametric = pow(
+      saturate(1.0 - dot(normal, view) + material.rim.y),
+      max(material.rim.x, 1e-5));
+  rim += parametric * material.rim_color.rgb;
+  rim *= rim_texel;
+  color += rim * lerp(float3(1.0), kLightColor + gi, material.rim_color.a);
 
   MToonSurface surface;
   surface.color = color;

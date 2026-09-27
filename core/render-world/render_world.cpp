@@ -233,7 +233,11 @@ bool IsStructuralChange(const ToonMaterial& before,
          before.mtoon.shade_texture.texture !=
              after.mtoon.shade_texture.texture ||
          before.mtoon.outline_width_texture.texture !=
-             after.mtoon.outline_width_texture.texture;
+             after.mtoon.outline_width_texture.texture ||
+         before.mtoon.matcap_texture.texture !=
+             after.mtoon.matcap_texture.texture ||
+         before.mtoon.rim_multiply_texture.texture !=
+             after.mtoon.rim_multiply_texture.texture;
 }
 
 MaterialId RenderWorld::CreateMaterial() {

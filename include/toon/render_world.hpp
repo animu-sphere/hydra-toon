@@ -220,10 +220,18 @@ struct ToonMaterial {
     float shading_shift = 0.0F;
     float shading_toony = 0.9F;
     float gi_equalization = 0.9F;
+    // matcapFactor, which multiplies the MatCap texture. A material without
+    // the texture adds no MatCap, whatever the factor.
     Float3 matcap{1.0F, 1.0F, 1.0F};
+    // MToon's matcapTexture, colour, sampled where the view-space normal
+    // points rather than at the mesh's UVs.
+    ToonTextureRef matcap_texture;
     Float3 rim_color;
     float rim_fresnel_power = 5.0F;
     float rim_lift = 0.0F;
+    // MToon's rimMultiplyTexture, colour: multiplies MatCap and the
+    // parametric rim together.
+    ToonTextureRef rim_multiply_texture;
     float rim_lighting_mix = 1.0F;
     ToonOutlineWidthMode outline_width_mode = ToonOutlineWidthMode::None;
     // MToon's outlineWidthMultiplyTexture: its G channel multiplies the

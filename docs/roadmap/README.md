@@ -10,7 +10,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️
 
 | Document | Contents |
 | --- | --- |
-| [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1's MToon path, Renderer Phase 1's items and stand-ins, and project infrastructure. |
+| [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1's MToon path, Renderer Phase 1's items and stand-ins, Renderer Phase 2's items and stand-ins, and project infrastructure. |
 | [vrm-host-session.md](vrm-host-session.md) | The VRM `usdview` session as a Formation: its members, package names, and the state and plan on Windows, Linux and macOS. |
 
 ## Sequence
@@ -29,7 +29,7 @@ in.** Other documents name a phase and defer the version here.
 | --- | --- | --- |
 | Renderer Phase 0 — Skeleton | ✅ | [v0.1.0](../releases/v0.1.0.md) |
 | Renderer Phase 1 — Avatar MVP | ✅ renderer work in v0.1.0; the host session's Formation on `main` ([report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)) | the release after v0.1.0, unscheduled |
-| Renderer Phase 2 — MToon completion | ⬜ | unscheduled |
+| Renderer Phase 2 — MToon completion | 🚧 rim and MatCap on `main` ([report 14](../reports/renderer/14-2026-09-28-mtoon-rim.md)) | unscheduled |
 | Renderer Phase 3 — Animation fast path | ⬜ | unscheduled |
 | Renderer Phase 4 — MMD | ⬜ | unscheduled |
 | Renderer Phase 5 — UsdPreviewSurface | ⬜ | unscheduled |

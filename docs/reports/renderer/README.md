@@ -19,3 +19,4 @@ finding gets a new report and a one-line forward note on the old one.
 | [11](11-2026-09-27-expression-bake.md) | An expression bake played in `testusdview`: each time move rewrites the MToon slot once and uploads nothing; the bake's emission is on screen with `vrmImaging` and absent without it |
 | [12](12-2026-09-28-published-vrmimaging.md) | The VRM Formations pin the published `vrmImaging` 0.10.0 from GHCR; each of reports 06–11's runs gives its report's numbers |
 | [13](13-2026-09-28-host-session-formation.md) | The VRM host session is a Formation in the repository, pinning published packages only; its command checks MToon on the probe stage, and the published `toon` 0.1.0 draws the avatar with report 12's numbers |
+| [14](14-2026-09-28-mtoon-rim.md) | MToon's rim: MatCap, the parametric rim and the rim multiply texture in both MToon pipelines; 7 avatar materials share one MatCap image, uploaded once; a rim edit rewrites one slot per material |

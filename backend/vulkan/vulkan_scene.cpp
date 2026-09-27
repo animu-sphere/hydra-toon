@@ -215,32 +215,19 @@ void DestroyScenePipeline(VkDevice device, ScenePipeline& pipeline) {
   pipeline = {};
 }
 
-Float3 Cross(const Float3& a, const Float3& b) {
-  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-
-// Writes the rows of the inverse transpose of `matrix`'s upper 3x3, each
-// padded to four floats, and returns whether the 3x3 mirrors, which turns a
-// counter-clockwise triangle clockwise. The inverse transpose's columns are
-// the cross products of the matrix's columns over its determinant.
-bool NormalRows(const Matrix4& matrix, float rows[12]) {
-  const Float3 a0{matrix.m[0], matrix.m[1], matrix.m[2]};
-  const Float3 a1{matrix.m[4], matrix.m[5], matrix.m[6]};
-  const Float3 a2{matrix.m[8], matrix.m[9], matrix.m[10]};
-  const Float3 c0 = Cross(a1, a2);
-  const Float3 c1 = Cross(a2, a0);
-  const Float3 c2 = Cross(a0, a1);
-  const float determinant = a0.x * c0.x + a0.y * c0.y + a0.z * c0.z;
-  const float scale = determinant == 0.0F ? 1.0F : 1.0F / determinant;
-  const Float3 columns[3] = {c0, c1, c2};
+// Writes the top three rows of `matrix`, its 3x3 in xyz and translation in
+// w, and returns whether the 3x3 mirrors, which turns a counter-clockwise
+// triangle clockwise: whether its determinant is negative.
+bool ViewRows(const Matrix4& matrix, float rows[12]) {
   for (int row = 0; row < 3; ++row) {
-    for (int column = 0; column < 3; ++column) {
-      const Float3& source = columns[column];
-      const float value = row == 0 ? source.x : row == 1 ? source.y : source.z;
-      rows[row * 4 + column] = value * scale;
+    for (int column = 0; column < 4; ++column) {
+      rows[row * 4 + column] = matrix.m[column * 4 + row];
     }
-    rows[row * 4 + 3] = 0.0F;
   }
+  const float* m = matrix.m.data();
+  const float determinant = m[0] * (m[5] * m[10] - m[9] * m[6]) -
+                            m[4] * (m[1] * m[10] - m[9] * m[2]) +
+                            m[8] * (m[1] * m[6] - m[5] * m[2]);
   return determinant < 0.0F;
 }
 
@@ -284,9 +271,17 @@ std::uint32_t OutlineMode(const ToonMaterial& material) {
   return 0U;
 }
 
-void WriteParameters(const ToonMaterial& material, std::uint32_t base_entry,
-    std::uint32_t shade_entry, std::uint32_t outline_entry,
-    MToonParameters& slot) {
+MaterialEntries EntriesOf(const ToonMaterial& material,
+    const TextureCache& textures) {
+  return {textures.Entry(material.base_texture.texture),
+      textures.Entry(material.mtoon.shade_texture.texture),
+      textures.Entry(material.mtoon.outline_width_texture.texture),
+      textures.Entry(material.mtoon.matcap_texture.texture),
+      textures.Entry(material.mtoon.rim_multiply_texture.texture)};
+}
+
+void WriteParameters(const ToonMaterial& material,
+    const MaterialEntries& entries, MToonParameters& slot) {
   slot = {};
   slot.base_color[0] = material.base_color.x;
   slot.base_color[1] = material.base_color.y;
@@ -304,9 +299,9 @@ void WriteParameters(const ToonMaterial& material, std::uint32_t base_entry,
   slot.shading[0] = material.mtoon.shading_shift;
   slot.shading[1] = material.mtoon.shading_toony;
   slot.shading[2] = material.mtoon.gi_equalization;
-  slot.textures[0] = base_entry;
+  slot.textures[0] = entries.base;
   slot.textures[1] = SamplerIndex(material.base_texture);
-  slot.textures[2] = shade_entry;
+  slot.textures[2] = entries.shade;
   slot.textures[3] = SamplerIndex(material.mtoon.shade_texture);
   WriteUvRows(material.base_texture, slot.base_uv);
   WriteUvRows(material.mtoon.shade_texture, slot.shade_uv);
@@ -315,10 +310,25 @@ void WriteParameters(const ToonMaterial& material, std::uint32_t base_entry,
   slot.outline_color[2] = material.outline_color.z;
   slot.outline_color[3] = material.mtoon.outline_lighting_mix;
   slot.outline[0] = material.outline_width;
-  slot.outline_texture[0] = outline_entry;
+  slot.outline_texture[0] = entries.outline;
   slot.outline_texture[1] = SamplerIndex(material.mtoon.outline_width_texture);
   slot.outline_texture[2] = OutlineMode(material);
   WriteUvRows(material.mtoon.outline_width_texture, slot.outline_uv);
+  slot.rim_color[0] = material.mtoon.rim_color.x;
+  slot.rim_color[1] = material.mtoon.rim_color.y;
+  slot.rim_color[2] = material.mtoon.rim_color.z;
+  slot.rim_color[3] = material.mtoon.rim_lighting_mix;
+  slot.rim[0] = material.mtoon.rim_fresnel_power;
+  slot.rim[1] = material.mtoon.rim_lift;
+  slot.matcap[0] = material.mtoon.matcap.x;
+  slot.matcap[1] = material.mtoon.matcap.y;
+  slot.matcap[2] = material.mtoon.matcap.z;
+  slot.rim_textures[0] = entries.matcap;
+  slot.rim_textures[1] = SamplerIndex(material.mtoon.matcap_texture);
+  slot.rim_textures[2] = entries.rim;
+  slot.rim_textures[3] = SamplerIndex(material.mtoon.rim_multiply_texture);
+  WriteUvRows(material.mtoon.matcap_texture, slot.matcap_uv);
+  WriteUvRows(material.mtoon.rim_multiply_texture, slot.rim_uv);
 }
 
 // Every level down to 1x1.
@@ -917,22 +927,13 @@ bool MaterialCache::Update(const DrawList& draws,
       found = entries_.emplace(material.id, Entry{slot}).first;
     }
     Entry& entry = found->second;
-    const std::uint32_t base_entry =
-        textures.Entry(material.material.base_texture.texture);
-    const std::uint32_t shade_entry =
-        textures.Entry(material.material.mtoon.shade_texture.texture);
-    const std::uint32_t outline_entry =
-        textures.Entry(material.material.mtoon.outline_width_texture.texture);
+    const MaterialEntries entries = EntriesOf(material.material, textures);
     if (entry.parameters_revision != material.parameters_revision ||
-        entry.base_entry != base_entry || entry.shade_entry != shade_entry ||
-        entry.outline_entry != outline_entry) {
+        entry.entries != entries) {
       auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
-      WriteParameters(material.material, base_entry, shade_entry,
-          outline_entry, slots[entry.slot]);
+      WriteParameters(material.material, entries, slots[entry.slot]);
       entry.parameters_revision = material.parameters_revision;
-      entry.base_entry = base_entry;
-      entry.shade_entry = shade_entry;
-      entry.outline_entry = outline_entry;
+      entry.entries = entries;
       entry.model = material.material.model;
       entry.double_sided = material.material.double_sided;
       entry.outline = HasOutline(material.material);
@@ -1251,6 +1252,8 @@ void MeshCache::Record(VkCommandBuffer command,
   // they differ in shaders and in which faces they cull.
   const VkDescriptorSet material_set = materials.descriptor_set();
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
+  // A perspective projection puts -z into w; an orthographic one keeps w 1.
+  const bool orthographic = draws.view.projection.m[11] == 0.0F;
   const auto record_mtoon = [&](const ScenePipeline& pipeline, bool outline) {
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline.pipeline);
@@ -1282,11 +1285,13 @@ void MeshCache::Record(VkCommandBuffer command,
           Multiply(clip_from_world, mesh.transform);
       std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
           sizeof(constants.clip_from_object));
-      const bool mirrored = NormalRows(
+      const bool mirrored = ViewRows(
           Multiply(draws.view.view, mesh.transform),
-          constants.view_normal_rows);
+          constants.view_from_object_rows);
       constants.material_slot = material->slot;
-      constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | entry.skin_flags;
+      constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) |
+                        (orthographic ? kDrawOrthographic : 0U) |
+                        entry.skin_flags;
       constants.projection_scale = projection_scale;
       // The hull culls its front faces whether or not the material is
       // double-sided, as MToon states.

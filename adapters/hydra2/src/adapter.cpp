@@ -1058,9 +1058,9 @@ HdToonMaterial::HdToonMaterial(const SdfPath& id,
 
 HdToonMaterial::~HdToonMaterial() {
   state_->RemoveMaterial(material_, GetId());
-  state_->ReleaseTexture(base_texture_);
-  state_->ReleaseTexture(shade_texture_);
-  state_->ReleaseTexture(outline_width_texture_);
+  for (const Toon::TextureId texture : textures_) {
+    state_->ReleaseTexture(texture);
+  }
 }
 
 // The canonical values are not in the material network: a format
@@ -1102,21 +1102,18 @@ void HdToonMaterial::SyncValues(const HdSceneIndexBase& terminal) {
 // the material keeps sampling is never decoded again.
 void HdToonMaterial::Read(const HdContainerDataSourceHandle& prim) {
   HdToonMaterialSource source = HdToonReadMaterial(prim);
-  const Toon::TextureId base_texture =
-      state_->AcquireTexture(source.base_texture);
-  const Toon::TextureId shade_texture =
-      state_->AcquireTexture(source.shade_texture);
-  const Toon::TextureId outline_width_texture =
-      state_->AcquireTexture(source.outline_width_texture);
-  state_->ReleaseTexture(base_texture_);
-  state_->ReleaseTexture(shade_texture_);
-  state_->ReleaseTexture(outline_width_texture_);
-  base_texture_ = base_texture;
-  shade_texture_ = shade_texture;
-  outline_width_texture_ = outline_width_texture;
-  source.values.base_texture.texture = base_texture;
-  source.values.mtoon.shade_texture.texture = shade_texture;
-  source.values.mtoon.outline_width_texture.texture = outline_width_texture;
+  std::array<Toon::TextureId, kHdToonTextureRoles> textures{};
+  for (std::size_t role = 0; role < kHdToonTextureRoles; ++role) {
+    textures[role] = state_->AcquireTexture(source.textures[role]);
+  }
+  for (const Toon::TextureId texture : textures_) {
+    state_->ReleaseTexture(texture);
+  }
+  textures_ = textures;
+  const auto references = HdToonTextureRefs(source.values);
+  for (std::size_t role = 0; role < kHdToonTextureRoles; ++role) {
+    references[role]->texture = textures[role];
+  }
   values_ = source.values;
   state_->SetMaterial(material_, values_);
 }

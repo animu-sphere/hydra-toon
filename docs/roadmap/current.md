@@ -1,7 +1,7 @@
 # Current
 
 Renderer Phase 0's stand-ins, the work that precedes Renderer Phase 1's
-MToon path, and Renderer Phase 1 itself. Which release carries a phase is the
+MToon path, Renderer Phase 1 itself, and Renderer Phase 2. Which release carries a phase is the
 [status table](README.md#status-at-a-glance).
 
 Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️ accepted workaround
@@ -124,6 +124,30 @@ Stand-ins this phase accepts so far:
   has `metersPerUnit = 1`.
 - ⚠️ **The outline width texture is sampled at mip 0**, in the vertex stage,
   where there are no derivatives to choose another.
+
+## Renderer Phase 2 — MToon completion
+
+[Design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases):
+the rest of MToon 1.0. Shade colour, shading shift and toony, emission from
+its factor and the outline parameters came with Renderer Phase 1.
+
+- ✅ **Rim and MatCap.** MatCap, the parametric rim and the rim multiply
+  texture, mixed with the light by `rimLightingMixFactor`, in both MToon
+  pipelines; every factor is a value in the parameter slot
+  ([renderer report 14](../reports/renderer/14-2026-09-28-mtoon-rim.md)).
+- ⬜ **Alpha mode.** `mtoon_transparent` for Blend, sorted by
+  `renderQueueOffsetNumber`, writing depth only with `transparentWithZWrite`
+  ([material policy §6](../design/MATERIAL_POLICY.md#6-transparency-and-draw-order)).
+- ⬜ **UV animation.** Scroll and rotation by time, masked by
+  `uvAnimationMask`.
+- ⬜ **Texture variations.** The emissive texture, the shading shift
+  texture and its scale, and the normal map.
+
+Stand-ins this phase accepts so far:
+
+- ⚠️ **MatCap's frame takes the camera's up**, as three-vrm does, where
+  MToon's pseudocode takes the world's. The two agree while the camera is
+  level; a camera that rolls or pitches turns the MatCap with it.
 
 ## Project infrastructure
 
