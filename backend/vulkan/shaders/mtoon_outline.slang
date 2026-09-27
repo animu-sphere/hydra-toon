@@ -52,7 +52,8 @@ VertexStageOutput vertex_main(VertexInput input) {
 
 // outlineColorFactor, multiplied by the surface's shading as far as
 // outlineLightingMixFactor asks. The hull's visible faces are its back
-// faces, lit from their own side.
+// faces, lit from their own side. A transparent material's hull takes its
+// surface's alpha, which the pipeline blends by; any other's returns 1.
 [shader("fragment")]
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     float3 view_position : TEXCOORD1, bool front : SV_IsFrontFace)
@@ -66,5 +67,7 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
   const float3 color = material.outline_color.rgb *
                        lerp(float3(1.0), surface.color,
                            material.outline_color.a);
-  return float4(color, 1.0);
+  const float alpha =
+      (draw.flags & kDrawBlend) != 0 ? saturate(surface.alpha) : 1.0;
+  return float4(color, alpha);
 }

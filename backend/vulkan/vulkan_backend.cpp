@@ -21,6 +21,8 @@ SceneShaders SceneShadersIn(const std::string& directory) {
   const std::filesystem::path root(directory);
   return {(root / "mesh.vert.spv").string(), (root / "mesh.frag.spv").string(),
       (root / "mtoon.vert.spv").string(), (root / "mtoon.frag.spv").string(),
+      (root / "mtoon_transparent.vert.spv").string(),
+      (root / "mtoon_transparent.frag.spv").string(),
       (root / "mtoon_outline.vert.spv").string(),
       (root / "mtoon_outline.frag.spv").string()};
 }

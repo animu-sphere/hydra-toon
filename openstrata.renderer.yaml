@@ -31,6 +31,8 @@ validation:
     - renderer.material.mtoon_opaque
     - renderer.material.mtoon_textured
     - renderer.material.mtoon_outline
+    - renderer.material.mtoon_rim
+    - renderer.material.mtoon_transparent
     - renderer.skinning.gpu
     - renderer.install_tree
     - renderer.plugin.discovery

@@ -102,10 +102,11 @@ void AppendHostEvidence(std::uint64_t frame_index,
       ++mtoon_materials;
     }
   }
-  // And how many of this frame's draws went through mtoon_opaque, how many
-  // of those added mtoon_outline's hull, and how many were skinned on the
-  // GPU.
+  // And how many of this frame's draws selected MToon, how many of those
+  // went through mtoon_transparent, how many added mtoon_outline's hull,
+  // and how many were skinned on the GPU.
   std::size_t mtoon_draws{};
+  std::size_t transparent_draws{};
   std::size_t outline_draws{};
   std::size_t skinned_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
@@ -119,6 +120,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
         material->id == mesh.material &&
         material->material.model == Toon::ToonShadingModel::MToon) {
       ++mtoon_draws;
+      transparent_draws += Toon::IsTransparent(material->material) ? 1U : 0U;
       outline_draws += Toon::HasOutline(material->material) ? 1U : 0U;
     }
   }
@@ -146,6 +148,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " materials_mtoon=" << mtoon_materials
          << " draws=" << draws.draws.size()
          << " draws_mtoon=" << mtoon_draws
+         << " draws_transparent=" << transparent_draws
          << " draws_outline=" << outline_draws
          << " draws_skinned=" << skinned_draws << '\n';
 }

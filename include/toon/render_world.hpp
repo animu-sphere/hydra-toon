@@ -254,6 +254,21 @@ struct ToonMaterial {
 // material whose width mode is not None, with a width above zero.
 [[nodiscard]] bool HasOutline(const ToonMaterial& material);
 
+// Whether a material's draws blend over what is behind them: its alpha mode
+// is Blend. Opaque and Mask draw first, and blend nothing.
+[[nodiscard]] bool IsTransparent(const ToonMaterial& material);
+
+// A material's sort key (material policy §6), as MToon's render queue
+// states it: Opaque 2000 and Mask 2450; Blend with transparentWithZWrite
+// 2501 plus renderQueueOffsetNumber clamped to [0, 9], and without it 3000
+// plus the offset clamped to [-9, 0]. A transparent draw with a lower key
+// draws first; the offset is read for MToon alone.
+[[nodiscard]] std::int32_t RenderQueue(const ToonMaterial& material);
+
+// Whether a material's draws write depth: every one but a transparent one,
+// which writes it only when MToon's transparentWithZWrite asks.
+[[nodiscard]] bool WritesDepth(const ToonMaterial& material);
+
 // Whether moving from one material to the other changes how it is drawn —
 // its model, alpha mode, double-sidedness or which textures it samples —
 // rather than only the values in its parameter slot (material policy §8).

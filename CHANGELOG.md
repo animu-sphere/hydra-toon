@@ -23,6 +23,15 @@ version has a record in [docs/releases/](docs/releases/README.md).
   reads the `matcap` and `rimMultiply` texture roles; a material's slot grew
   to 352 bytes. The headless check `renderer.material.mtoon_rim`, and
   renderer report 14.
+- MToon transparency: `mtoon_transparent` (`shaders/mtoon_transparent.slang`)
+  blends MToon's Blend alpha mode over what is behind it, after every
+  opaque and Mask draw, in MToon's render queue order from
+  `renderQueueOffsetNumber` and `transparentWithZWrite`, writing depth only
+  with the latter. A double-sided transparent surface draws its back faces
+  first, and its outline hull draws after it with its alpha. The core's
+  `IsTransparent`, `RenderQueue` and `WritesDepth` state the rules; the host
+  frame evidence adds `draws_transparent`. The headless check
+  `renderer.material.mtoon_transparent`, and renderer report 15.
 - Documentation: the release milestones. `v0.x.0` versions replace
   Renderer Phase 0–7 as the delivery sequence; the roadmap has a page per
   coming milestone and no status marks, and the capability matrix is the
@@ -31,6 +40,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Four scene pipelines where there were three. Depth writes are dynamic
+  state in every MToon pipeline, and `mtoon_outline` blends, returning 1
+  for an opaque material, so one hull pipeline serves both.
+- `openstrata.renderer.yaml` lists `renderer.material.mtoon_rim` and
+  `renderer.material.mtoon_transparent` among the assertions `ost validate`
+  requires.
 - The MToon pipelines' push constants carry view-from-object's top three
   rows in place of the normal matrix, which the shaders now derive, so a
   fragment knows its view-space position.

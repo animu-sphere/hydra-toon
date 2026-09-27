@@ -74,9 +74,12 @@ struct PipelineDescription {
   std::uint32_t push_constant_size = 0;
   // Position, then normal and UV when there are three.
   std::uint32_t vertex_streams = 1;
-  // Cull mode, front face and vertex strides set per draw rather than baked
-  // in.
+  // Cull mode, front face, depth writes and vertex strides set per draw
+  // rather than baked in.
   bool dynamic_draw_state = false;
+  // Source over: the fragment's alpha blends it over the target, so one
+  // that returns 1 draws as an opaque one would.
+  bool blend = false;
 };
 
 // Every scene pipeline shares the set layouts, material then skin, so a
@@ -166,6 +169,15 @@ bool CreateScenePipeline(VkDevice device,
   depth_state.depthWriteEnable = VK_TRUE;
   depth_state.depthCompareOp = VK_COMPARE_OP_LESS;
   VkPipelineColorBlendAttachmentState blend_attachment{};
+  if (description.blend) {
+    blend_attachment.blendEnable = VK_TRUE;
+    blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+    blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+  }
   blend_attachment.colorWriteMask =
       VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -173,15 +185,15 @@ bool CreateScenePipeline(VkDevice device,
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   blend.attachmentCount = 1;
   blend.pAttachments = &blend_attachment;
-  // Cull mode, front face and vertex strides are core dynamic state in
-  // Vulkan 1.3; a stride of 0 stands in for a mesh's missing UVs.
+  // Cull mode, front face, depth writes and vertex strides are core dynamic
+  // state in Vulkan 1.3; a stride of 0 stands in for a mesh's missing UVs.
   const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
       VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE,
-      VK_DYNAMIC_STATE_FRONT_FACE,
+      VK_DYNAMIC_STATE_FRONT_FACE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
       VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE};
   VkPipelineDynamicStateCreateInfo dynamic{
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic.dynamicStateCount = description.dynamic_draw_state ? 5U : 2U;
+  dynamic.dynamicStateCount = description.dynamic_draw_state ? 6U : 2U;
   dynamic.pDynamicStates = dynamic_states;
   VkPipelineRenderingCreateInfo rendering{
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -377,6 +389,10 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
          LoadSpirv(shaders.mesh_fragment, words.mesh_fragment, detail) &&
          LoadSpirv(shaders.mtoon_vertex, words.mtoon_vertex, detail) &&
          LoadSpirv(shaders.mtoon_fragment, words.mtoon_fragment, detail) &&
+         LoadSpirv(shaders.mtoon_transparent_vertex,
+             words.mtoon_transparent_vertex, detail) &&
+         LoadSpirv(shaders.mtoon_transparent_fragment,
+             words.mtoon_transparent_fragment, detail) &&
          LoadSpirv(shaders.mtoon_outline_vertex, words.mtoon_outline_vertex,
              detail) &&
          LoadSpirv(shaders.mtoon_outline_fragment,
@@ -457,20 +473,30 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   mtoon.push_constant_size = sizeof(MToonDrawConstants);
   mtoon.vertex_streams = 3;
   mtoon.dynamic_draw_state = true;
-  // The same streams, constants and dynamic state; only the shaders differ.
+  // The same streams, constants and dynamic state; only the shaders and
+  // blending differ. The hull blends, so a transparent material's outline
+  // takes its surface's alpha while an opaque one's returns 1.
+  PipelineDescription transparent = mtoon;
+  transparent.vertex_words = &words.mtoon_transparent_vertex;
+  transparent.fragment_words = &words.mtoon_transparent_fragment;
+  transparent.blend = true;
   PipelineDescription outline = mtoon;
   outline.vertex_words = &words.mtoon_outline_vertex;
   outline.fragment_words = &words.mtoon_outline_fragment;
+  outline.blend = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
          CreateScenePipeline(device, mtoon, pipelines, color_format,
              depth_format, pipelines.mtoon, detail) &&
+         CreateScenePipeline(device, transparent, pipelines, color_format,
+             depth_format, pipelines.mtoon_transparent, detail) &&
          CreateScenePipeline(device, outline, pipelines, color_format,
              depth_format, pipelines.mtoon_outline, detail);
 }
 
 void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
   DestroyScenePipeline(device, pipelines.mtoon_outline);
+  DestroyScenePipeline(device, pipelines.mtoon_transparent);
   DestroyScenePipeline(device, pipelines.mtoon);
   DestroyScenePipeline(device, pipelines.mesh);
   vkDestroyDescriptorSetLayout(device, pipelines.material_layout, nullptr);
@@ -937,6 +963,9 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.model = material.material.model;
       entry.double_sided = material.material.double_sided;
       entry.outline = HasOutline(material.material);
+      entry.transparent = IsTransparent(material.material);
+      entry.queue = RenderQueue(material.material);
+      entry.depth_write = WritesDepth(material.material);
       ++writes_;
       written = true;
     }
@@ -1208,7 +1237,7 @@ void MeshCache::Release(Entry& entry) {
 
 void MeshCache::Record(VkCommandBuffer command,
     const ScenePipelines& pipelines, const MaterialCache& materials,
-    const DrawList& draws) const {
+    const DrawList& draws) {
   const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
   const auto mtoon_material =
       [&materials](const MeshSnapshot& mesh) -> const MaterialCache::Entry* {
@@ -1248,67 +1277,121 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
   }
 
-  // Both MToon pipelines share the layout, the streams and the constants;
-  // they differ in shaders and in which faces they cull.
+  // Every MToon pipeline shares the layout, the streams and the constants;
+  // they differ in shaders, blending and which faces they cull. Their
+  // layouts are identical, so the material set stays bound across them.
   const VkDescriptorSet material_set = materials.descriptor_set();
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
   // A perspective projection puts -z into w; an orthographic one keeps w 1.
   const bool orthographic = draws.view.projection.m[11] == 0.0F;
-  const auto record_mtoon = [&](const ScenePipeline& pipeline, bool outline) {
+  const ScenePipeline* bound = nullptr;
+  const auto bind = [&](const ScenePipeline& pipeline) {
+    if (bound == &pipeline) {
+      return;
+    }
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline.pipeline);
+    if (bound == nullptr) {
+      vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+          pipeline.layout, 0, 1, &material_set, 0, nullptr);
+    }
+    bound = &pipeline;
+  };
+  const auto draw_mtoon = [&](const ScenePipeline& pipeline,
+                              const MeshSnapshot& mesh, const Entry& entry,
+                              const MaterialCache::Entry& material,
+                              VkCullModeFlags cull) {
+    bind(pipeline);
+    const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
+        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
+    const VkDeviceSize offsets[] = {0, 0, 0};
+    const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
+        entry.has_uvs ? sizeof(Float2) : 0U};
+    vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
+        strides);
+    vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
+        VK_INDEX_TYPE_UINT32);
+    const VkDescriptorSet skin_set =
+        entry.skinned ? entry.skin_set : unskinned_set_;
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        pipeline.layout, 0, 1, &material_set, 0, nullptr);
-    for (const MeshSnapshot& mesh : draws.draws) {
+        pipeline.layout, 1, 1, &skin_set, 0, nullptr);
+    MToonDrawConstants constants{};
+    const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
+    std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
+        sizeof(constants.clip_from_object));
+    const bool mirrored = ViewRows(Multiply(draws.view.view, mesh.transform),
+        constants.view_from_object_rows);
+    constants.material_slot = material.slot;
+    constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) |
+                      (orthographic ? kDrawOrthographic : 0U) |
+                      (material.transparent ? kDrawBlend : 0U) |
+                      entry.skin_flags;
+    constants.projection_scale = projection_scale;
+    vkCmdSetCullMode(command, cull);
+    vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
+                                        : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetDepthWriteEnable(command,
+        material.depth_write ? VK_TRUE : VK_FALSE);
+    vkCmdPushConstants(command, pipeline.layout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+        sizeof(constants), &constants);
+    vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
+  };
+
+  // The opaque pass, Mask included: every hull, then every surface. The
+  // hull culls its front faces whether or not the material is double-sided,
+  // as MToon states.
+  transparent_scratch_.clear();
+  for (const bool outline : {true, false}) {
+    for (std::size_t index = 0; index < draws.draws.size(); ++index) {
+      const MeshSnapshot& mesh = draws.draws[index];
       const auto found = entries_.find(mesh.id);
       const MaterialCache::Entry* material = mtoon_material(mesh);
-      if (found == entries_.end() || material == nullptr ||
-          (outline && !material->outline)) {
+      if (found == entries_.end() || material == nullptr) {
         continue;
       }
-      const Entry& entry = found->second;
-      const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
-          entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
-      const VkDeviceSize offsets[] = {0, 0, 0};
-      const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
-          entry.has_uvs ? sizeof(Float2) : 0U};
-      vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
-          strides);
-      vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
-          VK_INDEX_TYPE_UINT32);
-      const VkDescriptorSet skin_set =
-          entry.skinned ? entry.skin_set : unskinned_set_;
-      vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-          pipeline.layout, 1, 1, &skin_set, 0, nullptr);
-      MToonDrawConstants constants{};
-      const Matrix4 clip_from_object =
-          Multiply(clip_from_world, mesh.transform);
-      std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
-          sizeof(constants.clip_from_object));
-      const bool mirrored = ViewRows(
-          Multiply(draws.view.view, mesh.transform),
-          constants.view_from_object_rows);
-      constants.material_slot = material->slot;
-      constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) |
-                        (orthographic ? kDrawOrthographic : 0U) |
-                        entry.skin_flags;
-      constants.projection_scale = projection_scale;
-      // The hull culls its front faces whether or not the material is
-      // double-sided, as MToon states.
-      vkCmdSetCullMode(command,
+      if (material->transparent) {
+        if (!outline) {
+          transparent_scratch_.push_back(index);
+        }
+        continue;
+      }
+      if (outline && !material->outline) {
+        continue;
+      }
+      draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
+          found->second, *material,
           outline                  ? VK_CULL_MODE_FRONT_BIT
           : material->double_sided ? VK_CULL_MODE_NONE
                                    : VK_CULL_MODE_BACK_BIT);
-      vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
-                                          : VK_FRONT_FACE_COUNTER_CLOCKWISE);
-      vkCmdPushConstants(command, pipeline.layout,
-          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-          sizeof(constants), &constants);
-      vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
     }
-  };
-  record_mtoon(pipelines.mtoon_outline, true);
-  record_mtoon(pipelines.mtoon, false);
+  }
+
+  // The transparent pass, back to front by render queue and, within one
+  // queue, in the order `draws` lists them. A double-sided surface draws
+  // its back faces before its front ones, so its near side blends over its
+  // far side. Its hull follows it, as UniVRM and three-vrm draw MToon's
+  // outline, so a surface that writes depth hides the hull's far side.
+  std::stable_sort(transparent_scratch_.begin(), transparent_scratch_.end(),
+      [&](std::size_t left, std::size_t right) {
+        return mtoon_material(draws.draws[left])->queue <
+               mtoon_material(draws.draws[right])->queue;
+      });
+  for (const std::size_t index : transparent_scratch_) {
+    const MeshSnapshot& mesh = draws.draws[index];
+    const Entry& entry = entries_.find(mesh.id)->second;
+    const MaterialCache::Entry& material = *mtoon_material(mesh);
+    if (material.double_sided) {
+      draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
+          VK_CULL_MODE_FRONT_BIT);
+    }
+    draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
+        VK_CULL_MODE_BACK_BIT);
+    if (material.outline) {
+      draw_mtoon(pipelines.mtoon_outline, mesh, entry, material,
+          VK_CULL_MODE_FRONT_BIT);
+    }
+  }
 }
 
 void MeshCache::Destroy() {
