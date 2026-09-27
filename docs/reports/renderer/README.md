@@ -17,3 +17,4 @@ finding gets a new report and a one-line forward note on the old one.
 | [09](09-2026-09-27-gpu-skinning.md) | GPU skinning: all 20 avatar draws skinned in the vertex stage; a joint turn writes 20 joint buffers and uploads nothing else; dual quaternion skinning stays on the CPU kernel |
 | [10](10-2026-09-27-mtoon-outline.md) | Inverted-hull outline: `mtoon_outline` adds the hull of 15 of the 20 avatar draws in world or screen units; widening or disabling an outline rewrites one parameter slot |
 | [11](11-2026-09-27-expression-bake.md) | An expression bake played in `testusdview`: each time move rewrites the MToon slot once and uploads nothing; the bake's emission is on screen with `vrmImaging` and absent without it |
+| [12](12-2026-09-28-published-vrmimaging.md) | The VRM Formations pin the published `vrmImaging` 0.10.0 from GHCR; each of reports 06–11's runs gives its report's numbers |

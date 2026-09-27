@@ -103,6 +103,9 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - Renderer report 11: an expression bake from `usd-vrm-plugins`, played in
   `testusdview`, rewrites its MToon material's slot once per time move and
   uploads nothing — `usd-vrm-plugins`' imaging Step I4, in the host session.
+- Renderer report 12: the VRM Formations pin the `vrmImaging` 0.10.0 that
+  `usd-vrm-plugins` published, and each of reports 06–11's runs gives its
+  report's numbers.
 
 ### Changed
 

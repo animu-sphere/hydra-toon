@@ -56,8 +56,10 @@ What is left for Renderer Phase 1's MToon path:
   in `testusdview`
   ([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md)),
   from the Formation's own command
-  ([ost report 06](../reports/ost/06-2026-09-27-v0.23.13-report-05-reverified.md));
-  the packages are not published yet. Per platform:
+  ([ost report 06](../reports/ost/06-2026-09-27-v0.23.13-report-05-reverified.md)).
+  `vrmImaging` is published and the Formations pin it
+  ([renderer report 12](../reports/renderer/12-2026-09-28-published-vrmimaging.md));
+  the renderer package is not published yet. Per platform:
   [vrm-host-session.md](vrm-host-session.md).
 
 Before Renderer Phase 4:
