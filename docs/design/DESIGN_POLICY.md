@@ -5,15 +5,13 @@ owner: hydra-toon
 
 # hydra-toon — design policy
 
-> Status: **accepted** as the project's design policy, 2026-09-26. Nothing
-> below is implemented beyond the OpenStrata renderer scaffold;
-> [reference/CAPABILITY_MATRIX.md](../reference/CAPABILITY_MATRIX.md) is the
-> only document that says what is implemented.
->
 > This is the canonical, long-form policy: what the renderer is for, how it is
-> shaped, and the order it is built in. It is distilled from the 2026-09-26
-> implementation policy, whose section numbers it keeps so either can be cited
-> by number. Where this repository departs from that policy, §30 records it.
+> shaped, and the order it is built in. It says what should be, never what is:
+> what is implemented is
+> [reference/CAPABILITY_MATRIX.md](../reference/CAPABILITY_MATRIX.md). It is
+> distilled from the 2026-09-26 implementation policy, whose section numbers it
+> keeps so either can be cited by number. Where this repository departs from
+> that policy, §30 records it.
 > Two focused documents own the detail of one area each, and **on its own area
 > the focused document wins**:
 >
@@ -100,7 +98,10 @@ Initial scope is exactly two backends:
    architecture and shader logic are shared; each backend has its own
    implementation. The Vulkan backend is never limited to what WebGPU can do.
 
-Metal is out of initial scope.
+WebGPU is not a copy of the Vulkan implementation but another realization of
+the same renderer model, and backend-specific needs never flow back into the
+render world or the Hydra adapter. Metal is out of scope until a need for it is
+clear, and is re-evaluated then. OpenGL is not pursued as a new backend.
 
 Where the backends live in this repository is
 [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md); the implementation
@@ -128,6 +129,10 @@ USD Stage → Hydra / Scene Index → hydra-toon adapter → hydra-toon renderer
   renderer — MToon API schema, MMD material and `UsdPreviewSurface` each
   become a `ToonMaterial` ([MATERIAL_POLICY.md](MATERIAL_POLICY.md)). The
   renderer core does not handle USD-, VRM- or MMD-specific structure directly.
+- **The adapter stays thin.** It turns Hydra's scene into the core's scene
+  data and nothing more: no Vulkan resources or their lifetime, no shaders or
+  pipelines, no backend scheduling. A Hydra API change is absorbed in the
+  adapter.
 
 ## 6. Relationship with Hgi
 
@@ -184,7 +189,9 @@ what stays model-specific — is [MATERIAL_POLICY.md](MATERIAL_POLICY.md).
 Slang is the shader source language, compiled to SPIR-V for Vulkan and WGSL
 for WebGPU. The shared subset is intentionally small: vertex, fragment and
 compute shaders only. Geometry shaders, tessellation and mesh shaders are not
-used, so both backends stay stable.
+used, so both backends stay stable. One source for both backends is a means,
+not a goal: where WGSL generation, WebGPU's restrictions or its binding model
+would bend the architecture, a backend-specific shader is allowed.
 
 ## 10. Outline
 
@@ -196,9 +203,10 @@ Pass 2: Toon surface
 ```
 
 It is easy on both backends, needs no geometry shader, suits MToon, and has a
-predictable GPU cost. Later the mode becomes selectable
-(`None | InvertedHull | ScreenSpace`); screen-space outline is Renderer Phase 2
-or later. The MToon outline *semantics* (`outlineWidthMode` and friends) are
+predictable GPU cost. Later the mode may become selectable
+(`None | InvertedHull | ScreenSpace`), but only after the inverted hull's width
+stability, aliasing and cost are finished; a second method does not come first.
+The MToon outline *semantics* (`outlineWidthMode` and friends) are
 the avatar's request, not a rendering instruction
 ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §5).
 
@@ -336,11 +344,18 @@ Not required initially: meshlets, visibility buffer, GPU culling, full
 indirect rendering, bindless everything. The main case is a few characters,
 some hundreds of thousands of polygons and tens to hundreds of materials, for
 which CPU-side persistent draw packets should be enough. GPU-driven techniques
-come after measurement, in Renderer Phase 7.
+come after a measurement shows the need.
 
 ## 23. Performance KPIs
 
-Maximum FPS is not the measure.
+Maximum FPS is not the measure. In order of priority:
+
+1. motion-to-photon latency;
+2. stable frame time;
+3. per-frame CPU cost;
+4. no unnecessary upload;
+5. GPU frame cost;
+6. peak throughput.
 
 - **Renderer latency:** pose → GPU submit, CPU render-thread time, GPU frame
   time, present latency.
@@ -369,25 +384,40 @@ follow.
 
 ## 25. Implementation phases
 
-This sequence is **Renderer Phase 0–7**. A phase is not a release; which
-release carries it is the [roadmap](../roadmap/README.md).
+The renderer is built in **milestones, and each milestone is a `v0.x.0`
+release**: a version number says how far the renderer has come, not how much
+changed. What each milestone contains, and the order, is the
+[roadmap](../roadmap/README.md). The order follows three rules:
 
-| Phase | Name | Contents |
-| --- | --- | --- |
-| 0 | Skeleton | plugin registration; `HdRenderDelegate`; Vulkan instance / device / swapchain; camera; triangle and mesh rendering; basic synchronization; basic shader system |
-| 1 | Avatar MVP | `UsdGeomMesh`; `UsdSkel`; GPU skinning; MToon opaque; basic textures; inverted-hull outline; depth; camera; Vulkan. **A VRM character displays in real time.** |
-| 2 | MToon completion | shade colour; shading shift; shading toony; rim; MatCap; emission; UV animation; alpha mode; outline parameters; texture variations |
-| 3 | Animation fast path | persistent `DrawPacket`; skeleton-only dirty path; morph targets; expressions; look-at; late motion latching; direct `MotionPose` update path |
-| 4 | MMD | MMD material normalization; sphere and toon textures; MMD-style lighting; MMD outline behaviour; PMX material mapping |
-| 5 | UsdPreviewSurface | basic PBR; fallback material; non-avatar USD scenes |
-| 6 | WebGPU | WebGPU backend; WGSL pipeline; shader portability validation; browser / WASM runtime evaluation |
-| 7 | Optimization | only what measurement asks for: bindless, indirect draw, GPU culling, meshlets, compute-skinning optimization, async compute, pipeline cache, shader pre-warming |
+- **Depth before breadth.** The avatar path — MToon quality, the animation
+  fast path, latency, frame stability, outline quality, expressions — is
+  finished before a new feature family (MMD, `UsdPreviewSurface`, WebGPU) is
+  added. A new family never leaves the avatar path half done.
+- **Vulkan first.** A capability is completed on Vulkan — scene model,
+  material model, resource lifetime, animation fast path, latency model,
+  diagnostics — before it is carried to WebGPU (§4).
+- **Measure before complexity.** GPU-driven and other advanced techniques
+  wait for a benchmark that asks for them (§22).
+
+Until v0.1.0 the sequence was **Renderer Phase 0–7**. It is retired; reports
+and the v0.1.0 record that name a phase map onto milestones as follows:
+
+| Renderer Phase | Milestone |
+| --- | --- |
+| 0 Skeleton, 1 Avatar MVP | v0.1.0 |
+| 2 MToon completion | v0.2.0, MToon quality |
+| 3 Animation fast path | v0.3.0, avatar animation fast path |
+| 4 MMD | v0.4.0, MMD realization |
+| 5 UsdPreviewSurface | v0.5.0, generic USD fallback |
+| 6 WebGPU | v0.6.0, WebGPU |
+| 7 Optimization | after v0.6.0, as measurement asks |
 
 ## 26. Non-goals
 
 Initially not goals: a general-purpose AAA renderer; a full deferred renderer;
 ray tracing; path tracing; large worlds; a geometry-shader architecture; full
-MaterialX; a Metal backend; a large render-graph framework; every Hydra
+MaterialX, production PBR or arbitrary material graphs (`UsdPreviewSurface` is
+a fallback, not a lookdev path); a Metal backend; a large render-graph framework; every Hydra
 feature. The value is **responsiveness for avatar rendering**, not feature
 count.
 
@@ -450,10 +480,9 @@ foundation for `usd-vrm-plugins`, `usd-mmd-plugins`, `usd-motion-plugins`,
 
 ## 30. Where this repository departs from the implementation policy
 
-Each departure is `proposed` until the phase that first depends on it lands,
-and binding from then.
+Both departures are binding.
 
-| Implementation policy | Here | Why | Status |
-| --- | --- | --- | --- |
-| §4, §7 — `src/{hd,renderer,material,backend,shaders}` and `renderer/` + `backend/` | The OpenStrata renderer layout: `core/`, `backend/`, `adapters/`, `include/toon/`, `validation/` ([PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §2–3) | The scaffold's layout is what `ost build`, `ost validate` and the renderer evidence contract are wired to, and its core-boundary check enforces §7 mechanically. The policy's directories were an example; its separation (core / backend / Hydra adapter / material / shaders) is kept one-to-one. | binding (Renderer Phase 0) |
-| §5 — "the `HdRenderDelegate` adapter" | The adapter lives at `adapters/hydra2/` and is named `hydra2` in `openstrata.renderer.yaml` | That is OpenStrata's name for the Hydra scene-input slot. The code is a classic `HdRenderDelegate` + `HdRendererPlugin`, which is what §5 asks for; the directory name claims nothing about the Hydra 2.0 renderer interface. | binding (Renderer Phase 0) |
+| Implementation policy | Here | Why |
+| --- | --- | --- |
+| §4, §7 — `src/{hd,renderer,material,backend,shaders}` and `renderer/` + `backend/` | The OpenStrata renderer layout: `core/`, `backend/`, `adapters/`, `include/toon/`, `validation/` ([PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §2–3) | The scaffold's layout is what `ost build`, `ost validate` and the renderer evidence contract are wired to, and its core-boundary check enforces §7 mechanically. The policy's directories were an example; its separation (core / backend / Hydra adapter / material / shaders) is kept one-to-one. |
+| §5 — "the `HdRenderDelegate` adapter" | The adapter lives at `adapters/hydra2/` and is named `hydra2` in `openstrata.renderer.yaml` | That is OpenStrata's name for the Hydra scene-input slot. The code is a classic `HdRenderDelegate` + `HdRendererPlugin`, which is what §5 asks for; the directory name claims nothing about the Hydra 2.0 renderer interface. |

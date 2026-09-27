@@ -5,9 +5,7 @@ owner: hydra-toon
 
 # Material policy
 
-> Status: **proposed**, 2026-09-26. It becomes binding piece by piece as
-> Renderer Phase 1 (MToon opaque), Phase 4 (MMD) and Phase 5
-> (PreviewSurface) land; what is implemented is the
+> A model's part of this policy binds once that model draws; what draws is the
 > [capability matrix](../reference/CAPABILITY_MATRIX.md). It expands
 > [DESIGN_POLICY.md](DESIGN_POLICY.md) §8 and wins over it on materials.
 
@@ -38,9 +36,9 @@ render index's terminal scene index, in the locator hierarchy the adapter's
 owner froze. It links neither the schema nor the adapter. A session that
 registers either without the other, or neither, carries no `vrm` container,
 and the material is PreviewSurface by §3 — a silent fall-back that the
-session's composition, not this renderer, has to prevent. MMD's stage-contract version 1 (schema-less `mmd:material:*`)
-is not read: MMD rendering is Renderer Phase 4, after that repository's
-version 2 became what its importer authors.
+session's composition, not this renderer, has to prevent. MMD's
+stage-contract version 1 (schema-less `mmd:material:*`) is not read: the MMD
+path reads version 2, which is what that repository's importer authors.
 
 ## 3. Selection: a realization is chosen, not merged
 
@@ -118,6 +116,10 @@ mmd_opaque    mmd_transparent    mmd_outline
 preview_surface
 ```
 
+MToon and MMD are separate shaders, not one shader with a model switch. They
+share what is truly common — skinning, morph evaluation, the texture table,
+light data, the outline's hull, math helpers — as included Slang modules.
+
 A material is a slot in its model's parameter buffer plus texture indices.
 Normalizing a new material writes a slot; it never compiles a shader. A
 feature a material does not use is a zero or a disabled flag in its slot, not
@@ -146,6 +148,6 @@ structural.
 
 | Id | Question | Proposed answer | Resolve by |
 | --- | --- | --- | --- |
-| MAT-Q1 | How the Material interface inputs `inputs:vrm:*` and `inputs:mmd:material:*` reach the render delegate | **MToon: answered** on OpenUSD 26.08 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)). Not through the material network or `Get`; through `vrmImaging`'s `vrm` container on the Hydra material prim, read from the terminal scene index — structural changes in `Sync`, value-only changes from the observed terminal scene index (§2, §8). **MMD:** the same shape is proposed for `mmdImaging`, whose Hydra view is `usd-mmd-plugins`' to define, so that one read path serves both | MToon: Renderer Phase 1. MMD: agreed with `usd-mmd-plugins` before Renderer Phase 4 |
-| MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | `hydra-toon` ships its own ramp set whose terms allow redistribution, mapped by index | Renderer Phase 4 |
-| MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | Decide, and record, how the MMD path interprets them, against reference renders from MMD itself | Renderer Phase 4 |
+| MAT-Q1 | How `inputs:mmd:material:*` reaches the render delegate. For MToon this is answered by §2 and §8 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)) | The same shape for `mmdImaging` — a container on the Hydra material prim, read from the terminal scene index — whose Hydra view is `usd-mmd-plugins`' to define, so that one read path serves both models | agreed with `usd-mmd-plugins` before v0.4.0 |
+| MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | `hydra-toon` ships its own ramp set whose terms allow redistribution, mapped by index | v0.4.0 |
+| MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | Decide, and record, how the MMD path interprets them, against reference renders from MMD itself | v0.4.0 |

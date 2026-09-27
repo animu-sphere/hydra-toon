@@ -28,5 +28,5 @@ runs on a tag or a manual dry run, never on a pull request.
 | OpenUSD | 26.08 measured | Hydra adapter only; a real `lookdev` or `usd` runtime |
 | GLFW | 3.4 | standalone viewport only; `find_package`, else a pinned FetchContent |
 
-Linux and macOS are not measured. macOS is out of scope for the Vulkan-first
-phases ([design policy §4](../design/DESIGN_POLICY.md#4-backends)).
+Linux and macOS are not measured. macOS has no backend: there is no Metal
+backend ([design policy §4](../design/DESIGN_POLICY.md#4-backends)).

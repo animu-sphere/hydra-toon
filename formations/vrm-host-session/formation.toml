@@ -1,7 +1,7 @@
 schema = "openstrata.formation/v1alpha1"
 
 # The VRM usdview session, composed only of published packages
-# (docs/roadmap/vrm-host-session.md). Run from this directory: the command's
+# (docs/guides/BUILDING.md). Run from this directory: the command's
 # paths are relative to the working directory.
 
 [formation]

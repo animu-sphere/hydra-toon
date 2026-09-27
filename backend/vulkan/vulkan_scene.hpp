@@ -368,8 +368,7 @@ private:
 // a shared one it never reads.
 //
 // Geometry is written through host-visible memory on the render thread. That
-// is the Renderer Phase 0 stand-in for the staged, off-thread upload of
-// design policy §20.
+// is a stand-in for the staged, off-thread upload of design policy §20.
 class MeshCache {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,

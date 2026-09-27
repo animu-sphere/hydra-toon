@@ -1,7 +1,7 @@
 # Documentation guidelines
 
 Documentation is part of the implementation contract. A change is incomplete
-if it changes a public boundary, implemented architecture or delivery status
+if it changes a public boundary, implemented architecture or a capability
 without updating the page that owns it.
 
 **One concept, one owning repository, one canonical document.** Everything
@@ -17,15 +17,33 @@ so a reader moving between them finds the same shape.
 | `docs/README.md` | Which document owns which subject | Content of its own |
 | `design/` | Intended contracts, their rationale, open questions | Claims that something is implemented |
 | `architecture/` | Target identities, directories, dependency edges, packaging — the binding structural contract | Rationale; plans |
-| `reference/` | Facts about the current tree: capabilities, measured configurations | Plans; a sibling repository's status |
-| `roadmap/` | Incomplete work this repository owns, and which release carries it | Completed work; rationale; a sibling's roadmap |
+| `reference/` | What is implemented now (the capability matrix), and where it was measured (supported configurations) | Plans; a sibling repository's status |
+| `roadmap/` | What is built next: the work of each coming milestone, and planned work no milestone carries yet | Status marks; completed work; rationale; a sibling's roadmap |
 | `guides/` | How to accomplish a task, with commands that have been run | Commands nobody has run |
-| `releases/` | One immutable record per released version | Work in progress |
-| `reports/` | Dated measurements and observations: builds, benchmarks, hardware sessions, `ost` dogfooding | Current-state claims |
+| `releases/` | Versioning and the release gate; one immutable record per released version, saying what it established | Work in progress |
+| `reports/` | Dated evidence: what was verified, under which conditions, and how — builds, benchmarks, hardware sessions, `ost` dogfooding | Current-state claims |
 | `archive/` | Plans and documents that were once authoritative and no longer are | Anything a reader should act on |
 | `contributing/` | How to maintain this repository | End-user tasks |
 
 The same fact is not maintained independently in two categories.
+
+## Status
+
+Current status is stated in one place, the
+[capability matrix](../reference/CAPABILITY_MATRIX.md). Nothing else carries a
+status mark or a "done" or "in progress" claim about this repository's work —
+not the roadmap, a design document, the root README or the changelog.
+
+- When work is finished, its row in the capability matrix changes, its entry
+  goes to the changelog, and its item is deleted from the roadmap in the same
+  change.
+- Planned work that no milestone carries yet is listed once, in the
+  roadmap's *not yet in a milestone* section, and moves to a milestone's
+  page when one takes it. A gap the tree has is also a ⬜ or ⚠️ row in the
+  capability matrix, which states the gap, not the plan; an idea nobody
+  has planned is an issue.
+- A milestone's roadmap page is deleted when that version is released; its
+  release record says what it established.
 
 ## Cross-repository contracts
 
@@ -84,9 +102,11 @@ canonical: X.md        # superseded only: the replacement, relative
 
 ## Naming
 
-- Phase identifiers are always qualified by their sequence: Renderer Phase 1.
-  A sibling's sequence carries the sibling's name ("`usd-vrm-plugins`
-  Product P5").
+- A milestone is named by its version: v0.2.0. The retired Renderer Phase 0–7
+  appear only in history, and
+  [design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)
+  maps them onto milestones. A sibling's sequence carries the sibling's name
+  ("`usd-vrm-plugins` Product P5").
 - Section numbers in design documents are stable, so they can be cited.
   [DESIGN_POLICY.md](../design/DESIGN_POLICY.md) keeps the implementation
   policy's §1–§29 numbering.
@@ -108,5 +128,6 @@ canonical: X.md        # superseded only: the replacement, relative
 2. Every new page appears in its category index.
 3. Relative links resolve.
 4. Implementation changes update `architecture/` and `reference/`.
-5. Completed work leaves `roadmap/`; a completed plan moves to `archive/`.
+5. Completed work leaves `roadmap/`, and no status is written outside the
+   capability matrix.
 6. A sibling's contract is linked, not restated.

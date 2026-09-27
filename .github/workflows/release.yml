@@ -272,7 +272,7 @@ jobs:
           mkdir -p "oci-stage/$stem"
           cp -R "$dist_dir/." "oci-stage/$stem/"
           # The OCI tag is `<package>-<version>-<target>`, as usd-vrm-plugins
-          # and usd-motion-plugins tag theirs (docs/roadmap/vrm-host-session.md).
+          # and usd-motion-plugins tag theirs.
           printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$target" "$name-$version-$target" "$first" > "oci-stage/$stem/publish.tsv"
           ls -l release-stage/
       - name: Upload the evidence

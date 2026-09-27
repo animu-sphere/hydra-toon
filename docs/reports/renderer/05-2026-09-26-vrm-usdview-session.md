@@ -8,7 +8,7 @@
   (OpenUSD 26.08, oneTBB 2021.12), exported into the local artifact registry
   and re-materialized from it; `usd-vrm-plugins` `vrmSchema` 0.9.0 and
   `vrmImaging` 0.9.0, built and packaged against that runtime
-- Occasion: the [roadmap](../../roadmap/current.md#before-renderer-phase-1)
+- Occasion: the [roadmap](https://github.com/animu-sphere/hydra-toon/blob/428202238e9d2d2346b21371c5d2f383d1fe1426/docs/roadmap/current.md#before-renderer-phase-1)
   item that [report 03](03-2026-09-26-material-sprim.md) and
   [report 04](04-2026-09-26-material-value-route.md) left open — `vrmSchema`
   and `vrmImaging` in the `usdview` host session, composed as bundles rather

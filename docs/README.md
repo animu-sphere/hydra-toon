@@ -14,11 +14,11 @@ and the document is a bug. When a summary disagrees with
 | --- | --- | --- |
 | [design/](design/) | What the renderer is meant to be, and why. | [DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | [architecture/](architecture/) | Which targets exist, where code goes, and how they depend on each other. | [PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
-| [reference/](reference/) | What is implemented now, and on what. | [CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) · [SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
-| [roadmap/](roadmap/) | What incomplete work remains. | [README.md](roadmap/README.md) · [current.md](roadmap/current.md) · [vrm-host-session.md](roadmap/vrm-host-session.md) |
+| [reference/](reference/) | What is implemented now, and on what it was measured. | [CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) · [SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
+| [roadmap/](roadmap/) | What is built next, milestone by milestone. | [README.md](roadmap/README.md) · [v0.2.0.md](roadmap/v0.2.0.md) · [v0.3.0.md](roadmap/v0.3.0.md) · [later.md](roadmap/later.md) |
 | [guides/](guides/) | How to perform a task. | [BUILDING.md](guides/BUILDING.md) |
-| [releases/](releases/) | What shipped in a released version. | [README.md](releases/README.md) |
-| [reports/](reports/) | What was measured or observed. | [README.md](reports/README.md) |
+| [releases/](releases/) | What a released version established, and how a release is cut. | [README.md](releases/README.md) |
+| [reports/](reports/) | What was verified, under which conditions, and how. | [README.md](reports/README.md) |
 | [archive/](archive/) | What used to be planned or authoritative and is now superseded. | [README.md](archive/README.md) |
 | [contributing/](contributing/) | How these documents are maintained, and how release notes are rendered. | [documentation.md](contributing/documentation.md) · [RELEASE_NOTES_TEMPLATE.md](contributing/RELEASE_NOTES_TEMPLATE.md) |
 
@@ -26,13 +26,14 @@ and the document is a bug. When a summary disagrees with
 
 | Question | Owner |
 | --- | --- |
-| Purpose, principles, renderer architecture, Renderer Phase 0–7 | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
+| Purpose, principles, renderer architecture, how milestones are ordered | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | What this repository owns, what it consumes from which sibling, what it does not own | [design/INTEGRATION_SCOPE_POLICY.md](design/INTEGRATION_SCOPE_POLICY.md) |
 | Reading MToon, MMD and PreviewSurface materials; `ToonMaterial`; outline; draw order; pipelines | [design/MATERIAL_POLICY.md](design/MATERIAL_POLICY.md) |
 | Targets, names, directories, dependency directions, build intents, install tree | [architecture/PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
-| Implemented capabilities; measured platforms and runtimes | [reference/](reference/) |
-| Incomplete work, and which release carries it | [roadmap/](roadmap/) |
-| Released history, and how a release is cut | [releases/](releases/) and the [CHANGELOG](../CHANGELOG.md) |
+| Implemented capabilities — the only statement of current status | [reference/CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) |
+| Measured platforms and runtimes | [reference/SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
+| What each milestone contains, and the order of work | [roadmap/](roadmap/) |
+| Versioning, the release gate, how a release is cut, and what each release established | [releases/](releases/); change by change, the [CHANGELOG](../CHANGELOG.md) |
 | How documents here are maintained, and how they cite sibling repositories | [contributing/documentation.md](contributing/documentation.md) |
 
 Where the design documents overlap, the narrower one wins:

@@ -251,8 +251,8 @@ bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
 }
 
 // Rule 2 of the selection, MMD, waits for `mmdImaging`'s Hydra view
-// (MAT-Q1). Rule 3's surface network is read in Renderer Phase 5; until then
-// a PreviewSurface material has the fallback material's values.
+// (MAT-Q1). Rule 3's surface network is not read yet: a PreviewSurface
+// material has the fallback material's values.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim) {
   HdToonMaterialSource source;

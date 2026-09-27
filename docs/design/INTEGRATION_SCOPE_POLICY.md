@@ -5,9 +5,8 @@ owner: hydra-toon
 
 # Integration scope policy
 
-> Status: **accepted**, 2026-09-26. This document says how far `hydra-toon`
-> goes, what it consumes from which sibling repository, and what it does not
-> own. On structure, [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md)
+> This document says how far `hydra-toon` goes, what it consumes from which
+> sibling repository, and what it does not own. On structure, [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md)
 > wins; on materials, [MATERIAL_POLICY.md](MATERIAL_POLICY.md) does.
 
 ## 1. The rule

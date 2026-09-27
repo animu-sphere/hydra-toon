@@ -2,7 +2,8 @@
 
 All notable changes to `hydra-toon` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each released
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html), each `v0.x.0` a
+milestone ([versioning](docs/releases/README.md#versioning)). Each released
 version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
@@ -13,15 +14,20 @@ version has a record in [docs/releases/](docs/releases/README.md).
   OpenStrata Formation of the canonical `lookdev` runtime, `vrmImaging`
   0.10.0 and `toon` 0.1.0, each pinned by its published digest. Its declared
   command runs `vrm_material_check.py` in `testusdview` on the probe stage
-  and needs no environment. This closes Renderer Phase 1 on Windows.
+  and needs no environment.
 - Renderer report 13: the published `toon` 0.1.0 draws the avatar in that
   Formation with the numbers of the workstation's packages.
-- MToon's rim, the first Renderer Phase 2 item: MatCap, the parametric rim
+- MToon's rim: MatCap, the parametric rim
   and the rim multiply texture, mixed with the light by
   `rimLightingMixFactor`, in `mtoon_opaque` and `mtoon_outline`. `hdToon`
   reads the `matcap` and `rimMultiply` texture roles; a material's slot grew
   to 352 bytes. The headless check `renderer.material.mtoon_rim`, and
   renderer report 14.
+- Documentation: the release milestones. `v0.x.0` versions replace
+  Renderer Phase 0–7 as the delivery sequence; the roadmap has a page per
+  coming milestone and no status marks, and the capability matrix is the
+  only statement of status. The versioning and patch policy and the release
+  gate are in `docs/releases/README.md`.
 
 ### Changed
 

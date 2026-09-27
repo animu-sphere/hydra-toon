@@ -76,7 +76,7 @@ synced without disturbing the mesh path.
   avatar is 12 PreviewSurface materials or 12 MToon ones depending only on
   `PXR_PLUGINPATH_NAME`, with no error either way. Composing the `usdview`
   host session with both plugins is still on the
-  [roadmap](../../roadmap/current.md#before-renderer-phase-1).
+  [roadmap](https://github.com/animu-sphere/hydra-toon/blob/428202238e9d2d2346b21371c5d2f383d1fe1426/docs/roadmap/current.md#before-renderer-phase-1).
 - **Value-only changes still stop short.** A time move across
   `shadingShiftFactor` does not reach this Sprim, as report 02 predicted; the
   delegate-side route is the next roadmap item.

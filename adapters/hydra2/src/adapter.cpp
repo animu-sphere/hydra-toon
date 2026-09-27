@@ -684,7 +684,7 @@ private:
     }
 
     // Blend shapes are applied to the rest points here, so a weight change
-    // uploads the points, until Renderer Phase 3's morph targets.
+    // uploads the points, until morphs are evaluated on the GPU.
     if (rest_changed || weights != weights_) {
       weights_ = weights;
       state_->SetMeshPoints(mesh_, RestPoints());
