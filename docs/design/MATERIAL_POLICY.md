@@ -99,7 +99,18 @@ offset in clip space, not by switching to a screen-space outline.
 ## 6. Transparency and draw order
 
 - **MToon** sorts by alpha mode, then `renderQueueOffsetNumber`, and writes
-  depth for transparent materials only with `transparentWithZWrite`.
+  depth for transparent materials only with `transparentWithZWrite`. The
+  sort key is MToon's render queue: Opaque 2000, Mask 2450, Blend with
+  `transparentWithZWrite` 2501 plus the offset clamped to [0, 9], and Blend
+  without it 3000 plus the offset clamped to [−9, 0]. Opaque and Mask draw
+  first; transparent draws follow in queue order and, within one queue, in
+  the order the scene lists them, not by distance, so an avatar's layers do
+  not swap as the camera moves. A double-sided transparent surface draws
+  its back faces before its front faces. A transparent material's outline
+  hull draws right after its surface, as UniVRM and three-vrm draw MToon's
+  outline, so a surface that writes depth hides the hull's far side; an
+  opaque one's draws before, as [DESIGN_POLICY.md](DESIGN_POLICY.md) §10
+  orders it.
 - **MMD** draws in material-table order (`mmd:sourceIndex`) with alpha
   blending, because models are authored against that order.
 

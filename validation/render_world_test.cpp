@@ -122,6 +122,36 @@ int main() {
           "an alpha mode change must be structural")) {
     return 1;
   }
+  // MToon's render queue: Mask ignores the offset; Blend clamps it to its
+  // side of the queue, and transparentWithZWrite draws before the rest.
+  toon.mtoon.render_queue_offset = 5;
+  const std::int32_t mask_queue = Toon::RenderQueue(toon);
+  toon.alpha_mode = Toon::ToonAlphaMode::Blend;
+  const std::int32_t blend_queue = Toon::RenderQueue(toon);
+  const bool blend_depth = Toon::WritesDepth(toon);
+  toon.mtoon.transparent_with_z_write = true;
+  const std::int32_t z_write_queue = Toon::RenderQueue(toon);
+  toon.mtoon.render_queue_offset = 12;
+  if (!Check(mask_queue == 2450 && blend_queue == 3000 &&
+                 z_write_queue == 2506 && Toon::RenderQueue(toon) == 2510,
+          "the render queue must follow MToon's alpha mode and offset") ||
+      !Check(!blend_depth && Toon::WritesDepth(toon) &&
+                 Toon::IsTransparent(toon),
+          "a Blend material must write depth only with transparentWithZWrite")) {
+    return 1;
+  }
+  // The queue and depth writes are values: a draw's order and depth state
+  // are recorded per frame from its slot's material, not built into it.
+  world.SetMaterial(material, toon);
+  const Toon::FrameSnapshot blended = world.Commit();
+  toon.mtoon.render_queue_offset = -3;
+  toon.mtoon.transparent_with_z_write = false;
+  world.SetMaterial(material, toon);
+  if (!Check(world.Commit().materials[0].structure_revision ==
+                 blended.materials[0].structure_revision,
+          "a render queue or depth write edit must not be structural")) {
+    return 1;
+  }
   world.RemoveMaterial(material);
   if (!Check(world.Commit().materials.empty(),
           "a removed material must be gone")) {

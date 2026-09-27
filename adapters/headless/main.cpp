@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
@@ -312,6 +313,15 @@ Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
 // normals point along x and y at the four rim corners and along +z at the
 // centre. On a 64x64 target, column c's centre is x = (c + 0.5) / 32 - 1
 // and row r's is y = 1 - (r + 0.5) / 32.
+// OpenGL's orthographic projection of the unit cube: z is negated, so +z
+// faces the camera and is nearer. A point at z lands at depth
+// 0.5 - 0.5 * z.
+void SetOrthographicView(Toon::RenderWorld& world) {
+  Toon::ToonView view;
+  view.projection.m[10] = -1.0F;
+  world.SetView(view);
+}
+
 Toon::MeshId AddOctahedron(Toon::RenderWorld& world) {
   const Toon::MeshId mesh = world.CreateMesh();
   world.SetMeshPoints(mesh, {{0.5F, 0.0F, 0.0F}, {-0.5F, 0.0F, 0.0F},
@@ -321,11 +331,7 @@ Toon::MeshId AddOctahedron(Toon::RenderWorld& world) {
   world.SetMeshTopology(mesh, {0, 2, 4, 1, 4, 2, 0, 4, 3, 1, 3, 4, 0, 5, 2,
                                   1, 2, 5, 0, 3, 5, 1, 5, 3});
   world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
-  // OpenGL's orthographic projection of the unit cube: z is negated, so +z
-  // faces the camera and is nearer.
-  Toon::ToonView view;
-  view.projection.m[10] = -1.0F;
-  world.SetView(view);
+  SetOrthographicView(world);
   return mesh;
 }
 
@@ -594,6 +600,244 @@ Check MToonRimCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// The bootstrap triangle's outline at z, facing the camera, over the centre
+// of the target.
+Toon::MeshId AddTriangle(Toon::RenderWorld& world, float z) {
+  const Toon::MeshId mesh = world.CreateMesh();
+  world.SetMeshPoints(mesh,
+      {{-0.70F, -0.65F, z}, {0.70F, -0.65F, z}, {0.00F, 0.70F, z}});
+  world.SetMeshTopology(mesh, {0, 1, 2});
+  return mesh;
+}
+
+// mtoon_transparent and the draw order (material policy §6), seen through
+// SetOrthographicView. Lit colours saturate, and the target is UNORM, so a
+// Blend layer of alpha 0.5 halves what is behind it and adds half its
+// colour. At the centre: red Blend at z 0.5, created first, over opaque
+// blue at -0.5 draws after it, as purple. Green Blend at 0.2, in the same
+// queue, draws after red, as `draws` lists it; a renderQueueOffsetNumber of
+// -1, a value-only edit, draws it first; transparentWithZWrite on red draws
+// red first, in its own queue, and its depth hides green. Blue as Mask
+// draws whole above its cutoff and is cut away below it. A double-sided
+// Blend mesh whose front triangle samples red and whose back one, nearer
+// the blue, samples green draws its back faces first. An outlined Blend
+// octahedron with transparentWithZWrite blends its green hull at the rim
+// and hides the hull's far side behind its surface.
+Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_transparent";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  const auto blend = [](Toon::Float3 color) {
+    Toon::ToonMaterial toon;
+    toon.model = Toon::ToonShadingModel::MToon;
+    toon.base_color = color;
+    toon.mtoon.shade_color = color;
+    toon.alpha = 0.5F;
+    toon.alpha_mode = Toon::ToonAlphaMode::Blend;
+    return toon;
+  };
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const Toon::MeshId red = AddTriangle(world, 0.5F);
+  const Toon::MeshId blue = AddTriangle(world, -0.5F);
+  Toon::ToonMaterial red_toon = blend({1.0F, 0.0F, 0.0F});
+  Toon::ToonMaterial blue_toon;
+  blue_toon.model = Toon::ToonShadingModel::MToon;
+  blue_toon.base_color = {0.0F, 0.0F, 1.0F};
+  blue_toon.mtoon.shade_color = {0.0F, 0.0F, 1.0F};
+  const Toon::MaterialId red_material = world.CreateMaterial();
+  const Toon::MaterialId blue_material = world.CreateMaterial();
+  world.SetMaterial(red_material, red_toon);
+  world.SetMaterial(blue_material, blue_toon);
+  world.SetMeshMaterial(red, red_material);
+  world.SetMeshMaterial(blue, blue_material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  struct Shot {
+    std::array<std::uint8_t, 4> center{};
+    // x = 0.58 on the centre row, AddOctahedron's outline pixel.
+    std::array<std::uint8_t, 4> rim{};
+    float center_depth = 0.0F;
+    Toon::OffscreenStatistics statistics;
+  };
+  const auto render = [&](Shot& shot) {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    shot.center = CenterPixel(color);
+    shot.rim = PixelAt(color, 50, 32);
+    shot.center_depth = depth.payload[32U * depth.width + 32U];
+    shot.statistics = renderer->statistics();
+    return true;
+  };
+  Shot over_opaque;
+  Shot in_order;
+  Shot offset;
+  Shot z_write;
+  Shot mask_kept;
+  Shot mask_cut;
+  Shot double_sided;
+  Shot outlined;
+  if (!render(over_opaque)) {
+    return {id, "fail", detail};
+  }
+  const Toon::MeshId green = AddTriangle(world, 0.2F);
+  Toon::ToonMaterial green_toon = blend({0.0F, 1.0F, 0.0F});
+  const Toon::MaterialId green_material = world.CreateMaterial();
+  world.SetMaterial(green_material, green_toon);
+  world.SetMeshMaterial(green, green_material);
+  if (!render(in_order)) {
+    return {id, "fail", detail};
+  }
+  green_toon.mtoon.render_queue_offset = -1;
+  world.SetMaterial(green_material, green_toon);
+  if (!render(offset)) {
+    return {id, "fail", detail};
+  }
+  red_toon.mtoon.transparent_with_z_write = true;
+  world.SetMaterial(red_material, red_toon);
+  if (!render(z_write)) {
+    return {id, "fail", detail};
+  }
+  blue_toon.alpha_mode = Toon::ToonAlphaMode::Mask;
+  blue_toon.alpha = 0.7F;
+  world.SetMaterial(blue_material, blue_toon);
+  if (!render(mask_kept)) {
+    return {id, "fail", detail};
+  }
+  blue_toon.alpha = 0.3F;
+  world.SetMaterial(blue_material, blue_toon);
+  if (!render(mask_cut)) {
+    return {id, "fail", detail};
+  }
+
+  // The front triangle at z 0.5 samples the red texel; the back one at 0.3,
+  // wound to face away, the green one, and is listed second.
+  world.SetMeshVisible(red, false);
+  world.SetMeshVisible(green, false);
+  blue_toon.alpha_mode = Toon::ToonAlphaMode::Opaque;
+  blue_toon.alpha = 1.0F;
+  world.SetMaterial(blue_material, blue_toon);
+  const Toon::MeshId layers = world.CreateMesh();
+  world.SetMeshPoints(layers,
+      {{-0.70F, -0.65F, 0.5F}, {0.70F, -0.65F, 0.5F}, {0.00F, 0.70F, 0.5F},
+          {-0.70F, -0.65F, 0.3F}, {0.70F, -0.65F, 0.3F},
+          {0.00F, 0.70F, 0.3F}});
+  world.SetMeshTopology(layers, {0, 1, 2, 3, 5, 4});
+  world.SetMeshUVs(layers, {{0.25F, 0.75F}, {0.25F, 0.75F}, {0.25F, 0.75F},
+                               {0.75F, 0.75F}, {0.75F, 0.75F}, {0.75F, 0.75F}});
+  const Toon::TextureId texture = world.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 2;
+  texels.height = 2;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255,
+          255, 255, 255, 255, 255});
+  world.SetTexture(texture, texels);
+  Toon::ToonMaterial layers_toon = blend({1.0F, 1.0F, 1.0F});
+  layers_toon.base_texture.texture = texture;
+  layers_toon.base_texture.wrap_s = Toon::ToonWrap::ClampToEdge;
+  layers_toon.base_texture.wrap_t = Toon::ToonWrap::ClampToEdge;
+  layers_toon.double_sided = true;
+  const Toon::MaterialId layers_material = world.CreateMaterial();
+  world.SetMaterial(layers_material, layers_toon);
+  world.SetMeshMaterial(layers, layers_material);
+  if (!render(double_sided)) {
+    return {id, "fail", detail};
+  }
+
+  world.SetMeshVisible(layers, false);
+  world.SetMeshVisible(blue, false);
+  const Toon::MeshId octahedron = AddOctahedron(world);
+  Toon::ToonMaterial outlined_toon = blend({1.0F, 0.0F, 0.0F});
+  outlined_toon.mtoon.transparent_with_z_write = true;
+  outlined_toon.outline = true;
+  outlined_toon.outline_width = 0.2F;
+  outlined_toon.outline_color = {0.0F, 1.0F, 0.0F};
+  outlined_toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  outlined_toon.mtoon.outline_lighting_mix = 0.0F;
+  const Toon::MaterialId outlined_material = world.CreateMaterial();
+  world.SetMaterial(outlined_material, outlined_toon);
+  world.SetMeshMaterial(octahedron, outlined_material);
+  if (!render(outlined)) {
+    return {id, "fail", detail};
+  }
+
+  const Toon::OffscreenStatistics& first = over_opaque.statistics;
+  const Toon::OffscreenStatistics& last = outlined.statistics;
+  if (last.validation_message_count != 0) {
+    return {id, "fail", last.validation_detail};
+  }
+  const auto is = [](const std::array<std::uint8_t, 4>& pixel,
+                      std::uint8_t red, std::uint8_t green,
+                      std::uint8_t blue) {
+    const auto near = [](std::uint8_t value, std::uint8_t expected) {
+      return value + 16 >= expected && value <= expected + 16;
+    };
+    return near(pixel[0], red) && near(pixel[1], green) &&
+           near(pixel[2], blue);
+  };
+  if (!is(over_opaque.center, 128, 0, 128)) {
+    return {id, "fail",
+        "a Blend surface must blend by its alpha over the opaque draw behind "
+        "it, whatever order the meshes were created in"};
+  }
+  if (!is(in_order.center, 64, 128, 64)) {
+    return {id, "fail",
+        "within one render queue, transparent draws must keep their order"};
+  }
+  if (!is(offset.center, 128, 64, 64) ||
+      std::fabs(offset.center_depth - 0.75F) > 0.01F) {
+    return {id, "fail",
+        "a lower renderQueueOffsetNumber must draw first, without writing "
+        "depth"};
+  }
+  if (!is(z_write.center, 128, 0, 128) ||
+      std::fabs(z_write.center_depth - 0.25F) > 0.01F) {
+    return {id, "fail",
+        "transparentWithZWrite must draw before the other transparent queue "
+        "and write depth"};
+  }
+  if (!is(mask_kept.center, 128, 0, 128)) {
+    return {id, "fail",
+        "a Mask surface above its cutoff must draw whole, before Blend"};
+  }
+  if (!is(mask_cut.center, 134, 13, 19)) {
+    return {id, "fail", "a Mask surface below its cutoff must be cut away"};
+  }
+  if (!is(double_sided.center, 128, 64, 64)) {
+    return {id, "fail",
+        "a double-sided Blend surface must draw its back faces first"};
+  }
+  if (!is(outlined.rim, 6, 140, 19)) {
+    return {id, "fail",
+        "a transparent material's hull must blend by its surface's alpha"};
+  }
+  if (!is(outlined.center, 134, 13, 19)) {
+    return {id, "fail",
+        "a surface that writes depth must hide its hull's far side"};
+  }
+  const Toon::OffscreenStatistics& before = in_order.statistics;
+  const Toon::OffscreenStatistics& after = z_write.statistics;
+  if (after.material_writes != before.material_writes + 2U ||
+      after.point_uploads != before.point_uploads ||
+      after.topology_uploads != before.topology_uploads ||
+      after.texture_uploads != before.texture_uploads ||
+      last.pipelines_created != first.pipelines_created) {
+    return {id, "fail",
+        "a render queue or depth write edit must rewrite one slot and "
+        "nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 Toon::Matrix4 Translation(float x) {
   Toon::Matrix4 matrix;
   matrix.m[12] = x;
@@ -772,13 +1016,13 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: the three scene pipelines, one target
+    // 1,000 frames on one device: the four scene pipelines, one target
     // allocation and one upload of the unchanged mesh, every later frame
     // reusing them.
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 3 &&
+                     statistics.pipelines_created == 4 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;
@@ -817,6 +1061,7 @@ int main(int argc, char** argv) {
     checks.push_back(MToonTexturedCheck(shaders));
     checks.push_back(MToonOutlineCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
+    checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
@@ -826,6 +1071,8 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_outline", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",

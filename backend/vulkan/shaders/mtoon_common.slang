@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// What mtoon_opaque and mtoon_outline share (material policy §7): the draw
-// constants, the material parameter slot and texture table, the stand-in
-// lighting and MToon's surface shading, rim included. Included, not compiled on its own.
+// What mtoon_opaque, mtoon_transparent and mtoon_outline share (material
+// policy §7): the draw constants, the material parameter slot and texture
+// table, the stand-in lighting, the surface's vertex stage and MToon's
+// surface shading, rim included. Included, not compiled on its own.
 
 #include "skinning.slang"
 
@@ -13,7 +14,8 @@ struct DrawConstants {
   float4 view_from_object_rows[3];
   uint material_slot;
   // kDrawHasUVs when the mesh has texture coordinates, kDrawOrthographic
-  // under an orthographic camera, and the skinning flags (skinning.slang).
+  // under an orthographic camera, kDrawBlend when the material is
+  // transparent, and the skinning flags (skinning.slang).
   uint flags;
   // |projection[1][1]|: clip-space y per unit of view-space height at w = 1.
   // Read by mtoon_outline's screen-coordinates width alone. Scalars, not a
@@ -25,6 +27,8 @@ struct DrawConstants {
 static const uint kDrawHasUVs = 1;
 // Must match vulkan_internal::kDrawOrthographic.
 static const uint kDrawOrthographic = 16;
+// Must match vulkan_internal::kDrawBlend.
+static const uint kDrawBlend = 32;
 // Must match vulkan_internal::kTextureCapacity and kSamplerCount.
 static const uint kTextureCapacity = 128;
 static const uint kSamplerCount = 9;
@@ -123,6 +127,20 @@ float3x3 NormalMatrix() {
 
 float3 ViewNormal(float3 normal) {
   return mul(NormalMatrix(), normal);
+}
+
+// The surface's vertex stage, mtoon_opaque's and mtoon_transparent's: the
+// point and normal skinned, then seen through the camera.
+VertexStageOutput SurfaceVertex(VertexInput input) {
+  VertexStageOutput output;
+  float3 position = input.position;
+  float3 normal = input.normal;
+  Skin(draw.flags, input.vertex, position, normal);
+  output.position = mul(draw.clip_from_object, float4(position, 1.0));
+  output.view_normal = ViewNormal(normal);
+  output.st = input.st;
+  output.view_position = ViewPosition(position);
+  return output;
 }
 
 // The unit vector from a view-space point toward the eye.

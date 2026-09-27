@@ -35,9 +35,9 @@ struct MToonDrawConstants {
   float view_from_object_rows[12];
   std::uint32_t material_slot;
   // kDrawHasUVs when the mesh has texture coordinates; kDrawOrthographic
-  // under an orthographic camera; kDrawSkinned, kDrawConstantInfluences and
-  // the influences per point from kInfluenceCountShift up when it is
-  // skinned.
+  // under an orthographic camera; kDrawBlend when its material is
+  // transparent; kDrawSkinned, kDrawConstantInfluences and the influences
+  // per point from kInfluenceCountShift up when it is skinned.
   std::uint32_t flags;
   // |projection[1][1]|, for mtoon_outline's screen-coordinates width.
   float projection_scale;
@@ -50,6 +50,9 @@ constexpr std::uint32_t kDrawSkinned = 2U;
 constexpr std::uint32_t kDrawConstantInfluences = 4U;
 // The camera is orthographic: every fragment is seen along view-space +z.
 constexpr std::uint32_t kDrawOrthographic = 16U;
+// The material is transparent: mtoon_outline's hull returns the surface's
+// alpha rather than 1.
+constexpr std::uint32_t kDrawBlend = 32U;
 constexpr std::uint32_t kInfluenceCountShift = 8U;
 
 // An MToon slot's outline width mode, as mtoon_outline reads it; 0 draws
@@ -140,25 +143,27 @@ struct ScenePipeline {
 };
 
 // The scene pipelines for one colour/depth format pair: the unlit mesh
-// pipeline, mtoon_opaque and mtoon_outline. The MToon pair reads the
+// pipeline, mtoon_opaque, mtoon_transparent and mtoon_outline. The last two
+// blend their source's alpha over the target; the MToon ones read the
 // material parameter buffer, the texture table and the wrap samplers
 // through `material_layout` (set 0), in both stages, since the outline's
 // width is the vertex stage's to apply. Every pipeline skins a mesh in the
 // vertex stage through `skin_layout` (set 1): its influences and its joint
-// buffer. Viewport and scissor are dynamic, and so are the MToon pair's
-// cull mode, front face and vertex strides, so each pipeline is created once
-// and survives every resize, every material and every mesh with or without
-// UVs or a skin.
+// buffer. Viewport and scissor are dynamic, and so are the MToon pipelines'
+// cull mode, front face, depth writes and vertex strides, so each pipeline
+// is created once and survives every resize, every material and every mesh
+// with or without UVs or a skin.
 struct ScenePipelines {
   ScenePipeline mesh;
   ScenePipeline mtoon;
+  ScenePipeline mtoon_transparent;
   ScenePipeline mtoon_outline;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
   VkSampler samplers[kSamplerCount] = {};
 
-  static constexpr std::uint32_t kCount = 3;
+  static constexpr std::uint32_t kCount = 4;
 };
 
 // The SPIR-V of every scene pipeline, loaded before any device exists so a
@@ -168,6 +173,8 @@ struct SceneShaderWords {
   std::vector<std::uint32_t> mesh_fragment;
   std::vector<std::uint32_t> mtoon_vertex;
   std::vector<std::uint32_t> mtoon_fragment;
+  std::vector<std::uint32_t> mtoon_transparent_vertex;
+  std::vector<std::uint32_t> mtoon_transparent_fragment;
   std::vector<std::uint32_t> mtoon_outline_vertex;
   std::vector<std::uint32_t> mtoon_outline_fragment;
 };
@@ -320,6 +327,11 @@ public:
     // Whether a draw with this material also draws mtoon_outline's hull:
     // an MToon material that asks for an outline of some width.
     bool outline = false;
+    // Whether its draws go through mtoon_transparent, in `queue` order
+    // after every opaque draw, and whether they write depth.
+    bool transparent = false;
+    std::int32_t queue = 0;
+    bool depth_write = true;
     std::uint64_t generation = 0;
   };
 
@@ -376,11 +388,13 @@ public:
   // Upload whatever `draws` changed and release meshes it no longer draws.
   // No frame that reads these buffers may be in flight.
   bool Update(const DrawList& draws, std::string& detail);
-  // Unlit draws first; then the outline hull of every MToon draw that asks
-  // for one (design policy §10's first pass); then every draw whose
-  // material selected MToon.
+  // Unlit draws first; then the outline hull of every opaque MToon draw
+  // that asks for one (design policy §10's first pass); then every opaque
+  // draw whose material selected MToon. Transparent MToon draws come last,
+  // ordered by their material's render queue and then as `draws` lists
+  // them, each surface followed by its hull (material policy §6).
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
-      const MaterialCache& materials, const DrawList& draws) const;
+      const MaterialCache& materials, const DrawList& draws);
   void Destroy();
 
   [[nodiscard]] std::uint64_t topology_uploads() const {
@@ -443,6 +457,9 @@ private:
   // Skin sets come from fixed-size pools, a new one when the last is full.
   std::vector<VkDescriptorPool> skin_pools_;
   std::vector<Matrix4> joint_scratch_;
+  // This frame's transparent draws, as indices into `draws.draws`, kept so
+  // a steady frame sorts without allocating.
+  std::vector<std::size_t> transparent_scratch_;
   std::unordered_map<MeshId, Entry> entries_;
   std::uint64_t generation_ = 0;
   std::uint64_t topology_uploads_ = 0;

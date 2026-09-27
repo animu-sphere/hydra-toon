@@ -224,6 +224,32 @@ bool HasOutline(const ToonMaterial& material) {
          material.outline_width > 0.0F;
 }
 
+bool IsTransparent(const ToonMaterial& material) {
+  return material.alpha_mode == ToonAlphaMode::Blend;
+}
+
+std::int32_t RenderQueue(const ToonMaterial& material) {
+  switch (material.alpha_mode) {
+  case ToonAlphaMode::Opaque:
+    return 2000;
+  case ToonAlphaMode::Mask:
+    return 2450;
+  case ToonAlphaMode::Blend:
+    break;
+  }
+  const bool mtoon = material.model == ToonShadingModel::MToon;
+  const std::int32_t offset = mtoon ? material.mtoon.render_queue_offset : 0;
+  return mtoon && material.mtoon.transparent_with_z_write
+             ? 2501 + std::clamp(offset, 0, 9)
+             : 3000 + std::clamp(offset, -9, 0);
+}
+
+bool WritesDepth(const ToonMaterial& material) {
+  return !IsTransparent(material) ||
+         (material.model == ToonShadingModel::MToon &&
+             material.mtoon.transparent_with_z_write);
+}
+
 bool IsStructuralChange(const ToonMaterial& before,
     const ToonMaterial& after) {
   return before.model != after.model ||

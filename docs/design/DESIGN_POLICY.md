@@ -203,7 +203,9 @@ Pass 2: Toon surface
 ```
 
 It is easy on both backends, needs no geometry shader, suits MToon, and has a
-predictable GPU cost. Later the mode may become selectable
+predictable GPU cost. A transparent material's hull is the exception to the
+order: it draws after its own surface
+([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §6). Later the mode may become selectable
 (`None | InvertedHull | ScreenSpace`), but only after the inverted hull's width
 stability, aliasing and cost are finished; a second method does not come first.
 The MToon outline *semantics* (`outlineWidthMode` and friends) are
