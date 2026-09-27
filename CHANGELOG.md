@@ -100,6 +100,9 @@ version will have a record in [docs/releases/](docs/releases/README.md).
   `vrm/textureInfo/outlineWidthMultiply` as data.
 - The headless assertion `renderer.material.mtoon_outline`, and
   `draws_outline` in the host frame evidence; renderer report 10.
+- Renderer report 11: an expression bake from `usd-vrm-plugins`, played in
+  `testusdview`, rewrites its MToon material's slot once per time move and
+  uploads nothing — `usd-vrm-plugins`' imaging Step I4, in the host session.
 
 ### Changed
 
