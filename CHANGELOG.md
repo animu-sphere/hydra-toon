@@ -79,6 +79,17 @@ version will have a record in [docs/releases/](docs/releases/README.md).
 - The headless assertion `renderer.material.mtoon_textured`, and
   `texture_uploads` and `textures` in the host frame evidence; renderer
   report 08.
+- GPU skinning: a mesh `UsdSkel` skins linearly is skinned in the vertex
+  stage of both scene pipelines (`shaders/skinning.slang`). `RenderWorld`
+  holds a mesh's `ToonSkin` and `ToonSkinPose`, each with its own revision;
+  the backend uploads influences when the skin changes and writes the joint
+  buffer alone when the pose does. `hdToon` reads usdSkelImaging's
+  aggregator and skinning computations itself, re-reading rest data only
+  when the aggregator's inputs changed, and applies blend shapes to the rest
+  points; dual quaternion skinning still runs the CPU kernel.
+- The headless assertion `renderer.skinning.gpu`, the CTest
+  `toon-renderer-hydra-skinning`, and `skin_uploads`, `pose_writes` and
+  `draws_skinned` in the host frame evidence; renderer report 09.
 
 ### Changed
 

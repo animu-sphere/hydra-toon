@@ -1,10 +1,19 @@
 # Compiles each Slang module's vertex_main and fragment_main into
 # <module>.vert.spv and <module>.frag.spv, and sets TOON_SHADER_SPVS in the
-# caller's scope to every output, for consumers to copy and install.
+# caller's scope to every output, for consumers to copy and install. Files
+# after INCLUDES are included by the modules, not compiled; every module is
+# rebuilt when one changes.
 function(toon_add_shader_library target)
+  cmake_parse_arguments(PARSE_ARGV 1 _toon "" "" "INCLUDES")
   set(_shader_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
   set(_outputs)
-  foreach(source IN LISTS ARGN)
+  set(_includes)
+  foreach(include IN LISTS _toon_INCLUDES)
+    get_filename_component(_include "${include}" ABSOLUTE
+      BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    list(APPEND _includes "${_include}")
+  endforeach()
+  foreach(source IN LISTS _toon_UNPARSED_ARGUMENTS)
     get_filename_component(_shader_source "${source}" ABSOLUTE
       BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     get_filename_component(_shader_name "${source}" NAME_WE)
@@ -22,7 +31,7 @@ function(toon_add_shader_library target)
           -entry "${_stage}_main" -stage "${_stage}" -target spirv
           -matrix-layout-column-major -warnings-as-errors all
           -o "${_output}"
-        DEPENDS "${_shader_source}"
+        DEPENDS "${_shader_source}" ${_includes}
         VERBATIM)
       list(APPEND _outputs "${_output}")
     endforeach()

@@ -70,6 +70,11 @@ struct OffscreenStatistics {
   std::uint64_t material_writes = 0;
   // Textures uploaded: one per new texture or pixel change.
   std::uint64_t texture_uploads = 0;
+  // Skin influences uploaded: one per newly skinned mesh or binding change.
+  std::uint64_t skin_uploads = 0;
+  // Joint buffers written: one per skinned mesh whose pose changed, the only
+  // work a pose change does (design policy §11).
+  std::uint64_t pose_writes = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;

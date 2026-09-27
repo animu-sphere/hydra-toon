@@ -1,0 +1,94 @@
+#usda 1.0
+(
+    doc = "hdToon's skinning check: a quad skinned linearly by two joints, with a blend shape, and a second quad skinned by dual quaternions."
+    startTimeCode = 1
+    endTimeCode = 3
+    upAxis = "Y"
+)
+
+def SkelRoot "Root" (
+    prepend apiSchemas = ["SkelBindingAPI"]
+)
+{
+    rel skel:skeleton = </Root/Skel>
+
+    def Skeleton "Skel" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        uniform token[] joints = ["base", "base/tip"]
+        uniform matrix4d[] bindTransforms = [
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 0, 1))]
+        uniform matrix4d[] restTransforms = [
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 0, 1))]
+        rel skel:animationSource = </Root/Skel/Anim>
+
+        # Time 1 is the bind pose. At 2 the tip moves one unit along +x; at
+        # 3 the pose holds and the blend shape's weight goes to 1.
+        def SkelAnimation "Anim"
+        {
+            uniform token[] joints = ["base", "base/tip"]
+            float3[] translations.timeSamples = {
+                1: [(0, 0, 0), (0, 1, 0)],
+                2: [(0, 0, 0), (1, 1, 0)],
+                3: [(0, 0, 0), (1, 1, 0)],
+            }
+            quatf[] rotations = [(1, 0, 0, 0), (1, 0, 0, 0)]
+            half3[] scales = [(1, 1, 1), (1, 1, 1)]
+            uniform token[] blendShapes = ["lift"]
+            float[] blendShapeWeights.timeSamples = {
+                1: [0],
+                2: [0],
+                3: [1],
+            }
+        }
+    }
+
+    def Mesh "Linear" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] primvars:skel:jointIndices = [0, 0, 1, 1] (
+            elementSize = 1
+            interpolation = "vertex"
+        )
+        float[] primvars:skel:jointWeights = [1, 1, 1, 1] (
+            elementSize = 1
+            interpolation = "vertex"
+        )
+        matrix4d primvars:skel:geomBindTransform = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
+        uniform token[] skel:blendShapes = ["lift"]
+        rel skel:blendShapeTargets = </Root/Linear/lift>
+        rel skel:skeleton = </Root/Skel>
+
+        def BlendShape "lift"
+        {
+            uniform vector3f[] offsets = [(0, 0, 1)]
+            uniform int[] pointIndices = [0]
+        }
+    }
+
+    def Mesh "DualQuaternion" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] primvars:skel:jointIndices = [0, 0, 1, 1] (
+            elementSize = 1
+            interpolation = "vertex"
+        )
+        float[] primvars:skel:jointWeights = [1, 1, 1, 1] (
+            elementSize = 1
+            interpolation = "vertex"
+        )
+        uniform token primvars:skel:skinningMethod = "dualQuaternion"
+        rel skel:skeleton = </Root/Skel>
+    }
+}

@@ -32,6 +32,8 @@ struct Matrix4 {
       0.0F, 1.0F, 0.0F, 0.0F,
       0.0F, 0.0F, 1.0F, 0.0F,
       0.0F, 0.0F, 0.0F, 1.0F};
+
+  friend bool operator==(const Matrix4&, const Matrix4&) = default;
 };
 
 [[nodiscard]] Matrix4 Multiply(const Matrix4& left, const Matrix4& right);
@@ -47,12 +49,48 @@ using MeshId = std::uint32_t;
 using MaterialId = std::uint32_t;
 using TextureId = std::uint32_t;
 
+// One joint's pull on a point: an index into the mesh's own joint order and
+// its weight.
+struct ToonJointInfluence {
+  std::uint32_t joint = 0;
+  float weight = 0.0F;
+
+  friend bool operator==(const ToonJointInfluence&,
+      const ToonJointInfluence&) = default;
+};
+
 // Geometry is immutable once committed, so a snapshot shares it with the
 // world instead of copying it.
 using PointArray = std::shared_ptr<const std::vector<Float3>>;
 using IndexArray = std::shared_ptr<const std::vector<std::uint32_t>>;
 using TexCoordArray = std::shared_ptr<const std::vector<Float2>>;
 using PixelArray = std::shared_ptr<const std::vector<std::uint8_t>>;
+using InfluenceArray = std::shared_ptr<const std::vector<ToonJointInfluence>>;
+using MatrixArray = std::shared_ptr<const std::vector<Matrix4>>;
+
+// How a mesh's points follow a skeleton, as UsdSkel's linear blend skinning
+// states it. Structural: it changes when the binding does, not with a pose.
+struct ToonSkin {
+  // 0 when the mesh is not skinned.
+  std::uint32_t influences_per_point = 0;
+  // One set of influences for every point, a rigid binding, rather than one
+  // set per point.
+  bool constant = false;
+  // `influences_per_point` per point, or once when `constant`.
+  std::vector<ToonJointInfluence> influences;
+  // Takes the mesh's points into the skeleton's bind space.
+  Matrix4 geom_bind;
+};
+
+// A skeleton's pose as one skinned mesh sees it. Changes every frame an
+// avatar moves, and moves nothing but the joint buffer (design policy §11).
+struct ToonSkinPose {
+  // Each joint's skinning transform, bind space to skeleton space, in the
+  // mesh's joint order.
+  std::vector<Matrix4> joints;
+  // Skeleton space to the mesh's own space, where its transform applies.
+  Matrix4 skeleton_to_mesh;
+};
 
 // One mesh as of a commit. Each revision changes only when its own data
 // does, so a consumer re-uploads points without rebuilding topology
@@ -68,8 +106,9 @@ struct MeshSnapshot {
   // One past the largest index; a draw needs at least this many points.
   std::uint32_t index_bound = 0;
   // Smooth vertex normals, one per point, derived from the points and
-  // topology at commit, as Storm derives them for a mesh that is skinned or
-  // authors none. Empty while the topology indexes past the points.
+  // topology at commit, as Storm derives them for a mesh that authors none.
+  // A skinned mesh's are its rest pose's, skinned with its points. Empty
+  // while the topology indexes past the points.
   PointArray normals;
   std::uint64_t normals_revision = 0;
   // Texture coordinates, one per point, as USD's `st`: origin at the
@@ -77,12 +116,31 @@ struct MeshSnapshot {
   // no texture.
   TexCoordArray uvs;
   std::uint64_t uvs_revision = 0;
+  // The skin, when the mesh is skinned: `points` and `normals` are then its
+  // rest pose, and a draw moves them by `joints` (see IsSkinned). Empty
+  // influences when it is not.
+  std::uint32_t influences_per_point = 0;
+  bool constant_influences = false;
+  InfluenceArray influences;
+  Matrix4 geom_bind;
+  // One past the largest joint the influences name; a draw skins only with
+  // at least this many joints.
+  std::uint32_t joint_bound = 0;
+  std::uint64_t skin_revision = 0;
+  MatrixArray joints;
+  Matrix4 skeleton_to_mesh;
+  std::uint64_t pose_revision = 0;
   Matrix4 transform;
   Float3 color{0.5F, 0.5F, 0.5F};
   // 0 when the mesh binds no material; it then draws its colour, unlit.
   MaterialId material = 0;
   bool visible = true;
 };
+
+// Whether a draw skins `mesh`: it has influences for every point its
+// topology reaches and a joint for every index they name. Otherwise it draws
+// its points as they are.
+[[nodiscard]] bool IsSkinned(const MeshSnapshot& mesh);
 
 // The material model a material's source selected (material policy §3).
 enum class ToonShadingModel { PreviewSurface, MToon, MMD };
@@ -223,6 +281,10 @@ public:
   void SetMeshVisible(MeshId mesh, bool visible);
   // Binds a material by id; 0, or an id no material has, draws unlit.
   void SetMeshMaterial(MeshId mesh, MaterialId material);
+  // A skin without influences per point unskins the mesh. Setting the skin
+  // or pose a mesh already has changes nothing.
+  void SetMeshSkin(MeshId mesh, ToonSkin skin);
+  void SetMeshSkinPose(MeshId mesh, ToonSkinPose pose);
   void SetView(const ToonView& view);
 
   // A new material is the default `ToonMaterial`: the fallback material.

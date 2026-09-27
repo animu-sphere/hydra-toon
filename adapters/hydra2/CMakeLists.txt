@@ -80,6 +80,17 @@ if(TOON_BUILD_TESTS)
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
+  # A small UsdSkel stage through UsdImaging and usdSkelImaging: what a
+  # skinned mesh commits, and what a pose change alone changes.
+  add_executable(toon-hydra2-skinning-test tests/skinning_test.cpp)
+  toon_configure_warnings(toon-hydra2-skinning-test)
+  target_link_libraries(toon-hydra2-skinning-test
+    PRIVATE toon-hydra2-runtime usdImaging usd)
+  target_compile_features(toon-hydra2-skinning-test PRIVATE cxx_std_20)
+  target_compile_definitions(toon-hydra2-skinning-test PRIVATE
+    NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+
   add_executable(toon-hydra2-render-buffer-test
     tests/render_buffer_test.cpp)
   toon_configure_warnings(toon-hydra2-render-buffer-test)
@@ -114,11 +125,15 @@ if(TOON_BUILD_TESTS)
     COMMAND toon-hydra2-render-buffer-test)
   add_test(NAME toon-renderer-hydra-material
     COMMAND toon-hydra2-material-test)
+  add_test(NAME toon-renderer-hydra-skinning
+    COMMAND toon-hydra2-skinning-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda")
   set_tests_properties(
     toon-renderer-plugin-discovery
     toon-renderer-delegate-creation
     toon-renderer-hydra-render-buffer
     toon-renderer-hydra-material
+    toon-renderer-hydra-skinning
     PROPERTIES ENVIRONMENT_MODIFICATION
       "${_toon_pxr_runtime_modifications}")
 

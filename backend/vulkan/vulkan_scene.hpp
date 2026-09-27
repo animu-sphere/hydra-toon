@@ -20,6 +20,9 @@ namespace Toon::vulkan_internal {
 struct DrawConstants {
   float clip_from_object[16];
   float color[4];
+  // The kDraw* skinning flags and influence count, as mtoon_opaque's.
+  std::uint32_t flags;
+  std::uint32_t padding[3];
 };
 
 // Must match DrawConstants in shaders/mtoon.slang: 128 bytes, the push
@@ -29,13 +32,18 @@ struct MToonDrawConstants {
   // Rows of the view-space normal matrix, each padded to four floats.
   float view_normal_rows[12];
   std::uint32_t material_slot;
-  // kDrawHasUVs when the mesh has texture coordinates.
+  // kDrawHasUVs when the mesh has texture coordinates; kDrawSkinned,
+  // kDrawConstantInfluences and the influences per point from
+  // kInfluenceCountShift up when it is skinned.
   std::uint32_t flags;
   std::uint32_t padding[2];
 };
 static_assert(sizeof(MToonDrawConstants) == 128);
 
 constexpr std::uint32_t kDrawHasUVs = 1U;
+constexpr std::uint32_t kDrawSkinned = 2U;
+constexpr std::uint32_t kDrawConstantInfluences = 4U;
+constexpr std::uint32_t kInfluenceCountShift = 8U;
 
 // Entries in the texture table mtoon_opaque indexes, and a shader constant
 // (kTextureCapacity in shaders/mtoon.slang). Entry 0 is a white placeholder,
@@ -102,14 +110,17 @@ struct ScenePipeline {
 
 // The scene pipelines for one colour/depth format pair: the unlit mesh
 // pipeline and mtoon_opaque, which reads the material parameter buffer, the
-// texture table and the wrap samplers through `material_layout`. Viewport
-// and scissor are dynamic, and so are mtoon_opaque's cull mode, front face
-// and vertex strides, so each pipeline is created once and survives every
-// resize, every material and every mesh with or without UVs.
+// texture table and the wrap samplers through `material_layout` (set 0).
+// Both skin a mesh in the vertex stage through `skin_layout` (set 1): its
+// influences and its joint buffer. Viewport and scissor are dynamic, and so
+// are mtoon_opaque's cull mode, front face and vertex strides, so each
+// pipeline is created once and survives every resize, every material and
+// every mesh with or without UVs or a skin.
 struct ScenePipelines {
   ScenePipeline mesh;
   ScenePipeline mtoon;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
   VkSampler samplers[kSamplerCount] = {};
 
@@ -299,13 +310,20 @@ private:
 // indices are re-uploaded only when their own revision changes, into the
 // existing buffer when it is large enough.
 //
+// A skinned mesh also has its influences, uploaded when its skin changes,
+// and a joint buffer, rewritten when its pose changes and nothing else does
+// (design policy §11): the skeleton-to-mesh transform, then each joint's
+// skinning transform composed with the geometry bind transform. Both are
+// bound through the mesh's own skin descriptor set; an unskinned mesh binds
+// a shared one it never reads.
+//
 // Geometry is written through host-visible memory on the render thread. That
 // is the Renderer Phase 0 stand-in for the staged, off-thread upload of
 // design policy §20.
 class MeshCache {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,
-      std::string& detail);
+      VkDescriptorSetLayout skin_layout, std::string& detail);
   // Upload whatever `draws` changed and release meshes it no longer draws.
   // No frame that reads these buffers may be in flight.
   bool Update(const DrawList& draws, std::string& detail);
@@ -320,6 +338,12 @@ public:
   [[nodiscard]] std::uint64_t point_uploads() const {
     return point_uploads_;
   }
+  [[nodiscard]] std::uint64_t skin_uploads() const {
+    return skin_uploads_;
+  }
+  [[nodiscard]] std::uint64_t pose_writes() const {
+    return pose_writes_;
+  }
 
 private:
   struct Entry {
@@ -327,27 +351,53 @@ private:
     HostBuffer normals;
     HostBuffer uvs;
     HostBuffer indices;
+    HostBuffer influences;
+    HostBuffer joints;
     std::uint64_t points_revision = 0;
     std::uint64_t normals_revision = 0;
     std::uint64_t uvs_revision = 0;
     std::uint64_t topology_revision = 0;
+    std::uint64_t skin_revision = 0;
+    std::uint64_t pose_revision = 0;
     std::uint32_t index_count = 0;
     // Whether `uvs` holds a coordinate for every vertex the indices reach.
     bool has_uvs = false;
+    // Whether this frame's draw skins the mesh, and the flags that say how.
+    bool skinned = false;
+    std::uint32_t skin_flags = 0;
+    // Allocated when the mesh is first skinned, from `skin_pools_[pool]`.
+    VkDescriptorSet skin_set = VK_NULL_HANDLE;
+    std::size_t skin_pool = 0;
     std::uint64_t generation = 0;
   };
 
   bool Upload(HostBuffer& buffer, VkBufferUsageFlags usage, const void* data,
       VkDeviceSize size, std::string& detail);
+  bool UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
+      std::string& detail);
+  bool AllocateSkinSet(VkDescriptorSet& set, std::size_t& pool,
+      std::string& detail);
+  void PointSkinSet(VkDescriptorSet set, VkBuffer influences,
+      VkBuffer joints);
+  void Release(Entry& entry);
 
   VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
   VkDevice device_ = VK_NULL_HANDLE;
+  VkDescriptorSetLayout skin_layout_ = VK_NULL_HANDLE;
   // Bound with stride 0 in place of a mesh's missing UVs.
   HostBuffer zero_uv_;
+  // Bound, never read, in place of an unskinned mesh's skin.
+  HostBuffer zero_skin_;
+  VkDescriptorSet unskinned_set_ = VK_NULL_HANDLE;
+  // Skin sets come from fixed-size pools, a new one when the last is full.
+  std::vector<VkDescriptorPool> skin_pools_;
+  std::vector<Matrix4> joint_scratch_;
   std::unordered_map<MeshId, Entry> entries_;
   std::uint64_t generation_ = 0;
   std::uint64_t topology_uploads_ = 0;
   std::uint64_t point_uploads_ = 0;
+  std::uint64_t skin_uploads_ = 0;
+  std::uint64_t pose_writes_ = 0;
 };
 
 } // namespace Toon::vulkan_internal

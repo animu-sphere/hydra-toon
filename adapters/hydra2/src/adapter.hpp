@@ -164,6 +164,10 @@ public:
       const HdSceneIndexBaseRefPtr& terminal_scene_index) override;
   void Update() override;
 
+  // The scene the next frame will draw, committed without rendering it: for
+  // a check that needs no GPU.
+  Toon::FrameSnapshot CommitScene();
+
 private:
   class Impl;
   std::unique_ptr<Impl> impl_;
