@@ -1,0 +1,28 @@
+schema = "openstrata.formation/v1alpha1"
+
+# The VRM usdview session, composed only of published packages
+# (docs/roadmap/vrm-host-session.md). Run from this directory: the command's
+# paths are relative to the working directory.
+
+[formation]
+name = "hydra-toon-vrm-host-session"
+
+# openstrata-runtime-cy2026-lookdev:26.08-gl-windows-x86_64
+[runtime]
+artifact = "sha256:b982656c07dd9147973e3c7197d9b050ee48dd1ac291988f7e6025c76c4a785b"
+
+# usd-vrm-plugins v0.10.0, carrying vrmSchema (lookdev-package-pins.json)
+[[components]]
+id = "vrmImaging"
+kind = "plugin"
+artifact = "sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667"
+
+# hydra-toon v0.1.0 (toon-package-pins.json)
+[[components]]
+id = "toon"
+kind = "renderer"
+artifact = "sha256:265328f06d0fcbdc718b459011f321c769dcf423881f8b67a12321254d728c29"
+
+[command]
+program = "testusdview"
+args = ["../../adapters/hydra2/tests/material-probe.usda", "--renderer", "Toon", "--testScript", "vrm_material_check.py"]

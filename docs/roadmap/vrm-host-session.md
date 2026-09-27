@@ -2,8 +2,11 @@
 
 The `usdview` session that renders a VRM stage with `hdToon`, composed by
 `ost formation` from released packages rather than a hand-set
-`PXR_PLUGINPATH_NAME`. It is the last item
-[before Renderer Phase 1](current.md#before-renderer-phase-1)'s MToon path.
+`PXR_PLUGINPATH_NAME`. It was the last item
+[before Renderer Phase 1](current.md#before-renderer-phase-1)'s MToon path,
+and on Windows it is done:
+[`formations/vrm-host-session/`](../../formations/vrm-host-session/) pins
+published packages only. What is left is the other platforms.
 
 Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️ accepted workaround
 
@@ -43,11 +46,17 @@ CY2026 names (2022.x) is what a managed build pins.
   `lookdev-package-pins.json`); the Formations pin archive
   `sha256:894fd616…`, and every run gives its report's numbers
   ([renderer report 12](../reports/renderer/12-2026-09-28-published-vrmimaging.md)).
-- ⬜ **A Formation in the repository** and its `testusdview` check. It pins
-  published digests only, so it waits on the next item.
-- ⬜ **Publish the renderer package** as
-  `ghcr.io/animu-sphere/hydra-toon:toon-<version>-cy2026-windows-x86_64-py313-lookdev`.
-  The runtime (`sha256:b982656c…`) and `vrmImaging` are published.
+- ✅ **The renderer package published.** [v0.1.0](../releases/v0.1.0.md)
+  publishes `ghcr.io/animu-sphere/hydra-toon:toon-0.1.0-cy2026-windows-x86_64-py313-lookdev`
+  with the digests a Formation pins (its release's `toon-package-pins.json`,
+  archive `sha256:265328f0…`).
+- ✅ **A Formation in the repository** and its `testusdview` check.
+  [`formations/vrm-host-session/`](../../formations/vrm-host-session/) pins
+  the runtime, `vrmImaging` 0.10.0 and `toon` 0.1.0 by published digest; its
+  declared command selects MToon on the committed probe stage and fails
+  without `vrmImaging`, and the published package draws the avatar with
+  report 12's numbers
+  ([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)).
 
 ## Linux x86_64
 

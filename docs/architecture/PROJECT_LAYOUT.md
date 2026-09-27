@@ -39,6 +39,11 @@ that moment every file is project-owned; the template is not re-applied.
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
+`formations/vrm-host-session/` builds nothing: it is an OpenStrata Formation
+that composes the published `toon` package with the runtime and `vrmImaging`,
+run by `ost formation`. Every other directory under `formations/` is a local
+Formation and ignored by Git.
+
 `adapters/hydra2/` is OpenStrata's name for the Hydra scene-input slot; the code
 is a classic `HdRenderDelegate` ([DESIGN_POLICY.md](../design/DESIGN_POLICY.md)
 §30).
