@@ -192,6 +192,8 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
           })},
           {"shadeMultiply", role({})},
           {"outlineWidthMultiply", role({})},
+          {"matcap", role({})},
+          {"rimMultiply", role({})},
       })},
       {b_id, HdPrimTypeTokens->material,
           TexturedPrim({{"baseColor", role({})}})},
@@ -200,10 +202,16 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
               {"file", Value(SdfAssetPath("missing.png"))},
           })}})},
       {other_set_id, HdPrimTypeTokens->material,
-          TexturedPrim({{"baseColor", Container({
-              {"file", Value(file)},
-              {"texCoord", Value(1)},
-          })}})},
+          TexturedPrim({
+              {"baseColor", Container({
+                  {"file", Value(file)},
+                  {"texCoord", Value(1)},
+              })},
+              {"matcap", Container({
+                  {"file", Value(file)},
+                  {"texCoord", Value(1)},
+              })},
+          })},
   });
   HdTaskSharedPtrVector tasks;
   HdTaskContext context;
@@ -224,6 +232,10 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
       a->GetToonMaterial().mtoon.outline_width_texture.texture;
   if (!Check(shared != 0, "a resolved base colour texture must be sampled") ||
       !Check(a->GetToonMaterial().mtoon.shade_texture.texture == shared &&
+                 a->GetToonMaterial().mtoon.matcap_texture.texture ==
+                     shared &&
+                 a->GetToonMaterial().mtoon.rim_multiply_texture.texture ==
+                     shared &&
                  b->GetToonMaterial().base_texture.texture == shared,
           "one image must be one texture across roles and materials") ||
       !Check(outline_width != 0 && outline_width != shared,
@@ -238,13 +250,16 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
       !Check(unresolved->GetToonMaterial().base_texture.texture == 0,
           "a path that does not resolve must sample nothing") ||
       !Check(other_set->GetToonMaterial().base_texture.texture == 0,
-          "another TEXCOORD set must sample nothing")) {
+          "another TEXCOORD set must sample nothing") ||
+      !Check(other_set->GetToonMaterial().mtoon.matcap_texture.texture ==
+                 shared,
+          "MatCap samples no TEXCOORD set, so any set must be read")) {
     return 1;
   }
 
   // Once no material names the image, its texture is gone, and naming it
   // again decodes a new one.
-  scene.RemovePrims({{a_id}, {b_id}});
+  scene.RemovePrims({{a_id}, {b_id}, {other_set_id}});
   scene.AddPrims({{a_id, HdPrimTypeTokens->material,
       TexturedPrim({{"baseColor", role({})}})}});
   index.SyncAll(&tasks, &context);
@@ -254,7 +269,7 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
           "a texture no material samples must be released")) {
     return 1;
   }
-  scene.RemovePrims({{a_id}, {unresolved_id}, {other_set_id}});
+  scene.RemovePrims({{a_id}, {unresolved_id}});
   std::error_code ignored;
   std::filesystem::remove(image_path, ignored);
   return 0;

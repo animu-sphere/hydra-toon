@@ -30,12 +30,14 @@ struct DrawConstants {
 // every Vulkan device offers.
 struct MToonDrawConstants {
   float clip_from_object[16];
-  // Rows of the view-space normal matrix, each padded to four floats.
-  float view_normal_rows[12];
+  // The top three rows of view-from-object: its 3x3 in xyz and the
+  // translation in w. The shaders derive the normal matrix from it.
+  float view_from_object_rows[12];
   std::uint32_t material_slot;
-  // kDrawHasUVs when the mesh has texture coordinates; kDrawSkinned,
-  // kDrawConstantInfluences and the influences per point from
-  // kInfluenceCountShift up when it is skinned.
+  // kDrawHasUVs when the mesh has texture coordinates; kDrawOrthographic
+  // under an orthographic camera; kDrawSkinned, kDrawConstantInfluences and
+  // the influences per point from kInfluenceCountShift up when it is
+  // skinned.
   std::uint32_t flags;
   // |projection[1][1]|, for mtoon_outline's screen-coordinates width.
   float projection_scale;
@@ -46,6 +48,8 @@ static_assert(sizeof(MToonDrawConstants) == 128);
 constexpr std::uint32_t kDrawHasUVs = 1U;
 constexpr std::uint32_t kDrawSkinned = 2U;
 constexpr std::uint32_t kDrawConstantInfluences = 4U;
+// The camera is orthographic: every fragment is seen along view-space +z.
+constexpr std::uint32_t kDrawOrthographic = 16U;
 constexpr std::uint32_t kInfluenceCountShift = 8U;
 
 // An MToon slot's outline width mode, as mtoon_outline reads it; 0 draws
@@ -87,8 +91,19 @@ struct MToonParameters {
   // kOutlineScreen or 0.
   std::uint32_t outline_texture[4];
   float outline_uv[8];
+  // rgb the parametric rim colour, a the rim lighting mix.
+  float rim_color[4];
+  // x the parametric rim's fresnel power, y its lift.
+  float rim[4];
+  // rgb matcapFactor.
+  float matcap[4];
+  // x MatCap texture entry, y its sampler; z rim multiply texture entry,
+  // w its sampler.
+  std::uint32_t rim_textures[4];
+  float matcap_uv[8];
+  float rim_uv[8];
 };
-static_assert(sizeof(MToonParameters) == 224);
+static_assert(sizeof(MToonParameters) == 352);
 
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
 // pass or framebuffer to rebuild on resize), Synchronization2 and timeline
@@ -275,6 +290,18 @@ private:
   std::uint64_t uploads_ = 0;
 };
 
+// The texture table entry of every texture an MToon slot samples.
+struct MaterialEntries {
+  std::uint32_t base = 0;
+  std::uint32_t shade = 0;
+  std::uint32_t outline = 0;
+  std::uint32_t matcap = 0;
+  std::uint32_t rim = 0;
+
+  friend bool operator==(const MaterialEntries&,
+      const MaterialEntries&) = default;
+};
+
 // One parameter slot per material, in a host-visible storage buffer that
 // mtoon_opaque indexes by slot (material policy §7). A slot is rewritten
 // when its material's parameters revision changes or a texture it samples
@@ -287,9 +314,7 @@ public:
     std::uint32_t slot = 0;
     std::uint64_t parameters_revision = 0;
     // The table entries the slot was written with.
-    std::uint32_t base_entry = 0;
-    std::uint32_t shade_entry = 0;
-    std::uint32_t outline_entry = 0;
+    MaterialEntries entries;
     ToonShadingModel model = ToonShadingModel::PreviewSurface;
     bool double_sided = false;
     // Whether a draw with this material also draws mtoon_outline's hull:

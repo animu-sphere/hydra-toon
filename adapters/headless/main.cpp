@@ -307,10 +307,30 @@ Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
-// mtoon_outline (material policy §5): an octahedron of radius 0.5, seen
-// along -z through an orthographic camera, is a diamond |x| + |y| <= 0.5 on
-// screen, and its smooth normals at the four rim corners point along x and
-// y. A world-coordinates outline of 0.2 in green, unlit, grows the hull to
+// An octahedron of radius 0.5 with UVs of zero, seen along -z through an
+// orthographic camera: a diamond |x| + |y| <= 0.5 on screen, whose smooth
+// normals point along x and y at the four rim corners and along +z at the
+// centre. On a 64x64 target, column c's centre is x = (c + 0.5) / 32 - 1
+// and row r's is y = 1 - (r + 0.5) / 32.
+Toon::MeshId AddOctahedron(Toon::RenderWorld& world) {
+  const Toon::MeshId mesh = world.CreateMesh();
+  world.SetMeshPoints(mesh, {{0.5F, 0.0F, 0.0F}, {-0.5F, 0.0F, 0.0F},
+                                {0.0F, 0.5F, 0.0F}, {0.0F, -0.5F, 0.0F}, {0.0F, 0.0F, 0.5F},
+                                {0.0F, 0.0F, -0.5F}});
+  // Counter-clockwise seen from outside: one triangle per octant.
+  world.SetMeshTopology(mesh, {0, 2, 4, 1, 4, 2, 0, 4, 3, 1, 3, 4, 0, 5, 2,
+                                  1, 2, 5, 0, 3, 5, 1, 5, 3});
+  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
+  // OpenGL's orthographic projection of the unit cube: z is negated, so +z
+  // faces the camera and is nearer.
+  Toon::ToonView view;
+  view.projection.m[10] = -1.0F;
+  world.SetView(view);
+  return mesh;
+}
+
+// mtoon_outline (material policy §5), on AddOctahedron's diamond. A
+// world-coordinates outline of 0.2 in green, unlit, grows the hull to
 // |x| + |y| <= 0.7, so the pixel at x = 0.58 on the centre row draws green
 // while the centre stays the surface's. With the mode None, a value-only
 // edit, that pixel is background; as screen coordinates, 0.1 of the screen
@@ -326,19 +346,7 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
   }
 
   Toon::RenderWorld world;
-  const Toon::MeshId mesh = world.CreateMesh();
-  world.SetMeshPoints(mesh, {{0.5F, 0.0F, 0.0F}, {-0.5F, 0.0F, 0.0F},
-                                {0.0F, 0.5F, 0.0F}, {0.0F, -0.5F, 0.0F}, {0.0F, 0.0F, 0.5F},
-                                {0.0F, 0.0F, -0.5F}});
-  // Counter-clockwise seen from outside: one triangle per octant.
-  world.SetMeshTopology(mesh, {0, 2, 4, 1, 4, 2, 0, 4, 3, 1, 3, 4, 0, 5, 2,
-                                  1, 2, 5, 0, 3, 5, 1, 5, 3});
-  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
-  // OpenGL's orthographic projection of the unit cube: z is negated, so +z
-  // faces the camera and is nearer.
-  Toon::ToonView view;
-  view.projection.m[10] = -1.0F;
-  world.SetView(view);
+  const Toon::MeshId mesh = AddOctahedron(world);
   const Toon::MaterialId material = world.CreateMaterial();
   Toon::ToonMaterial toon;
   toon.model = Toon::ToonShadingModel::MToon;
@@ -436,6 +444,152 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
       last.topology_uploads != first.topology_uploads) {
     return {id, "fail",
         "an outline edit must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
+// MToon's rim (material policy §4's MToon block), on AddOctahedron's diamond
+// with black lit and shade colours, so a pixel is the rim alone. A green
+// parametric rim of fresnel power 1, unlit, is 1 - N.V: near 0 at the
+// centre, 0.93 at x = 0.45 on the centre row, and the default matcapFactor
+// adds nothing without a MatCap texture. A 2x2 MatCap texture whose top
+// left is red, top right green and bottom left blue then draws each where
+// the normal points: green up and to the right, blue down and to the left,
+// red up and to the left. A matcapFactor of 0.5 mixed fully with the
+// stand-in light, 1 + 0.25 ambient, is a value-only edit to 0.625; a black
+// rim multiply texture takes the rim away.
+Check MToonRimCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_rim";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  const Toon::MeshId mesh = AddOctahedron(world);
+  const Toon::MaterialId material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {0.0F, 0.0F, 0.0F};
+  toon.mtoon.shade_color = {0.0F, 0.0F, 0.0F};
+  toon.mtoon.rim_color = {0.0F, 1.0F, 0.0F};
+  toon.mtoon.rim_fresnel_power = 1.0F;
+  toon.mtoon.rim_lighting_mix = 0.0F;
+  world.SetMaterial(material, toon);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  struct Shot {
+    std::array<std::uint8_t, 4> center{};
+    // x = 0.45 on the centre row.
+    std::array<std::uint8_t, 4> edge{};
+    // x and y 0.2 from the centre: up right, down left, up left.
+    std::array<std::uint8_t, 4> up_right{};
+    std::array<std::uint8_t, 4> down_left{};
+    std::array<std::uint8_t, 4> up_left{};
+    Toon::OffscreenStatistics statistics;
+  };
+  const auto render = [&](Shot& shot) {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    shot.center = CenterPixel(color);
+    shot.edge = PixelAt(color, 46, 32);
+    shot.up_right = PixelAt(color, 38, 25);
+    shot.down_left = PixelAt(color, 25, 38);
+    shot.up_left = PixelAt(color, 25, 25);
+    shot.statistics = renderer->statistics();
+    return true;
+  };
+  Shot parametric;
+  Shot matcap;
+  Shot mixed;
+  Shot masked;
+  if (!render(parametric)) {
+    return {id, "fail", detail};
+  }
+  const Toon::TextureId matcap_texture = world.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 2;
+  texels.height = 2;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255,
+          255, 255, 255, 255, 255});
+  world.SetTexture(matcap_texture, texels);
+  toon.mtoon.rim_color = {0.0F, 0.0F, 0.0F};
+  toon.mtoon.matcap_texture.texture = matcap_texture;
+  // Clamped, so a filtered sample near an edge does not reach across it.
+  toon.mtoon.matcap_texture.wrap_s = Toon::ToonWrap::ClampToEdge;
+  toon.mtoon.matcap_texture.wrap_t = Toon::ToonWrap::ClampToEdge;
+  world.SetMaterial(material, toon);
+  if (!render(matcap)) {
+    return {id, "fail", detail};
+  }
+  toon.mtoon.matcap = {0.5F, 0.5F, 0.5F};
+  toon.mtoon.rim_lighting_mix = 1.0F;
+  world.SetMaterial(material, toon);
+  if (!render(mixed)) {
+    return {id, "fail", detail};
+  }
+  const Toon::TextureId mask = world.CreateTexture();
+  texels.width = 1;
+  texels.height = 1;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{0, 0, 0, 255});
+  world.SetTexture(mask, texels);
+  toon.mtoon.rim_multiply_texture.texture = mask;
+  world.SetMaterial(material, toon);
+  if (!render(masked)) {
+    return {id, "fail", detail};
+  }
+
+  const Toon::OffscreenStatistics& first = parametric.statistics;
+  const Toon::OffscreenStatistics& last = masked.statistics;
+  if (last.validation_message_count != 0) {
+    return {id, "fail", last.validation_detail};
+  }
+  const auto is = [](const std::array<std::uint8_t, 4>& pixel,
+                      std::uint8_t red, std::uint8_t green,
+                      std::uint8_t blue) {
+    const auto near = [](std::uint8_t value, std::uint8_t expected) {
+      return value + 16 >= expected && value <= expected + 16;
+    };
+    return near(pixel[0], red) && near(pixel[1], green) &&
+           near(pixel[2], blue);
+  };
+  if (!is(parametric.center, 0, 0, 0)) {
+    return {id, "fail",
+        "facing the camera, the parametric rim and a MatCap without a "
+        "texture must add nothing"};
+  }
+  if (!is(parametric.edge, 0, 237, 0)) {
+    return {id, "fail", "the parametric rim did not draw 1 - N.V at the edge"};
+  }
+  if (!is(matcap.up_right, 0, 255, 0) || !is(matcap.down_left, 0, 0, 255) ||
+      !is(matcap.up_left, 255, 0, 0)) {
+    return {id, "fail",
+        "the MatCap texture did not draw where the view-space normal points"};
+  }
+  if (!is(mixed.up_right, 0, 159, 0)) {
+    return {id, "fail",
+        "a rim lighting mix of 1 did not multiply the rim by the light"};
+  }
+  if (!is(masked.up_right, 0, 0, 0) || !is(masked.edge, 0, 0, 0)) {
+    return {id, "fail", "a black rim multiply texture must take the rim away"};
+  }
+  if (first.material_writes != 1 || matcap.statistics.texture_uploads != 1 ||
+      mixed.statistics.material_writes != 3 ||
+      mixed.statistics.texture_uploads != 1 || last.texture_uploads != 2 ||
+      last.material_writes != 4 ||
+      last.pipelines_created != first.pipelines_created ||
+      last.point_uploads != first.point_uploads ||
+      last.topology_uploads != first.topology_uploads) {
+    return {id, "fail",
+        "a rim edit must rewrite one slot, and a texture upload once"};
   }
   return {id, "pass", ""};
 }
@@ -662,6 +816,7 @@ int main(int argc, char** argv) {
     checks.push_back(MToonOpaqueCheck(shaders));
     checks.push_back(MToonTexturedCheck(shaders));
     checks.push_back(MToonOutlineCheck(shaders));
+    checks.push_back(MToonRimCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;

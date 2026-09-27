@@ -263,9 +263,36 @@ int main() {
   }
   textured.mtoon.outline_width_texture.texture = texture;
   world.SetMaterial(bound, textured);
-  if (!Check(world.Commit().materials[0].structure_revision !=
-                 outlined.structure_revision,
+  const Toon::MaterialSnapshot width_textured = world.Commit().materials[0];
+  if (!Check(width_textured.structure_revision != outlined.structure_revision,
           "sampling an outline width texture must be structural")) {
+    return 1;
+  }
+  // The rim's colour, shape and mix are values; its MatCap and multiply
+  // textures' identities are structural.
+  textured.mtoon.rim_color = {0.0F, 1.0F, 0.0F};
+  textured.mtoon.rim_lift = 0.2F;
+  textured.mtoon.rim_lighting_mix = 0.0F;
+  textured.mtoon.matcap = {0.5F, 0.5F, 0.5F};
+  world.SetMaterial(bound, textured);
+  const Toon::MaterialSnapshot rimmed = world.Commit().materials[0];
+  if (!Check(rimmed.parameters_revision != width_textured.parameters_revision &&
+                 rimmed.structure_revision == width_textured.structure_revision,
+          "a rim edit must not be structural")) {
+    return 1;
+  }
+  textured.mtoon.matcap_texture.texture = texture;
+  world.SetMaterial(bound, textured);
+  const Toon::MaterialSnapshot matcapped = world.Commit().materials[0];
+  if (!Check(matcapped.structure_revision != rimmed.structure_revision,
+          "sampling a MatCap texture must be structural")) {
+    return 1;
+  }
+  textured.mtoon.rim_multiply_texture.texture = texture;
+  world.SetMaterial(bound, textured);
+  if (!Check(world.Commit().materials[0].structure_revision !=
+                 matcapped.structure_revision,
+          "sampling a rim multiply texture must be structural")) {
     return 1;
   }
   world.RemoveTexture(texture);
