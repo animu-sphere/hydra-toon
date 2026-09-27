@@ -7,17 +7,7 @@ target_link_libraries(toon-headless PRIVATE
 target_compile_features(toon-headless PRIVATE cxx_std_20)
 
 if(TOON_WITH_VULKAN)
-  add_dependencies(toon-headless toon-renderer-shaders)
-  add_custom_command(TARGET toon-headless POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory
-      "$<TARGET_FILE_DIR:toon-headless>/shaders"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-      "${TOON_VERTEX_SPV}"
-      "$<TARGET_FILE_DIR:toon-headless>/shaders/mesh.vert.spv"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-      "${TOON_FRAGMENT_SPV}"
-      "$<TARGET_FILE_DIR:toon-headless>/shaders/mesh.frag.spv"
-    VERBATIM)
+  toon_copy_shaders(toon-headless)
 endif()
 
 if(NOT CMAKE_CROSSCOMPILING)

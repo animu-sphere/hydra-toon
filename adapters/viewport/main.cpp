@@ -130,9 +130,8 @@ int main(int argc, char** argv) {
         std::filesystem::absolute(argv[0]).parent_path() / "shaders";
     Toon::PresentSetupStatus status = Toon::PresentSetupStatus::Error;
     std::string error;
-    auto session = Toon::CreatePresentSession(
-        provider, (shader_directory / "mesh.vert.spv").string(),
-        (shader_directory / "mesh.frag.spv").string(), arguments.vsync,
+    auto session = Toon::CreatePresentSession(provider,
+        Toon::SceneShadersIn(shader_directory.string()), arguments.vsync,
         status, error);
     if (session == nullptr) {
       if (status == Toon::PresentSetupStatus::Unavailable) {

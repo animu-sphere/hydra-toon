@@ -39,20 +39,10 @@ set_target_properties(
   toon-hydra2-runtime
   PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_dependencies(hdToon toon-renderer-shaders)
-add_custom_command(TARGET hdToon POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E make_directory
-    "$<TARGET_FILE_DIR:hdToon>/shaders"
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-    "${TOON_VERTEX_SPV}"
-    "$<TARGET_FILE_DIR:hdToon>/shaders/mesh.vert.spv"
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-    "${TOON_FRAGMENT_SPV}"
-    "$<TARGET_FILE_DIR:hdToon>/shaders/mesh.frag.spv"
-  VERBATIM)
+toon_copy_shaders(hdToon)
 
 toon_install_plugin(hdToon "${TOON_PLUGIN_RESOURCE_FILE}"
-  "${TOON_VERTEX_SPV}" "${TOON_FRAGMENT_SPV}")
+  ${TOON_SHADER_SPVS})
 install(FILES tests/usdview-smoke.usda
   DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/tests")
 

@@ -9,12 +9,15 @@
 namespace Toon {
 
 // What a frame draws: every visible mesh whose topology its points can
-// satisfy, and the camera it is seen through.
+// satisfy, the materials they bind, and the camera they are seen through.
 struct DrawList {
   std::uint64_t source_revision = 0;
   ToonView view;
   std::uint64_t view_revision = 0;
   std::vector<MeshSnapshot> draws;
+  // Every material of the snapshot, ordered by id, so a consumer keeps one
+  // parameter slot per material whether or not a draw binds it this frame.
+  std::vector<MaterialSnapshot> materials;
   std::uint64_t triangle_count = 0;
 };
 

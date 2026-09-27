@@ -80,7 +80,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
     const Toon::OffscreenStatistics& statistics,
     std::uint32_t width, std::uint32_t height,
     std::size_t buffers_written,
-    const Toon::FrameSnapshot& snapshot) {
+    const Toon::FrameSnapshot& snapshot, const Toon::DrawList& draws) {
   const char* path = std::getenv("TOON_HYDRA_EVIDENCE");
   if (path == nullptr || *path == '\0') {
     return;
@@ -95,6 +95,20 @@ void AppendHostEvidence(std::uint64_t frame_index,
       ++preview_materials;
     } else if (material.material.model == Toon::ToonShadingModel::MToon) {
       ++mtoon_materials;
+    }
+  }
+  // And how many of this frame's draws went through mtoon_opaque.
+  std::size_t mtoon_draws{};
+  for (const Toon::MeshSnapshot& mesh : draws.draws) {
+    const auto material = std::lower_bound(snapshot.materials.begin(),
+        snapshot.materials.end(), mesh.material,
+        [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
+          return entry.id < id;
+        });
+    if (material != snapshot.materials.end() &&
+        material->id == mesh.material &&
+        material->material.model == Toon::ToonShadingModel::MToon) {
+      ++mtoon_draws;
     }
   }
   std::ofstream output(path, std::ios::binary | std::ios::app);
@@ -112,8 +126,11 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " target_allocations=" << statistics.target_allocations
          << " topology_uploads=" << statistics.topology_uploads
          << " point_uploads=" << statistics.point_uploads
+         << " material_writes=" << statistics.material_writes
          << " materials_preview=" << preview_materials
-         << " materials_mtoon=" << mtoon_materials << '\n';
+         << " materials_mtoon=" << mtoon_materials
+         << " draws=" << draws.draws.size()
+         << " draws_mtoon=" << mtoon_draws << '\n';
 }
 
 // GfMatrix4d is row-major for row vectors, so its storage order is already
@@ -139,6 +156,7 @@ public:
   void RemoveMesh(Toon::MeshId mesh) {
     std::scoped_lock lock(mutex_);
     world_.RemoveMesh(mesh);
+    bindings_.erase(mesh);
   }
 
   void SetMeshTopology(Toon::MeshId mesh,
@@ -167,14 +185,36 @@ public:
     world_.SetMeshVisible(mesh, visible);
   }
 
-  Toon::MaterialId CreateMaterial() {
+  // A mesh binds a material by path, and either may be synced first, so a
+  // binding is resolved again whenever a material under its path appears or
+  // goes away.
+  void SetMeshMaterial(Toon::MeshId mesh, const SdfPath& material) {
     std::scoped_lock lock(mutex_);
-    return world_.CreateMaterial();
+    bindings_[mesh] = material;
+    const auto found = materials_by_path_.find(material);
+    world_.SetMeshMaterial(mesh,
+        found == materials_by_path_.end() ? 0U : found->second);
   }
 
-  void RemoveMaterial(Toon::MaterialId material) {
+  // `path` is empty for the fallback material, which no mesh binds.
+  Toon::MaterialId CreateMaterial(const SdfPath& path) {
+    std::scoped_lock lock(mutex_);
+    const Toon::MaterialId material = world_.CreateMaterial();
+    if (!path.IsEmpty()) {
+      materials_by_path_[path] = material;
+      RebindLocked(path, material);
+    }
+    return material;
+  }
+
+  void RemoveMaterial(Toon::MaterialId material, const SdfPath& path) {
     std::scoped_lock lock(mutex_);
     world_.RemoveMaterial(material);
+    const auto found = materials_by_path_.find(path);
+    if (found != materials_by_path_.end() && found->second == material) {
+      materials_by_path_.erase(found);
+      RebindLocked(path, 0U);
+    }
   }
 
   void SetMaterial(Toon::MaterialId material,
@@ -238,10 +278,20 @@ public:
     }
     ++frame_index_;
     AppendHostEvidence(frame_index_, renderer_->statistics(), width, height,
-        buffers_written, snapshot_);
+        buffers_written, snapshot_, draws_);
   }
 
 private:
+  // Linear in the meshes; it runs when a material prim is added or removed,
+  // not per frame.
+  void RebindLocked(const SdfPath& path, Toon::MaterialId material) {
+    for (const auto& [mesh, bound] : bindings_) {
+      if (bound == path) {
+        world_.SetMeshMaterial(mesh, material);
+      }
+    }
+  }
+
   // The renderer is created on the first frame, not with the delegate, so a
   // delegate that never renders (discovery, probing) never creates a device.
   bool EnsureRendererLocked() {
@@ -255,8 +305,7 @@ private:
     Toon::FrameStatus status = Toon::FrameStatus::Fail;
     std::string detail;
     renderer_ = Toon::CreateOffscreenRenderer(
-        (shaders / "mesh.vert.spv").string(),
-        (shaders / "mesh.frag.spv").string(), status, detail);
+        Toon::SceneShadersIn(shaders.string()), status, detail);
     if (renderer_ == nullptr) {
       renderer_failed_ = true;
       TF_RUNTIME_ERROR("Toon could not create its Vulkan renderer: %s",
@@ -278,6 +327,9 @@ private:
 
   std::mutex mutex_;
   Toon::RenderWorld world_;
+  std::unordered_map<SdfPath, Toon::MaterialId, SdfPath::Hash>
+      materials_by_path_;
+  std::unordered_map<Toon::MeshId, SdfPath> bindings_;
   // Reused every frame, so a steady frame allocates nothing.
   Toon::FrameSnapshot snapshot_;
   Toon::DrawList draws_;
@@ -303,7 +355,8 @@ public:
   HdDirtyBits GetInitialDirtyBitsMask() const override {
     return HdChangeTracker::DirtyPoints | HdChangeTracker::DirtyTopology |
            HdChangeTracker::DirtyTransform | HdChangeTracker::DirtyVisibility |
-           HdChangeTracker::DirtyPrimvar | HdChangeTracker::DirtyRenderTag;
+           HdChangeTracker::DirtyPrimvar | HdChangeTracker::DirtyMaterialId |
+           HdChangeTracker::DirtyRenderTag;
   }
 
   // Each kind of change updates only its own data (design policy §14):
@@ -333,6 +386,10 @@ public:
       state_->SetMeshColor(mesh_,
           ReadDisplayColor(GetPrimvar(delegate, HdTokens->displayColor)));
     }
+    if ((*dirty_bits & HdChangeTracker::DirtyMaterialId) != 0) {
+      SetMaterialId(delegate->GetMaterialId(id));
+      state_->SetMeshMaterial(mesh_, GetMaterialId());
+    }
     *dirty_bits &= ~HdChangeTracker::AllSceneDirtyBits;
   }
 
@@ -347,11 +404,15 @@ protected:
   }
 
 private:
+  // The core takes triangles counter-clockwise from the front, so a
+  // left-handed mesh's are reversed here.
   std::vector<std::uint32_t> Triangulate(const HdMeshTopology& topology) const {
     HdMeshUtil util(&topology, GetId());
     VtVec3iArray triangles;
     VtIntArray primitive_params;
     util.ComputeTriangleIndices(&triangles, &primitive_params);
+    const bool left_handed =
+        topology.GetOrientation() == HdTokens->leftHanded;
     std::vector<std::uint32_t> indices;
     indices.reserve(triangles.size() * 3U);
     for (const GfVec3i& triangle : triangles) {
@@ -359,8 +420,10 @@ private:
         continue;
       }
       indices.push_back(static_cast<std::uint32_t>(triangle[0]));
-      indices.push_back(static_cast<std::uint32_t>(triangle[1]));
-      indices.push_back(static_cast<std::uint32_t>(triangle[2]));
+      indices.push_back(
+          static_cast<std::uint32_t>(triangle[left_handed ? 2 : 1]));
+      indices.push_back(
+          static_cast<std::uint32_t>(triangle[left_handed ? 1 : 2]));
     }
     return indices;
   }
@@ -400,8 +463,8 @@ private:
     return points;
   }
 
-  // Constant display colour only, until meshes bind materials; anything else
-  // falls back to grey.
+  // Constant display colour only, for a mesh that draws unlit; anything
+  // else falls back to grey.
   static Toon::Float3 ReadDisplayColor(const VtValue& value) {
     if (value.IsHolding<VtVec3fArray>()) {
       const VtVec3fArray& colors = value.UncheckedGet<VtVec3fArray>();
@@ -619,11 +682,11 @@ void HdToonRenderBuffer::_Deallocate() {
 HdToonMaterial::HdToonMaterial(const SdfPath& id,
     std::shared_ptr<HdToonAdapterState> state)
     : HdMaterial(id), state_(std::move(state)),
-      material_(state_->CreateMaterial()) {
+      material_(state_->CreateMaterial(id)) {
 }
 
 HdToonMaterial::~HdToonMaterial() {
-  state_->RemoveMaterial(material_);
+  state_->RemoveMaterial(material_, GetId());
 }
 
 // The canonical values are not in the material network: a format

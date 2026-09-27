@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <toon/extraction.hpp>
+#include <toon/vulkan_backend.hpp>
 
 namespace Toon {
 
@@ -65,8 +66,7 @@ public:
 // and missing device capability report Unavailable, real failures Error.
 // Shader paths are explicit, as in RenderOffscreen.
 [[nodiscard]] std::unique_ptr<PresentSession> CreatePresentSession(
-    const PresentSurfaceProvider& surface, const std::string& vertex_shader,
-    const std::string& fragment_shader, bool vsync, PresentSetupStatus& status,
-    std::string& error);
+    const PresentSurfaceProvider& surface, const SceneShaders& shaders,
+    bool vsync, PresentSetupStatus& status, std::string& error);
 
 } // namespace Toon

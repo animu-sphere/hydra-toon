@@ -10,7 +10,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⛔ blocked · ⚠️
 
 | Document | Contents |
 | --- | --- |
-| [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1, and project infrastructure. |
+| [current.md](current.md) | Renderer Phase 0's accepted stand-ins, what must precede Renderer Phase 1's MToon path, Renderer Phase 1's items and stand-ins, and project infrastructure. |
 | [vrm-host-session.md](vrm-host-session.md) | The VRM `usdview` session as a Formation: its members, package names, and the state and plan on Windows, Linux and macOS. |
 
 ## Sequence
@@ -28,7 +28,7 @@ in.** Other documents name a phase and defer the version here.
 | Phase | Status | Target |
 | --- | --- | --- |
 | Renderer Phase 0 — Skeleton | ✅ implemented, unreleased | v0.1.0 |
-| Renderer Phase 1 — Avatar MVP | ⬜ | unscheduled |
+| Renderer Phase 1 — Avatar MVP | 🚧 | unscheduled |
 | Renderer Phase 2 — MToon completion | ⬜ | unscheduled |
 | Renderer Phase 3 — Animation fast path | ⬜ | unscheduled |
 | Renderer Phase 4 — MMD | ⬜ | unscheduled |

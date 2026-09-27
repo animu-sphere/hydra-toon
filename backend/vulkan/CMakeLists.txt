@@ -15,7 +15,8 @@ if(TOON_WITH_VULKAN)
   target_compile_definitions(toon-render-vulkan PRIVATE TOON_HAS_VULKAN=1)
 
   include(ToonShaders)
-  toon_add_shader_library(toon-renderer-shaders shaders/mesh.slang)
-  set(TOON_VERTEX_SPV "${TOON_VERTEX_SPV}" PARENT_SCOPE)
-  set(TOON_FRAGMENT_SPV "${TOON_FRAGMENT_SPV}" PARENT_SCOPE)
+  toon_add_shader_library(toon-renderer-shaders
+    shaders/mesh.slang
+    shaders/mtoon.slang)
+  set(TOON_SHADER_SPVS "${TOON_SHADER_SPVS}" PARENT_SCOPE)
 endif()

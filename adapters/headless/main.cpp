@@ -4,6 +4,8 @@
 #include <toon/vulkan_backend.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -132,6 +134,79 @@ bool WriteReport(const std::string& path,
   return true;
 }
 
+// The centre pixel of a colour product, RGBA.
+std::array<std::uint8_t, 4> CenterPixel(const Toon::ColorProduct& color) {
+  const std::size_t center =
+      (color.height / 2U) * color.row_pitch + (color.width / 2U) * 4U;
+  if (center + 3U >= color.payload.size()) {
+    return {};
+  }
+  return {color.payload[center], color.payload[center + 1U],
+      color.payload[center + 2U], color.payload[center + 3U]};
+}
+
+// mtoon_opaque (material policy §7): the bootstrap triangle bound to an
+// MToon material whose lit colour is red and shade colour blue. Facing the
+// key light it draws lit; a shading shift of -1, a value-only edit, turns it
+// to shade by rewriting one parameter slot, with no pipeline and no upload.
+Check MToonOpaqueCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_opaque";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  world.SetBootstrapTriangle();
+  const Toon::MeshId mesh = world.Commit().meshes.front().id;
+  const Toon::MaterialId material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1.0F, 0.0F, 0.0F};
+  toon.mtoon.shade_color = {0.0F, 0.0F, 1.0F};
+  world.SetMaterial(material, toon);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64, color,
+          depth, detail)) {
+    return {id, "fail", detail};
+  }
+  const std::array<std::uint8_t, 4> lit = CenterPixel(color);
+  const Toon::OffscreenStatistics first = renderer->statistics();
+
+  toon.mtoon.shading_shift = -1.0F;
+  world.SetMaterial(material, toon);
+  if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64, color,
+          depth, detail)) {
+    return {id, "fail", detail};
+  }
+  const std::array<std::uint8_t, 4> shaded = CenterPixel(color);
+  const Toon::OffscreenStatistics& second = renderer->statistics();
+
+  // Its own renderer, so its own validation capture.
+  if (second.validation_message_count != 0) {
+    return {id, "fail", second.validation_detail};
+  }
+  if (lit[0] < 200U || lit[2] > 50U) {
+    return {id, "fail", "the lit side did not draw the base colour"};
+  }
+  if (shaded[2] < 200U || shaded[0] > 100U) {
+    return {id, "fail", "a shading shift of -1 did not draw the shade colour"};
+  }
+  if (first.material_writes != 1 || second.material_writes != 2 ||
+      second.pipelines_created != first.pipelines_created ||
+      second.point_uploads != first.point_uploads ||
+      second.topology_uploads != first.topology_uploads) {
+    return {id, "fail",
+        "a value-only material edit must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 std::string Status(Toon::FrameStatus status) {
   switch (status) {
   case Toon::FrameStatus::Pass:
@@ -178,11 +253,10 @@ int main(int argc, char** argv) {
                        draws.draws.size() == 1 && draws.triangle_count == 1;
 
   const Toon::BackendCapability capability = Toon::ProbeVulkanBackend();
-  const std::filesystem::path shader_directory =
-      std::filesystem::absolute(argv[0]).parent_path() / "shaders";
-  const Toon::GpuFrameEvidence frame = Toon::RenderOffscreen(
-      draws,(shader_directory / "mesh.vert.spv").string(),
-      (shader_directory / "mesh.frag.spv").string(), 1000);
+  const Toon::SceneShaders shaders = Toon::SceneShadersIn(
+      (std::filesystem::absolute(argv[0]).parent_path() / "shaders").string());
+  const Toon::GpuFrameEvidence frame =
+      Toon::RenderOffscreen(draws, shaders, 1000);
 
   bool color_ok = false;
   bool depth_ok = false;
@@ -214,12 +288,13 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: one pipeline, one target allocation and one
-    // upload of the unchanged mesh, every later frame reusing them.
+    // 1,000 frames on one device: the two scene pipelines, one target
+    // allocation and one upload of the unchanged mesh, every later frame
+    // reusing them.
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 1 &&
+                     statistics.pipelines_created == 2 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;
@@ -252,13 +327,15 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.frame.persistence",
         persistence_ok ? "pass" : "fail",
         persistence_ok ? ""
-                       : "1,000 frames did not complete on one pipeline, "
-                         "target allocation and mesh upload"});
+                       : "1,000 frames did not complete on the scene "
+                         "pipelines, one target allocation and mesh upload"});
+    checks.push_back(MToonOpaqueCheck(shaders));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
     checks.push_back({"renderer.render_product.color", "skip", dependent});
     checks.push_back({"renderer.render_product.depth", "skip", dependent});
     checks.push_back({"renderer.frame.persistence", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
   }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",
       install_tree ? "" : "run the renderer install-tree CTest"});
