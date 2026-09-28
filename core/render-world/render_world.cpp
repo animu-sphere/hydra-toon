@@ -118,6 +118,17 @@ void RenderWorld::SetMeshUVs(MeshId mesh, std::vector<Float2> uvs) {
   }
 }
 
+void RenderWorld::SetMeshNormals(MeshId mesh, std::vector<Float3> normals) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || *record->authored_normals == normals) {
+    return;
+  }
+  record->authored_normals =
+      std::make_shared<const std::vector<Float3>>(std::move(normals));
+  record->normals_stale = true;
+  dirty_ = true;
+}
+
 void RenderWorld::SetMeshTransform(MeshId mesh, const Matrix4& transform) {
   if (MeshRecord* record = Find(mesh)) {
     record->snapshot.transform = transform;
@@ -363,12 +374,24 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   for (auto& entry : meshes_) {
     MeshRecord& record = entry.second;
     if (record.normals_stale) {
+      // Authored normals do not follow the points, so a points edit that
+      // keeps them serving re-uploads none.
       MeshSnapshot& mesh = record.snapshot;
-      mesh.normals = mesh.points->size() < mesh.index_bound
-                         ? std::make_shared<const std::vector<Float3>>()
-                         : std::make_shared<const std::vector<Float3>>(
-                               SmoothNormals(*mesh.points, *mesh.indices));
-      mesh.normals_revision = Stamp();
+      const bool authored = !record.authored_normals->empty() &&
+                            record.authored_normals->size() >= mesh.index_bound;
+      if (authored) {
+        if (mesh.normals != record.authored_normals) {
+          mesh.normals = record.authored_normals;
+          mesh.normals_revision = Stamp();
+        }
+      } else {
+        mesh.normals = mesh.points->size() < mesh.index_bound
+                           ? std::make_shared<const std::vector<Float3>>()
+                           : std::make_shared<const std::vector<Float3>>(
+                                 SmoothNormals(*mesh.points, *mesh.indices));
+        mesh.normals_revision = Stamp();
+      }
+      mesh.authored_normals = authored;
       record.normals_stale = false;
     }
     snapshot.meshes.push_back(record.snapshot);

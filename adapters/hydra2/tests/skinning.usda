@@ -1,6 +1,6 @@
 #usda 1.0
 (
-    doc = "hdToon's skinning check: a quad skinned linearly by two joints, with a blend shape, and a second quad skinned by dual quaternions."
+    doc = "hdToon's skinning check: a quad skinned linearly by two joints, with authored normals and a blend shape, and a second quad skinned by dual quaternions."
     startTimeCode = 1
     endTimeCode = 3
     upAxis = "Y"
@@ -53,6 +53,13 @@ def SkelRoot "Root" (
         int[] faceVertexCounts = [4]
         int[] faceVertexIndices = [0, 1, 2, 3]
         point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        # Authored normals that are not the quad's derived +z, as a primvar,
+        # as a VRM importer writes them. usdSkelImaging hands them over only
+        # for a mesh that is not subdivided.
+        uniform token subdivisionScheme = "none"
+        normal3f[] primvars:normals = [(0.6, 0, 0.8), (0.6, 0, 0.8), (0.6, 0, 0.8), (0.6, 0, 0.8)] (
+            interpolation = "vertex"
+        )
         int[] primvars:skel:jointIndices = [0, 0, 1, 1] (
             elementSize = 1
             interpolation = "vertex"

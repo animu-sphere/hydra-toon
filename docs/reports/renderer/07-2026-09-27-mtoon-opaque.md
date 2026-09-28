@@ -2,6 +2,8 @@
 
 > Followed by [report 08](08-2026-09-27-basic-textures.md): the base and shade colour textures, so the avatar is no longer nearly white.
 
+> Followed by [report 20](20-2026-09-28-authored-normals.md): authored normals are now read, where §4 found them not read.
+
 - Date: 2026-09-27
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.13`; the canonical runtime

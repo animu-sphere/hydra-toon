@@ -131,6 +131,21 @@ sets it for a stage of centimetres
 image; unset, they go to a temporary directory the check prints
 ([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)).
 
+usdSkelImaging hides a skinned mesh's authored normals from Hydra unless
+`USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS=1` is set before the stage is
+imaged, and `hdToon` then derives smooth normals per mesh. On an avatar
+split into several meshes, such as bangs whose tips are a separate Blend
+mesh, those differ where the meshes meet and show as a line. Set it in the
+session's environment for the authored normals; the published v0.1.0 `toon`
+package reads none, so this needs a later one:
+
+```sh
+USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS=1 ost formation run formation.toml --     usdview <avatar.usdz> --renderer Toon
+```
+
+The setting is process-wide, so Storm in the same session reads it too. The
+standalone viewport sets it itself ([renderer report 20](../reports/renderer/20-2026-09-28-authored-normals.md)).
+
 ## The standalone viewport
 
 ```sh
