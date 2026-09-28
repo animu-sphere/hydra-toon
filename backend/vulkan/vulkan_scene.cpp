@@ -113,6 +113,9 @@ struct PipelineDescription {
   // Multisampled, the fragment's alpha is the share of its samples it
   // covers, so one that returns 1 covers them all.
   bool alpha_to_coverage = false;
+  // Pushed away from the camera by a depth resolution step and the slope's
+  // worth of one, so a surface at the same depth wins the test.
+  bool depth_bias = false;
 };
 
 // Every scene pipeline shares the set layouts, material then skin, so a
@@ -193,6 +196,13 @@ bool CreateScenePipeline(VkDevice device,
   // screen under OpenGL's convention stays counter-clockwise here.
   raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   raster.lineWidth = 1.0F;
+  // Depth grows away from the camera, so a positive bias pushes back. No
+  // clamp, which would need the depthBiasClamp feature.
+  if (description.depth_bias) {
+    raster.depthBiasEnable = VK_TRUE;
+    raster.depthBiasConstantFactor = 1.0F;
+    raster.depthBiasSlopeFactor = 1.0F;
+  }
   VkPipelineMultisampleStateCreateInfo multisample{
       VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
   multisample.rasterizationSamples = pipelines.samples;
@@ -525,6 +535,11 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   outline.vertex_words = &words.mtoon_outline_vertex;
   outline.fragment_words = &words.mtoon_outline_fragment;
   outline.blend = true;
+  // A hull thinner than the depth buffer resolves at the camera's distance
+  // lands on its surface's depth; where the two overlap, the hull's visible
+  // faces are meant to lie behind it. The bias makes the surface win that tie
+  // whichever draws first, instead of the outline colour showing across it.
+  outline.depth_bias = true;
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&

@@ -344,7 +344,8 @@ Toon::MeshId AddOctahedron(Toon::RenderWorld& world) {
 // reach that pixel. With the mode None, a value-only edit, that pixel is
 // background; as screen coordinates, 0.1 of the screen height is the same
 // 0.2 under this camera whatever the unit; a width texture whose G is 0,
-// sampled in the vertex stage, takes the outline away again.
+// sampled in the vertex stage, takes the outline away again. Last, a hull
+// at its surface's depth must lose to the surface.
 Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
   const std::string id = "renderer.material.mtoon_outline";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
@@ -426,10 +427,34 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
     return {id, "fail", detail};
   }
 
+  // A hull thinner than the depth buffer resolves. A double-sided quad at
+  // z = 0.25, wound to face away from the camera, shows its back face, and
+  // its hull's visible faces lie behind it, 1 pm away: a move its
+  // coordinates round away, so hull and surface land at one depth. The hull
+  // draws first, and the surface must still win over it.
+  world.SetMeshVisible(mesh, false);
+  const Toon::MeshId quad = world.CreateMesh();
+  world.SetMeshPoints(quad, {{-0.3F, -0.3F, 0.25F}, {-0.3F, 0.3F, 0.25F},
+                                {0.3F, 0.3F, 0.25F}, {0.3F, -0.3F, 0.25F}});
+  world.SetMeshTopology(quad, {0, 1, 2, 0, 2, 3});
+  world.SetMeshUVs(quad, std::vector<Toon::Float2>(4));
+  const Toon::MaterialId thin_material = world.CreateMaterial();
+  Toon::ToonMaterial thin = toon;
+  thin.double_sided = true;
+  thin.outline_width = 1e-12F;
+  thin.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  thin.mtoon.outline_width_texture = {};
+  world.SetMaterial(thin_material, thin);
+  world.SetMeshMaterial(quad, thin_material);
+  Shot coincident;
+  if (!render(coincident)) {
+    return {id, "fail", detail};
+  }
+
   const Toon::OffscreenStatistics& first = world_width.statistics;
   const Toon::OffscreenStatistics& last = textured.statistics;
-  if (last.validation_message_count != 0) {
-    return {id, "fail", last.validation_detail};
+  if (coincident.statistics.validation_message_count != 0) {
+    return {id, "fail", coincident.statistics.validation_detail};
   }
   const auto is_outline = [](const std::array<std::uint8_t, 4>& pixel) {
     return pixel[1] > 200U && pixel[0] < 50U && pixel[2] < 50U;
@@ -454,6 +479,10 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
   if (textured.rim[1] > 80U) {
     return {id, "fail",
         "a width texture whose G is 0 must take the outline away"};
+  }
+  if (coincident.center[1] > 50U || coincident.center[0] < 150U) {
+    return {id, "fail",
+        "a hull at its surface's depth must lose the depth test to it"};
   }
   if (first.material_writes != 1 ||
       metres.statistics.material_writes != 1 ||
