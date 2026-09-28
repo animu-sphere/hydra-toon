@@ -109,7 +109,8 @@ canonical: X.md        # superseded only: the replacement, relative
   ("`usd-vrm-plugins` Product P5").
 - Section numbers in design documents are stable, so they can be cited.
   [DESIGN_POLICY.md](../design/DESIGN_POLICY.md) keeps the implementation
-  policy's §1–§29 numbering.
+  policy's §1–§29 numbering; §30 onward are this repository's own, and a new
+  section is appended, never inserted.
 
 ## Language and form
 

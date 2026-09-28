@@ -53,6 +53,16 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Documentation: the 2026-09-28 direction. The dedicated viewport becomes
+  the renderer's main evaluation host (design policy §31) and leads
+  v0.2.0, now "MToon quality and the viewport foundation"; Linux and
+  multi-vendor Vulkan leave v0.2.0 and the release gate for a later
+  platform-coverage piece of work; the work order has thirteen steps, ending
+  with platform coverage. The design policy adds scene lighting (§32) and
+  the checks a new feature passes (§33), keeps MSAA as the anti-aliasing
+  baseline with FXAA or TAA only after an evaluation asks for them, keeps the
+  fixed texture table until it runs out, and treats Hydra AOV readback as
+  acceptable for integration but not as a premise.
 - Four scene pipelines where there were three. Depth writes are dynamic
   state in every MToon pipeline, and `mtoon_outline` blends, returning 1
   for an opaque material, so one hull pipeline serves both.

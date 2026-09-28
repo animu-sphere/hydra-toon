@@ -22,7 +22,7 @@ Configurations each row was measured on are
 | Offscreen colour (RGBA8) and depth (D32) render products at any extent, read back | ✅ | `Toon::OffscreenRenderer`; `renderer.render_product.color`, `.depth` at 64×64, the Hydra AOV's extent in `testusdview`; multisampled, the resolved colour and sample 0's depth |
 | Persistent device, pipelines and render targets | ✅ | the four scene pipelines created once for the renderer's life, targets reallocated only on a resize; `renderer.frame.persistence` requires 1,000 frames on those pipelines, one target allocation and one mesh upload |
 | One frame in flight on a timeline semaphore, Synchronization2 barriers, dynamic rendering | ✅ | offscreen and swapchain paths; `vkDeviceWaitIdle` only at swapchain recreation and teardown |
-| Swapchain presentation, one frame in flight | ✅ | `toon-viewport`, drawing the bootstrap triangle scene through the mesh pipeline, resolved into the swapchain image; `--samples N` |
+| Swapchain presentation, one frame in flight | ✅ | `toon-viewport`, drawing the bootstrap triangle scene through the mesh pipeline, resolved into the swapchain image; a resize recreates the swapchain; `--vsync on` presents FIFO, `--vsync off` immediate, else mailbox, else FIFO; `--samples N`, fixed at launch |
 | Slang shaders compiled to SPIR-V | ✅ | `backend/vulkan/shaders/mesh.slang`: unlit, one colour per draw; `mtoon.slang`: `mtoon_opaque`; `mtoon_transparent.slang`: `mtoon_transparent`; `mtoon_outline.slang`: `mtoon_outline`; the MToon three share `mtoon_common.slang`, and all four include `skinning.slang` |
 | Mesh rendering from scene data | ✅ | `RenderWorld` meshes (triangulated indices, points, UVs, transform, colour, visibility, material, skin and pose) → `DrawList` → indexed draws; CTest `toon-render-world` |
 | Smooth vertex normals | ✅ | derived from points and topology at commit, only when either changes, as Storm derives them for a mesh that authors none; authored normals are not read. A skinned mesh's are its rest pose's, skinned with its points. CTest `toon-render-world` |
@@ -78,5 +78,5 @@ Configurations each row was measured on are
 | Host | Status | How |
 | --- | --- | --- |
 | Headless runner (`toon-headless`) | ✅ | runs during `ost build`; writes `renderer-report.json` |
-| Standalone viewport (`toon-viewport`) | 🧪 | `ost renderer viewport`; shows the bootstrap triangle scene only |
+| Standalone viewport (`toon-viewport`) | 🧪 | `ost renderer viewport`; shows the bootstrap triangle scene only, with no camera control, and its frame count and device in the window title; `--hidden --frames N` is its presentation test |
 | `usdview` | ✅ | `testusdview` in CTest; in an `ost formation run` session with `vrmImaging`, VRM materials select MToon, with the host's Python supplied to the run ([renderer report 06](../reports/renderer/06-2026-09-27-vrm-formation.md)); `formations/vrm-host-session/` composes the published packages and its command checks it ([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)); `ost renderer view` has not been run |

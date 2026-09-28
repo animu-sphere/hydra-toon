@@ -26,11 +26,14 @@ fix, or a serious regression.
 
 Before a `v0.x.0` is tagged, the validation its milestone needs has passed:
 
-- **Build** on Windows and Linux, with plain CMake and with OpenStrata. Linux
-  joins the gate with v0.2.0.
+- **Build** on Windows, with plain CMake and with OpenStrata. Linux joins
+  the gate with
+  [platform and GPU coverage](../roadmap/later.md#platform-and-gpu-coverage),
+  not before
+  ([design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)).
 - **Tests** of what the tree implements: the core, render extraction, the
-  backend, materials, skinning, morphs, the Hydra adapter, the install tree
-  and a host smoke test.
+  backend, materials, skinning, morphs, the Hydra adapter, the install tree,
+  a host smoke test and the viewport's presentation test.
 - **GPU evidence.** CI without a GPU never completes a renderer release. On
   at least one real GPU, Vulkan validation, a representative scene and a
   representative avatar, with frame evidence and performance evidence, each

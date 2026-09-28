@@ -58,9 +58,9 @@ Each subject is linked to its owner and never restated here
 | Per-frame composition of the avatar stack, and when rendering happens in it | `usd-avatar-runtime` | its own documentation |
 | Build, runtime adoption, renderer evidence and validation | `open-strata` (`ost`) | [adopting a renderer project](https://github.com/animu-sphere/open-strata/blob/main/docs/guides/adopt-a-renderer-project.md) |
 
-`hydra-merlin` is a reference for technique — Vulkan setup, the OpenStrata
-adoption path, Hydra adapter handling across OpenUSD versions — and is not a
-dependency ([DESIGN_POLICY.md](DESIGN_POLICY.md) §3).
+`hydra-merlin` is a reference for technique and is not a dependency; what it
+is a reference for, and what is designed separately here, is
+[DESIGN_POLICY.md](DESIGN_POLICY.md) §3.
 
 ## 4. Dependency rules
 

@@ -1,20 +1,23 @@
 # After v0.3.0
 
-The milestones after the avatar path, in less detail than the next two. Each
-gets its own page when it becomes next.
+The milestones after the avatar path, and platform coverage, in less detail
+than the next two. Each gets its own page when it becomes next.
 
 ## v0.4.0 — MMD realization
 
 MMD's material and toon look as a first-class capability, drawn from the
 canonical USD stage `usd-mmd-plugins` authors. Parsing PMX, PMD, VMD and VPD,
 and MMD's semantics, stay there
-([integration scope](../design/INTEGRATION_SCOPE_POLICY.md)).
+([integration scope](../design/INTEGRATION_SCOPE_POLICY.md)). It is built on
+the material, morph and animation infrastructure v0.2.0 and v0.3.0 establish
+for MToon, not on an MMD-specific architecture.
 
 - **Before it starts:** MAT-Q1 agreed with `usd-mmd-plugins`, and MAT-Q2 and
   MAT-Q3 decided
   ([material policy §9](../design/MATERIAL_POLICY.md#9-open-questions)).
-- **Materials:** diffuse, ambient, specular, the toon texture, the sphere
-  map, the edge, alpha, double-sidedness and MMD's material flags, in
+- **Materials:** MMD material normalization; diffuse, ambient, specular, the
+  toon texture, the sphere texture, the edge and its outline semantics,
+  alpha and MMD transparency, double-sidedness and MMD's material flags, in
   `mmd_opaque`, `mmd_transparent` and `mmd_outline`, sharing only what
   [material policy §7](../design/MATERIAL_POLICY.md#7-pipelines-and-parameter-buffers)
   says is common.
@@ -28,12 +31,15 @@ quality from the canonical USD stage.
 
 Enough interoperability that an ordinary USD asset does not draw broken just
 because it is not a toon material, while the renderer stays a toon renderer
+and generic coverage never outranks it
 ([design policy §26](../design/DESIGN_POLICY.md#26-non-goals)); general
 rendering is `hydra-merlin`'s.
 
 - Base colour, roughness, metallic, normal, emissive, opacity, their textures
-  and basic texture transforms, in `preview_surface`.
-- Face-varying `st` and the other mesh data ordinary assets author.
+  and basic texture transforms, in `preview_surface`: a basic PBR fallback.
+- Generic textured meshes: face-varying `st` and the other mesh data
+  ordinary assets author.
+- A fallback for materials the renderer does not support.
 
 ## v0.6.0 — WebGPU
 
@@ -44,12 +50,36 @@ The architecture proven on Vulkan, realized a second time
 RenderWorld → draw list → Vulkan | WebGPU
 ```
 
+Shared with Vulkan: the render world, render extraction, the material model,
+shader semantics and the animation fast path. Not shared: resource
+implementation, synchronization, presentation and backend-specific bindings.
 Device and queue, buffers, textures, bind groups, pipelines, render passes,
 MToon, skinning, morphs, outline and presentation, in `backend/webgpu/`
 ([PROJECT_LAYOUT.md §3](../architecture/PROJECT_LAYOUT.md#3-where-new-code-goes)).
 
 **Done when** Vulkan and WebGPU draw the same basic scene from the same
 canonical scene and extraction path.
+
+## Platform and GPU coverage
+
+Vulkan portability beyond Windows and the main development GPU, as its own
+piece of work, taken up once the renderer core, the viewport and the fast
+path are settled
+([design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases));
+until then it is no release gate. Linux x86_64, with NVIDIA, AMD and Intel
+Vulkan, and what differs between them: vendor quirks, validation layer
+differences and shader compiler differences. On Linux x86_64:
+
+- the `hydra` intent built, tested and validated against the Linux leaf of
+  the canonical `lookdev` runtime;
+- the release workflow building and publishing the Linux package beside the
+  Windows one;
+- the VRM host session run as a Formation of the Linux runtime, `vrmImaging`'s
+  Linux package from `usd-vrm-plugins`' release pins, and the published
+  Linux `toon` package.
+
+Each measured configuration is a [report](../reports/) and a row of
+[supported configurations](../reference/SUPPORTED_CONFIGURATIONS.md).
 
 ## After v0.6.0
 

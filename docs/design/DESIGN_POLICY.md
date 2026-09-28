@@ -10,8 +10,10 @@ owner: hydra-toon
 > what is implemented is
 > [reference/CAPABILITY_MATRIX.md](../reference/CAPABILITY_MATRIX.md). It is
 > distilled from the 2026-09-26 implementation policy, whose section numbers it
-> keeps so either can be cited by number. Where this repository departs from
-> that policy, §30 records it.
+> keeps so either can be cited by number, and revised by the 2026-09-28
+> direction, which brought the dedicated viewport forward and put platform
+> coverage after the renderer. Where this repository departs from the
+> implementation policy, §30 records it; §31 onward are this repository's own.
 > Two focused documents own the detail of one area each, and **on its own area
 > the focused document wins**:
 >
@@ -39,7 +41,14 @@ toon shader". Its primary uses are:
 - vendor-neutral real-time rendering on Vulkan and WebGPU.
 
 The most important measure is not maximum FPS. It is **end-to-end latency from
-input to display, and the stability of frame time**.
+input to display, and the stability of frame time**. What the renderer weighs,
+in order:
+
+1. the VRM and MMD looks, reproduced faithfully and stably;
+2. low latency from a pose, expression, look-at or camera change to the
+   screen;
+3. stable frame time and presentation;
+4. a renderer core that does not lean on Hydra.
 
 ## 2. Core concept
 
@@ -62,15 +71,19 @@ motion state.**
 
 ```text
                  slow path
-USD / Hydra ─────────────────→ Scene / Geometry / Material
+USD / Hydra ─────────────────→ Scene / Geometry / Material / Texture /
+                               Topology / Skeleton definition
 
                  fast path
-MotionPose ──────────────────→ Skeleton / Morph
+MotionPose, expression, look-at,
+camera, small material values ─→ Skeleton / Morph / Parameters
                                     │
                                     │ late latch
                                     ▼
                                 GPU submit
 ```
+
+This separation is never given up for a feature.
 
 ## 3. Relationship with hydra-merlin
 
@@ -81,19 +94,24 @@ are not forced into a shared core.
 | --- | --- | --- |
 | Purpose | general USD rasterization; MaterialX / PreviewSurface / OpenPBR; ordinary USD scenes | avatar-first; MToon / MMD look; high-frequency animation; low motion-to-photon latency; VTuber and real-time characters |
 
-Sharing, if any, stays at the level of: CMake utilities, OpenUSD discovery,
-Slang build utilities, small common helpers, CI and packaging infrastructure.
-The renderer core and the GPU execution architecture are independent.
-`hydra-merlin` is a reference for implementation technique, not a dependency.
+`hydra-merlin` is a reference for implementation technique, not a
+dependency: Vulkan device and resource management, the Slang build, CMake
+utilities, CI and packaging, Hydra integration across OpenUSD versions, GPU
+profiling, presentation, and Hgi / Vulkan interop. Designed separately here:
+the renderer core, the material system, the animation fast path, draw
+scheduling, the latency architecture, the toon outline, and everything
+avatar-specific. What is shared is a small utility, and only once both need
+it; the renderer core and the GPU execution architecture are never shared.
 
 ## 4. Backends
 
 Initial scope is exactly two backends:
 
 1. **Vulkan** — the reference backend. It is finished first and is the
-   baseline for the low-latency design: explicit synchronization, timeline
-   semaphores and Synchronization2 are assumed, and native Vulkan performance
-   comes first.
+   baseline for the low-latency design: Vulkan 1.3 with dynamic rendering,
+   Synchronization2 and timeline semaphores, explicit resource lifetime,
+   explicit staging and upload, and explicit control of presentation. Native
+   Vulkan performance comes first.
 2. **WebGPU** — not treated as a full abstraction of Vulkan. The renderer
    architecture and shader logic are shared; each backend has its own
    implementation. The Vulkan backend is never limited to what WebGPU can do.
@@ -102,6 +120,11 @@ WebGPU is not a copy of the Vulkan implementation but another realization of
 the same renderer model, and backend-specific needs never flow back into the
 render world or the Hydra adapter. Metal is out of scope until a need for it is
 clear, and is re-evaluated then. OpenGL is not pursued as a new backend.
+
+Linux, and Vulkan validation across vendors (AMD and Intel as well as
+NVIDIA), matter, but they come after the renderer: its architecture and
+quality are settled on Windows and the main development GPU first, and
+platform coverage is then taken up as one piece of work (§25).
 
 Where the backends live in this repository is
 [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md); the implementation
@@ -147,6 +170,13 @@ is avoided. The shape is `Hydra → hydra-toon renderer core → native Vulkan |
 WebGPU`, and backend-specific code is allowed wherever explicit low-level GPU
 control is needed.
 
+Reading the Hydra AOVs back into CPU `HdRenderBuffer`s is acceptable for
+integration correctness, but it is not a premise of the architecture. The
+candidates to replace it are Hgi interop, a Vulkan image handoff, a shared
+GPU texture, and the renderer-native presentation path. Latency is judged on
+the renderer-native path, in the dedicated viewport (§31), not through a
+Hydra host.
+
 ## 7. Renderer core
 
 Between Hydra classes and GPU-API classes the core keeps a small, explicit
@@ -154,7 +184,7 @@ internal data model. Candidates:
 
 ```cpp
 ToonRenderer  ToonScene  ToonView  ToonMesh  ToonMaterial
-ToonSkeleton  ToonTexture  DrawPacket  RenderGraph
+ToonSkeleton  ToonTexture  ToonLight  DrawPacket  RenderGraph
 ```
 
 The core's public headers carry no OpenUSD, Hydra, Vulkan or WebGPU type; the
@@ -208,6 +238,11 @@ order: it draws after its own surface
 ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §6). Later the mode may become selectable
 (`None | InvertedHull | ScreenSpace`), but only after the inverted hull's width
 stability, aliasing and cost are finished; a second method does not come first.
+Finishing it means: a stable width in world and screen units; no aliasing of
+thin outlines and no flicker under animation; no depth conflict with the
+surface it outlines; the width texture sampled correctly; no hull drawn that
+cannot be seen; and its draw and GPU cost measured. Anti-aliasing is part of
+outline quality (§16), and both are judged in the dedicated viewport (§31).
 The MToon outline *semantics* (`outlineWidthMode` and friends) are
 the avatar's request, not a rendering instruction
 ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §5).
@@ -231,17 +266,21 @@ Skinning starts in a vertex or compute shader.
 
 ## 12. Late motion latching
 
-The latest `MotionPose` is written to GPU resources **after** the ordinary
-Hydra scene sync, immediately before submit:
+The latest `MotionPose`, expression, look-at and camera are written to GPU
+resources **after** the ordinary Hydra scene sync, immediately before submit:
 
 ```text
-Hydra scene sync (geometry, material, camera)
+Hydra scene sync → render world snapshot → draw list extraction
         │
-latest MotionPose → late motion latch → joint / morph buffers → GPU submit
+latest MotionPose, expression, look-at, camera
+        → late motion latch → joint / morph / camera buffers → GPU submit
 ```
 
 This shortens `tracking → motion processing → pose → GPU → display`, which
-matters most for MediaPipe, mocap, controller and XR input.
+matters most for MediaPipe, mocap, controller and XR input. The boundary the
+latest pose crosses is shaped so `usd-motion-plugins`' `MotionPose` can feed
+it directly (§13). The end goal is to trace one motion sample from when it
+was produced to when it reached the display (§24).
 
 ## 13. USD state and real-time state are separate
 
@@ -307,20 +346,21 @@ per-frame choice. One sample turns anti-aliasing off.
 
 What aliases most in a toon renderer is geometric — silhouettes, the
 inverted hull's edge, hair strands and eyelashes, facial features — and
-MSAA resolves exactly that, with no history:
+MSAA resolves exactly that, with no history. MSAA is therefore the baseline:
+it is evaluated first, in the dedicated viewport (§31), and another method
+is considered only after that evaluation shows aliasing MSAA leaves, and
+only as an addition to it, knowing what it costs:
 
-- **Not TAA.** It resolves shading as well, but ghosts under exactly what
-  an avatar does: fast motion, pose changes, hair and facial motion, and an
-  outline that moves with them. It needs motion vectors for skinned and
-  morphed geometry, so the previous frame's joints and weights, and its
-  jitter and history are at odds with late motion latching (§12), which
-  wants what is on screen to be the latest sample, not a blend with the last
-  frames. It can come back only as an addition, after a measurement shows
-  shading aliasing MSAA leaves.
-- **Not FXAA or SMAA.** A post-process filter sees only the resolved image:
-  it cannot recover a hull or a strand thinner than a pixel, which MSAA
-  covers by its samples, and it softens the texture line art a toon
-  material is drawn with.
+- **TAA** resolves shading as well, but ghosts under exactly what an avatar
+  does: fast motion, pose changes, hair and facial motion, and an outline
+  that moves with them. It needs motion vectors for skinned and morphed
+  geometry, so the previous frame's joints and weights, and its jitter and
+  history are at odds with late motion latching (§12), which wants what is
+  on screen to be the latest sample, not a blend with the last frames.
+- **FXAA or SMAA** is cheap, but a post-process filter sees only the
+  resolved image: it cannot recover a hull or a strand thinner than a pixel,
+  which MSAA covers by its samples, and it softens the texture line art a
+  toon material is drawn with.
 
 ## 17. Vulkan frame architecture
 
@@ -351,14 +391,16 @@ and the GPU does not wait for the CPU, without need.
 
 ## 20. Asset upload
 
-Texture and geometry upload are off the render thread:
+Geometry, texture and morph-target upload are off the render thread:
 
 ```text
 I/O thread → decode / transcode → staging → transfer queue → device-local resource
 ```
 
 The graphics queue stays on rendering. An asset that has not loaded draws with
-a placeholder, and the reference switches when it arrives.
+a placeholder, and the reference switches when it arrives. The asset loading
+path and the playback fast path are kept apart, so loading an asset never
+stalls an avatar that is playing.
 
 ## 21. Memory allocation
 
@@ -375,6 +417,11 @@ some hundreds of thousands of polygons and tens to hundreds of materials, for
 which CPU-side persistent draw packets should be enough. GPU-driven techniques
 come after a measurement shows the need.
 
+Textures are bound through a fixed texture table, and it is not made bindless
+early: while MToon and VRM fit in it, it stays. Descriptor indexing, a
+bindless texture table and how the backends abstract it are re-evaluated when
+MMD, PreviewSurface or a larger scene runs into the table's limits.
+
 ## 23. Performance KPIs
 
 Maximum FPS is not the measure. In order of priority:
@@ -386,10 +433,13 @@ Maximum FPS is not the measure. In order of priority:
 5. GPU frame cost;
 6. peak throughput.
 
-- **Renderer latency:** pose → GPU submit, CPU render-thread time, GPU frame
-  time, present latency.
-- **Frame consistency:** p50 / p95 / p99 frame time, hitch count, shader
-  compilation stalls, upload stalls.
+- **Renderer latency:** pose update → GPU buffer write → submit → present;
+  expression update → submit; camera update → present; CPU render-thread
+  time, GPU frame time.
+- **Frame consistency:** p50 / p95 / p99 frame time and its variance, hitch
+  count, shader compilation stalls, upload stalls.
+- **Update cost:** joint-buffer writes, morph updates, material parameter
+  updates.
 
 Initial targets, revised through benchmarks rather than fixed:
 
@@ -409,7 +459,8 @@ The renderer carries its own telemetry so regressions are caught early. At
 least: Hydra sync, scene update, pose update, draw preparation, CPU submit,
 GPU pass time, present interval. GPU markers: skinning, shadow, opaque,
 outline, transparent, composite. JSON, Chrome Trace or Tracy export may
-follow.
+follow. The dedicated viewport (§31) is where telemetry is shown and checked
+first.
 
 ## 25. Implementation phases
 
@@ -427,6 +478,16 @@ changed. What each milestone contains, and the order, is the
   diagnostics — before it is carried to WebGPU (§4).
 - **Measure before complexity.** GPU-driven and other advanced techniques
   wait for a benchmark that asks for them (§22).
+- **See it before tuning it.** The dedicated viewport (§31) comes before the
+  work it is used to judge: what cannot be seen, measured and compared is not
+  tuned. It is built early, and grows with each milestone.
+- **Platforms after the renderer.** Architecture and quality are settled on
+  Windows and the main development GPU. Linux and multi-vendor Vulkan
+  validation come after the renderer core, the viewport and the fast path
+  are settled, as their own piece of work, and are no release gate before
+  then (§4).
+
+In short: v0.2.0 finishes how an avatar looks, and v0.3.0 how it moves.
 
 Until v0.1.0 the sequence was **Renderer Phase 0–7**. It is retired; reports
 and the v0.1.0 record that name a phase map onto milestones as follows:
@@ -434,7 +495,7 @@ and the v0.1.0 record that name a phase map onto milestones as follows:
 | Renderer Phase | Milestone |
 | --- | --- |
 | 0 Skeleton, 1 Avatar MVP | v0.1.0 |
-| 2 MToon completion | v0.2.0, MToon quality |
+| 2 MToon completion | v0.2.0, MToon quality and the viewport foundation |
 | 3 Animation fast path | v0.3.0, avatar animation fast path |
 | 4 MMD | v0.4.0, MMD realization |
 | 5 UsdPreviewSurface | v0.5.0, generic USD fallback |
@@ -444,11 +505,15 @@ and the v0.1.0 record that name a phase map onto milestones as follows:
 ## 26. Non-goals
 
 Initially not goals: a general-purpose AAA renderer; a full deferred renderer;
-ray tracing; path tracing; large worlds; a geometry-shader architecture; full
-MaterialX, production PBR or arbitrary material graphs (`UsdPreviewSurface` is
-a fallback, not a lookdev path); a Metal backend; a large render-graph framework; every Hydra
-feature. The value is **responsiveness for avatar rendering**, not feature
-count.
+ray tracing; path tracing; large worlds; a geometry-shader or mesh-shader
+dependency; full MaterialX, production PBR or arbitrary material graphs
+(`UsdPreviewSurface` is a fallback, not a lookdev path); a Metal or OpenGL
+backend; clustered lighting or a production shadow system (§32); a
+screen-space outline before the inverted hull is finished (§10); tuning for
+large generic USD scenes; a renderer core shared with `hydra-merlin` (§3); a
+bindless redesign before the fixed texture table runs out (§22); a large
+render-graph framework; every Hydra feature. The value is **responsiveness
+for avatar rendering**, not feature count.
 
 ## 27. Design principles
 
@@ -485,13 +550,15 @@ When a decision is unclear, prefer in this order:
                          DrawPackets
 Motion connector             │
       → MotionStream         │
-      → MotionPose ── late latch ──┤
+      → MotionPose           │
+  expression, look-at,       │
+  camera ───── late latch ───┤
                              ▼
                     GPU resource update
                      ┌───────┴───────┐
                    Vulkan          WebGPU
                      └───────┬───────┘
-                          Display
+                 low-latency presentation
 ```
 
 ## 29. Conclusion
@@ -501,7 +568,11 @@ It is **a low-latency, highly responsive Hydra renderer for real-time digital
 characters**, built on: Vulkan-first, avatar-first, animation-first, late
 motion latching, persistent draw packets, strict dirty propagation, minimal
 synchronization, and separation of USD structural state from real-time motion
-state. That gives it a role distinct from a general renderer as the drawing
+state. It draws MToon faithfully and MMD's look naturally, skins and morphs on
+the GPU as a matter of course, keeps expression, look-at and motion updates
+light, measures its own input-to-display latency, and is judged on its own
+native path in a dedicated viewport, with Hydra confined to scene integration.
+That gives it a role distinct from a general renderer as the drawing
 foundation for `usd-vrm-plugins`, `usd-mmd-plugins`, `usd-motion-plugins`,
 `motion-connectors`, `usd-avatar-runtime` and Mimikuri.
 
@@ -515,3 +586,90 @@ Both departures are binding.
 | --- | --- | --- |
 | §4, §7 — `src/{hd,renderer,material,backend,shaders}` and `renderer/` + `backend/` | The OpenStrata renderer layout: `core/`, `backend/`, `adapters/`, `include/toon/`, `validation/` ([PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §2–3) | The scaffold's layout is what `ost build`, `ost validate` and the renderer evidence contract are wired to, and its core-boundary check enforces §7 mechanically. The policy's directories were an example; its separation (core / backend / Hydra adapter / material / shaders) is kept one-to-one. |
 | §5 — "the `HdRenderDelegate` adapter" | The adapter lives at `adapters/hydra2/` and is named `hydra2` in `openstrata.renderer.yaml` | That is OpenStrata's name for the Hydra scene-input slot. The code is a classic `HdRenderDelegate` + `HdRendererPlugin`, which is what §5 asks for; the directory name claims nothing about the Hydra 2.0 renderer interface. |
+
+## 31. Evaluation hosts
+
+The dedicated viewport, `toon-viewport`, is not an auxiliary tool: it is the
+main place the renderer is judged. It owns the frame loop and presents
+natively: no Hydra host's readback or scheduling sits between the renderer
+and the display.
+
+```text
+bootstrap scene (core build) ──────────────┐
+USD stage → Hydra, in process (--usd) ─────┴→ RenderWorld → RenderExtraction
+                                                  → Vulkan → GLFW / swapchain
+```
+
+The default build stays OpenUSD-free and draws a built-in scene. A USD
+scene — a VRM avatar among them — reaches the viewport as `hydra-merlin`'s
+viewport receives one: a build intent that enables both the Hydra adapter
+and the viewport, launched by `ost renderer viewport --intent <intent>
+--profile <runtime> -- --usd <stage>`. In that build the viewport links the
+adapter's runtime library (`toon-hydra2-runtime`), creates the render index
+with the render delegate itself, and runs Hydra's task in its own frame loop,
+so the scene arrives through the same adapter `usdview` exercises. The
+rendered image goes from the offscreen colour target to the swapchain by a
+GPU copy; a normal frame reads nothing back to the CPU, and only a
+screenshot, a reference check or picking asks for a readback. The change
+that builds it amends [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md)
+§4, whose rule keeps OpenUSD under `adapters/hydra2/`: the viewport's Hydra
+source joins it, in that build only.
+
+The two hosts divide the work:
+
+| Host | Judges |
+| --- | --- |
+| `usdview` | Hydra and USD integration correctness |
+| `toon-viewport` | image quality, anti-aliasing, outline, motion, frame pacing, presentation and latency |
+
+MToon fidelity, the outline, anti-aliasing, frame pacing and animation
+latency are all easier to judge without a Hydra host's readback and
+scheduling in the way, so the viewport is built early and grows with the
+renderer. First: presentation control (resize, swapchain recreation, vsync),
+an orbit / pan / zoom camera with framing, the MSAA sample count, frame time,
+CPU and GPU timing and renderer statistics, material and light debug
+controls, image capture, and an automated presentation test. Then: animation
+playback, expression and morph debug, skeleton display, outline debug modes,
+wireframe and normal display, and latency telemetry. Which milestone takes
+what is the [roadmap](../roadmap/README.md).
+
+### 31.1 Open questions
+
+| Id | Question | Proposed answer | Resolve by |
+| --- | --- | --- | --- |
+| DP-Q1 | How the Hydra-fed viewport is populated so a VRM avatar selects MToon. `hdToon` reads the `vrm` container from the terminal scene index ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §2), which `vrmImaging`'s adapter contributes to the stage scene index; a render index populated by a classic `UsdImagingDelegate`, as `hydra-merlin`'s viewport populates it, may not carry it | Populate the render index through UsdImaging's scene index chain, as `usdview`'s engine does, with `vrmImaging` supplied to the run as a Formation supplies it; measure with the probe stage that 20 of 20 draws select MToon, as a report | v0.2.0 |
+
+## 32. Scene lighting
+
+A light fixed to the camera is a stand-in, not the design. Scene lights come
+from Hydra:
+
+```text
+HdLight / scene index → ToonLight → light buffer → MToon
+```
+
+First come directional lights, basic point and spot lights, the ambient
+contribution, and MToon's lighting semantics over them. Clustered lighting
+and a production shadow system are not the goal (§26). The viewport carries
+basic light controls, so a lighting change can be compared quickly.
+
+## 33. Checks for a new feature
+
+Before a feature is added, it is checked against these questions:
+
+1. Does it improve how an avatar looks? Then it is high priority.
+2. Does it shorten motion-to-photon latency? Then it is high priority.
+3. Does it steady frame time? Then it is high priority.
+4. Does it make something easier to measure or compare in the viewport
+   (§31)? Then, for now, it is high priority.
+5. Does it break the separation of the slow and fast paths (§2)? Then it is
+   redesigned.
+6. Does it bring a Hydra or Vulkan type into the core (§7)? Then that part
+   goes back to the adapter or the backend.
+7. Does it force code sharing with `hydra-merlin` (§3)? The renderer core is
+   not shared.
+8. Does it add breadth beyond the current milestone? Then, as a rule, it
+   waits.
+9. Does it widen platform coverage early? Until the architecture and quality
+   are settled on Windows, Linux and multi-vendor coverage are no release
+   gate (§25).

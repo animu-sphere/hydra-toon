@@ -35,7 +35,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
 | `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline, Slang shaders |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
-| `adapters/viewport/` | `toon-viewport` | — | standalone GLFW window; optional (`TOON_ENABLE_VIEWPORT`) |
+| `adapters/viewport/` | `toon-viewport` | — | standalone GLFW window, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
@@ -55,7 +55,7 @@ placement rule; it does not say the component exists.
 
 | Design policy component | Directory | Target |
 | --- | --- | --- |
-| `ToonScene`, `ToonMesh`, `ToonSkeleton`, `ToonTexture`, `ToonView` | `core/render-world/` | `toon-render-world` |
+| `ToonScene`, `ToonMesh`, `ToonSkeleton`, `ToonTexture`, `ToonView`, `ToonLight` | `core/render-world/` | `toon-render-world` |
 | `ToonMaterial` and model normalization (§8) | `core/render-world/` until it needs its own target, then `core/material/` | — |
 | `DrawPacket`, extraction, dirty routing (§14–§15) | `core/render-extraction/` | `toon-render-extraction` |
 | `RenderGraph` (§16) | `core/render-graph/` when it exists | new core target |
@@ -64,6 +64,7 @@ placement rule; it does not say the component exists.
 | WebGPU backend | `backend/webgpu/` | new backend target |
 | Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
+| Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/` | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
 
 ## 4. Dependency directions
