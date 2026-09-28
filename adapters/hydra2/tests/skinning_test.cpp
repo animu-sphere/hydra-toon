@@ -3,13 +3,16 @@
 // hdToon's skinned meshes, through UsdImaging and usdSkelImaging as a host
 // drives them (design policy §11). skinning.usda's linear quad becomes a
 // skin and a pose; moving to a time where only the pose changes sets the
-// pose alone, and a blend shape weight change sets the points. Its dual
-// quaternion quad runs usdSkelImaging's CPU kernel instead. No GPU is used:
-// the check reads the scene the next frame would draw.
+// pose alone, and a blend shape weight change sets the points. The linear
+// quad's authored normals arrive as its normals computation's rest normals,
+// which the pose does not touch. Its dual quaternion quad runs
+// usdSkelImaging's CPU kernel instead. No GPU is used: the check reads the
+// scene the next frame would draw.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
 #include <pxr/imaging/hd/tokens.h>
@@ -108,6 +111,8 @@ int main(int argc, char** argv) {
     std::cerr << "usage: toon-hydra2-skinning-test <skinning.usda>\n";
     return 2;
   }
+  // What toon-viewport sets, so usdSkelImaging hands over authored normals.
+  TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   const UsdStageRefPtr stage = UsdStage::Open(argv[1]);
   if (!Check(stage != nullptr, "cannot open the skinning stage")) {
     return 1;
@@ -146,7 +151,13 @@ int main(int argc, char** argv) {
                  Near(Skinned(*bind_meshes.linear), rest),
           "the bind pose must draw the rest points") ||
       !Check(Near(*bind_meshes.dual->points, rest),
-          "the CPU kernel must give the rest points in the bind pose")) {
+          "the CPU kernel must give the rest points in the bind pose") ||
+      !Check(bind_meshes.linear->authored_normals &&
+                 Near(*bind_meshes.linear->normals,
+                     std::vector<Toon::Float3>(4, {0.6F, 0.0F, 0.8F})),
+          "the linear quad must draw its authored normals") ||
+      !Check(!bind_meshes.dual->authored_normals,
+          "a quad without authored normals must derive them")) {
     return 1;
   }
   const Toon::MeshSnapshot linear_bind = *bind_meshes.linear;
@@ -168,8 +179,10 @@ int main(int argc, char** argv) {
                  moved_meshes.linear->skin_revision ==
                      linear_bind.skin_revision &&
                  moved_meshes.linear->topology_revision ==
-                     linear_bind.topology_revision,
-          "a pose change must not touch points, skin or topology") ||
+                     linear_bind.topology_revision &&
+                 moved_meshes.linear->normals_revision ==
+                     linear_bind.normals_revision,
+          "a pose change must not touch points, normals, skin or topology") ||
       !Check(Near(*moved_meshes.dual->points, reached) &&
                  moved_meshes.dual->points_revision !=
                      dual_bind.points_revision,
@@ -186,6 +199,10 @@ int main(int argc, char** argv) {
                      linear_moved.points_revision &&
                  (*lifted_meshes.linear->points)[0].z == 1.0F,
           "a blend shape weight must move the rest points") ||
+      !Check(lifted_meshes.linear->authored_normals &&
+                 lifted_meshes.linear->normals_revision ==
+                     linear_moved.normals_revision,
+          "moved rest points must keep the authored normals") ||
       !Check(lifted_meshes.linear->pose_revision ==
                      linear_moved.pose_revision &&
                  lifted_meshes.linear->skin_revision ==

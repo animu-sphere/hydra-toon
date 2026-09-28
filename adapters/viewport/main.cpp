@@ -157,7 +157,7 @@ std::string WindowTitle(std::string_view scene, std::string_view device,
 
 // What the last frame drew, as the Hydra host evidence counts it: which
 // model each material selected, and how many draws selected MToon, blended,
-// added a hull and were skinned.
+// added a hull, were skinned and drew authored normals.
 std::string SceneSummary(const Toon::DrawList& draws) {
   std::size_t preview_materials{};
   std::size_t mtoon_materials{};
@@ -172,8 +172,10 @@ std::string SceneSummary(const Toon::DrawList& draws) {
   std::size_t transparent_draws{};
   std::size_t outline_draws{};
   std::size_t skinned_draws{};
+  std::size_t authored_normal_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
     skinned_draws += Toon::IsSkinned(mesh) ? 1U : 0U;
+    authored_normal_draws += mesh.authored_normals ? 1U : 0U;
     const auto material = std::lower_bound(draws.materials.begin(),
         draws.materials.end(), mesh.material,
         [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
@@ -191,6 +193,7 @@ std::string SceneSummary(const Toon::DrawList& draws) {
           << " draws_transparent=" << transparent_draws
           << " draws_outline=" << outline_draws
           << " draws_skinned=" << skinned_draws
+          << " draws_authored_normals=" << authored_normal_draws
           << " materials_preview=" << preview_materials
           << " materials_mtoon=" << mtoon_materials
           << " textures=" << draws.textures.size();

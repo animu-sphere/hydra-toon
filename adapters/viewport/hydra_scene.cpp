@@ -5,6 +5,8 @@
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/tf/getenv.h>
+#include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
 #include <pxr/imaging/hd/task.h>
@@ -24,6 +26,9 @@ PXR_NAMESPACE_USING_DIRECTIVE
 
 namespace Toon::viewport {
 namespace {
+
+constexpr char kNormalComputations[] =
+    "USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS";
 
 // Draws nothing: it states the render tags a frame shows, as usdview's
 // default does — geometry and proxy, not guides such as usdSkelImaging's
@@ -124,6 +129,14 @@ private:
 } // namespace
 
 std::unique_ptr<HydraScene> HydraScene::Open(const std::string& path) {
+  // usdSkelImaging hands a skinned mesh's authored normals to Hydra only with
+  // this setting, and hdToon draws derived smooth normals without them, which
+  // split where a model's meshes meet. It is read once, when the first scene
+  // index needs it, so it is set before any is created; a value the user set
+  // is kept.
+  if (TfGetenv(kNormalComputations).empty()) {
+    TfSetenv(kNormalComputations, "1");
+  }
   UsdStageRefPtr stage = UsdStage::Open(path);
   if (stage == nullptr) {
     throw std::runtime_error("could not open the USD stage " + path);

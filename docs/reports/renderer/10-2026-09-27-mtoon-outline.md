@@ -2,6 +2,8 @@
 
 > Followed by [report 17](17-2026-09-28-outline-meters-per-unit.md): a world-coordinates width is now metres in a stage of any `metersPerUnit`, which the host states as `toon:metersPerUnit`.
 
+> Followed by [report 20](20-2026-09-28-authored-normals.md): the hull follows authored normals now, where §4 found derived ones.
+
 - Date: 2026-09-27
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.13`; the canonical runtime

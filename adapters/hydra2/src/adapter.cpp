@@ -104,13 +104,15 @@ void AppendHostEvidence(std::uint64_t frame_index,
   }
   // And how many of this frame's draws selected MToon, how many of those
   // went through mtoon_transparent, how many added mtoon_outline's hull,
-  // and how many were skinned on the GPU.
+  // how many were skinned on the GPU, and how many drew authored normals.
   std::size_t mtoon_draws{};
   std::size_t transparent_draws{};
   std::size_t outline_draws{};
   std::size_t skinned_draws{};
+  std::size_t authored_normal_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
     skinned_draws += Toon::IsSkinned(mesh) ? 1U : 0U;
+    authored_normal_draws += mesh.authored_normals ? 1U : 0U;
     const auto material = std::lower_bound(snapshot.materials.begin(),
         snapshot.materials.end(), mesh.material,
         [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
@@ -151,7 +153,8 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " draws_mtoon=" << mtoon_draws
          << " draws_transparent=" << transparent_draws
          << " draws_outline=" << outline_draws
-         << " draws_skinned=" << skinned_draws << '\n';
+         << " draws_skinned=" << skinned_draws
+         << " draws_authored_normals=" << authored_normal_draws << '\n';
 }
 
 // GfMatrix4d is row-major for row vectors, so its storage order is already
@@ -185,7 +188,9 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
     (skinningXforms)
     (skinningDualQuats)
     (skelLocalToWorld)
-    (primWorldToLocal));
+    (primWorldToLocal)
+    (restNormals)
+    (hasFaceVaryingNormals));
 
 // The delegate's render settings.
 TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
@@ -246,6 +251,11 @@ public:
   void SetMeshUVs(Toon::MeshId mesh, std::vector<Toon::Float2> uvs) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshUVs(mesh, std::move(uvs));
+  }
+
+  void SetMeshNormals(Toon::MeshId mesh, std::vector<Toon::Float3> normals) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshNormals(mesh, std::move(normals));
   }
 
   void SetMeshTransform(Toon::MeshId mesh, const Toon::Matrix4& transform) {
@@ -574,7 +584,8 @@ public:
 
   HdDirtyBits GetInitialDirtyBitsMask() const override {
     return HdChangeTracker::DirtyPoints | HdChangeTracker::DirtyTopology |
-           HdChangeTracker::DirtyTransform | HdChangeTracker::DirtyVisibility |
+           HdChangeTracker::DirtyNormals | HdChangeTracker::DirtyTransform |
+           HdChangeTracker::DirtyVisibility |
            HdChangeTracker::DirtyPrimvar | HdChangeTracker::DirtyMaterialId |
            HdChangeTracker::DirtyRenderTag;
   }
@@ -593,6 +604,9 @@ public:
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, HdTokens->points)) {
       SyncPoints(delegate);
+    }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, HdTokens->normals)) {
+      SyncNormals(delegate);
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, StToken())) {
       state_->SetMeshUVs(mesh_, ReadUVs(delegate));
@@ -833,6 +847,73 @@ private:
     aggregator_ = SdfPath();
   }
 
+  // The mesh's authored normals, as a VRM importer writes glTF's NORMAL: a
+  // `normals` primvar with one value per point or, for a mesh UsdSkel skins,
+  // the rest normals its normals computation aggregates, which the GPU skins
+  // with the points. usdSkelImaging makes that computation only under
+  // USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS and for a mesh whose
+  // subdivision scheme is none; otherwise it hides a skinned mesh's normals.
+  // Face-varying normals need split vertices, as a face-varying `st` does,
+  // and blend shapes' normal offsets are not applied; without authored
+  // normals the core derives smooth ones.
+  void SyncNormals(HdSceneDelegate* delegate) {
+    for (const HdExtComputationPrimvarDescriptor& descriptor :
+        delegate->GetExtComputationPrimvarDescriptors(GetId(),
+            HdInterpolationVertex)) {
+      if (descriptor.name == HdTokens->normals) {
+        SyncRestNormals(delegate, descriptor.sourceComputationId);
+        return;
+      }
+    }
+    normals_aggregator_ = SdfPath();
+    normals_revision_ = 0;
+    for (const HdInterpolation interpolation :
+        {HdInterpolationVertex, HdInterpolationVarying}) {
+      for (const HdPrimvarDescriptor& descriptor :
+          GetPrimvarDescriptors(delegate, interpolation)) {
+        if (descriptor.name == HdTokens->normals) {
+          state_->SetMeshNormals(mesh_,
+              ReadPoints(GetPrimvar(delegate, HdTokens->normals)));
+          return;
+        }
+      }
+    }
+    state_->SetMeshNormals(mesh_, {});
+  }
+
+  // The aggregator's rest normals are read again only when its inputs
+  // changed, so a pose that dirties the normals reads nothing.
+  void SyncRestNormals(HdSceneDelegate* delegate, const SdfPath& skinning) {
+    SdfPath aggregator;
+    for (const HdExtComputationInputDescriptor& input :
+        delegate->GetExtComputationInputDescriptors(skinning)) {
+      if (input.name == SkinTokens->restNormals) {
+        aggregator = input.sourceComputationId;
+      }
+    }
+    const auto* computation = dynamic_cast<const HdToonExtComputation*>(
+        delegate->GetRenderIndex().GetSprim(HdPrimTypeTokens->extComputation,
+            aggregator));
+    const std::uint64_t revision =
+        computation == nullptr ? 0U : computation->GetInputRevision();
+    if (revision != 0 && revision == normals_revision_ &&
+        aggregator == normals_aggregator_) {
+      return;
+    }
+    normals_aggregator_ = aggregator;
+    normals_revision_ = revision;
+    VtVec3fArray normals;
+    bool face_varying = false;
+    if (aggregator.IsEmpty() ||
+        !ReadInput(delegate, aggregator, SkinTokens->restNormals, normals) ||
+        (ReadInput(delegate, aggregator, SkinTokens->hasFaceVaryingNormals,
+             face_varying) &&
+            face_varying)) {
+      normals.clear();
+    }
+    state_->SetMeshNormals(mesh_, ReadPoints(VtValue(normals)));
+  }
+
   static const TfToken& StToken() {
     static const TfToken st("st");
     return st;
@@ -902,6 +983,10 @@ private:
   VtVec2iArray blend_ranges_;
   VtFloatArray weights_;
   bool skinned_ = false;
+  // The aggregator the rest normals were last read from, and as of which of
+  // its revisions; 0 when they must be read again.
+  SdfPath normals_aggregator_;
+  std::uint64_t normals_revision_ = 0;
 };
 
 // HdCamera's own Sync reads the camera; the render pass reads its view and

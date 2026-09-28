@@ -105,12 +105,15 @@ struct MeshSnapshot {
   std::uint64_t topology_revision = 0;
   // One past the largest index; a draw needs at least this many points.
   std::uint32_t index_bound = 0;
-  // Smooth vertex normals, one per point, derived from the points and
-  // topology at commit, as Storm derives them for a mesh that authors none.
-  // A skinned mesh's are its rest pose's, skinned with its points. Empty
-  // while the topology indexes past the points.
+  // Vertex normals, one per point: the mesh's authored ones when it has one
+  // for every point the topology reaches, otherwise smooth normals derived
+  // from the points and topology at commit, as Storm derives them for a mesh
+  // that authors none. A skinned mesh's are its rest pose's, skinned with its
+  // points. Empty while the topology indexes past the points.
   PointArray normals;
   std::uint64_t normals_revision = 0;
+  // Whether `normals` are the authored ones.
+  bool authored_normals = false;
   // Texture coordinates, one per point, as USD's `st`: origin at the
   // image's bottom left. Empty when the mesh has none; a draw then samples
   // no texture.
@@ -312,6 +315,10 @@ public:
   void SetMeshPoints(MeshId mesh, std::vector<Float3> points);
   // One per point; any other count, or none, draws without textures.
   void SetMeshUVs(MeshId mesh, std::vector<Float2> uvs);
+  // Authored normals, one per point. Fewer than the topology reaches, or
+  // none, derive smooth normals instead. Setting the normals a mesh already
+  // has changes nothing.
+  void SetMeshNormals(MeshId mesh, std::vector<Float3> normals);
   void SetMeshTransform(MeshId mesh, const Matrix4& transform);
   void SetMeshColor(MeshId mesh, Float3 color);
   void SetMeshVisible(MeshId mesh, bool visible);
@@ -348,7 +355,11 @@ public:
 private:
   struct MeshRecord {
     MeshSnapshot snapshot;
-    // Set by a points or topology edit; the next commit recomputes normals.
+    // The authored normals, empty when there are none.
+    PointArray authored_normals =
+        std::make_shared<const std::vector<Float3>>();
+    // Set by a points, topology or normals edit; the next commit chooses the
+    // normals again, deriving them unless the authored ones serve.
     bool normals_stale = true;
   };
 

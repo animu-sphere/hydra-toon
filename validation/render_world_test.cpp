@@ -208,6 +208,35 @@ int main() {
     return 1;
   }
 
+  // Authored normals replace derived ones when there is one per point, do
+  // not follow a points edit, and derived ones return without them.
+  world.SetMeshNormals(quad, {{1, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 0, 0}});
+  const Toon::MeshSnapshot authored = world.Commit().meshes[0];
+  if (!Check(authored.authored_normals && !flipped.authored_normals &&
+                 authored.normals_revision != flipped.normals_revision &&
+                 (*authored.normals)[0].x == 1.0F,
+          "authored normals must replace derived ones")) {
+    return 1;
+  }
+  world.SetMeshPoints(quad, {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}});
+  world.SetMeshNormals(quad, {{1, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 0, 0}});
+  const Toon::MeshSnapshot raised = world.Commit().meshes[0];
+  if (!Check(raised.normals_revision == authored.normals_revision &&
+                 raised.normals == authored.normals,
+          "a points edit, or the same normals, must not re-send them")) {
+    return 1;
+  }
+  world.SetMeshNormals(quad, {{1, 0, 0}});
+  const Toon::MeshSnapshot short_normals = world.Commit().meshes[0];
+  world.SetMeshNormals(quad, {});
+  const Toon::MeshSnapshot derived = world.Commit().meshes[0];
+  if (!Check(!short_normals.authored_normals &&
+                 (*short_normals.normals)[0].z == -1.0F &&
+                 !derived.authored_normals && derived.normals->size() == 4,
+          "too few normals, or none, must derive them")) {
+    return 1;
+  }
+
   // A mesh binds a material by id; unbinding or an unknown id draws unlit.
   const Toon::MaterialId bound = world.CreateMaterial();
   world.SetMeshMaterial(quad, bound);
