@@ -17,29 +17,36 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.2.0 | MToon quality: the rest of MToon, outline stability, scene lights, Linux and more GPU vendors | [v0.2.0.md](v0.2.0.md) |
-| v0.3.0 | Avatar animation fast path: GPU morphs, expressions, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
+| v0.2.0 | MToon quality and the viewport foundation: the dedicated viewport, outline stability, the rest of MToon, scene lights, anti-aliasing quality | [v0.2.0.md](v0.2.0.md) |
+| v0.3.0 | Avatar animation fast path: GPU morphs, the expression, look-at and camera fast paths, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
 | v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
 | v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
 | v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
+| later | Platform and GPU coverage: Linux, and AMD and Intel Vulkan | [later.md](later.md#platform-and-gpu-coverage) |
 | after v0.6.0 | Candidates, taken up when the above is settled | [later.md](later.md#after-v060) |
 
 ## Priority
 
 Work is taken in this order, across milestones:
 
-1. Outline stability and cost
-2. The rest of MToon
-3. Linux and multi-vendor Vulkan
+1. The dedicated viewport's foundation
+2. Outline stability and cost
+3. The rest of MToon
 4. Scene lights
-5. GPU morphs
-6. The expression fast path
-7. Late motion latching
-8. MMD
-9. `UsdPreviewSurface`
-10. WebGPU
+5. Anti-aliasing and presentation quality
+6. GPU morphs
+7. The expression fast path
+8. Late motion latching
+9. Latency telemetry
+10. MMD
+11. `UsdPreviewSurface`
+12. WebGPU
+13. Linux and multi-vendor Vulkan
 
-The avatar path is finished before a new feature family is added.
+The current milestone is finished before a new feature family is added, and
+platform coverage is not widened before the renderer core, the viewport and
+the fast path are settled
+([design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases)).
 
 ## Project infrastructure
 
@@ -59,14 +66,21 @@ Not tied to a milestone:
 Planned, but not yet given to a milestone. When one takes an item, it moves
 to that milestone's page.
 
-- **Off-thread asset upload.** Geometry and textures staged and copied off
-  the render thread, on a transfer queue, with a placeholder until they
-  arrive ([design policy §20](../design/DESIGN_POLICY.md#20-asset-upload)).
+- **Off-thread asset upload.** Geometry, textures and morph targets decoded
+  and staged off the render thread and copied on a transfer queue, with a
+  placeholder until they arrive, so asset loading never stalls a playing
+  avatar ([design policy §20](../design/DESIGN_POLICY.md#20-asset-upload)).
+  Not a priority of v0.2.0 or v0.3.0.
 - **Dual quaternion skinning on the GPU.** A dual quaternion variant of the
   skinning vertex stage, replacing usdSkelImaging's CPU kernel and its point
   uploads, when an asset needs it.
 - **Hgi interop.** Hand the Hydra host the rendered image without reading
-  every frame back into CPU `HdRenderBuffer`s and waiting for it.
+  every frame back into CPU `HdRenderBuffer`s and waiting for it: Hgi
+  interop, a Vulkan image handoff or a shared GPU texture
+  ([design policy §6](../design/DESIGN_POLICY.md#6-relationship-with-hgi)).
+- **More viewport debug views.** Outline debug modes, and wireframe and
+  normal display
+  ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)).
 - **Picking.** Fill the `primId`, `instanceId` and `elementId` AOVs.
 - **Render tags, instancers and the framing data window.**
 - **The VRM host session on macOS arm64: the runtime and the VRM package

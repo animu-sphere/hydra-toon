@@ -35,11 +35,13 @@ USD stage ─→ Hydra ─→ hdToon adapter ─→ ToonScene ─→ DrawPackets
                          (MToon / MMD / PreviewSurface             │
                           → ToonMaterial)                          ▼
              fast path                                   GPU resource update ─→ Vulkan | WebGPU
-MotionPose ─────────────────────────── late latch ───────────────┘
+MotionPose · expression · look-at · camera ──── late latch ──────┘
 ```
 
 Static scene state and per-frame motion state take separate paths. A pose
-change updates a skeleton buffer and nothing else. See the
+change updates a skeleton buffer and nothing else. Hydra is the scene
+integration layer: `usdview` checks the integration, and the renderer itself
+is judged in its own viewport. See the
 [design policy](docs/design/DESIGN_POLICY.md).
 
 ## Components
@@ -51,7 +53,7 @@ change updates a skeleton buffer and nothing else. See the
 | `toon-render-vulkan` | `backend/vulkan/` | Vulkan backend and Slang shaders |
 | `hdToon` | `adapters/hydra2/` | Hydra render delegate and renderer plugin |
 | `toon-headless` | `adapters/headless/` | headless runner and renderer evidence |
-| `toon-viewport` | `adapters/viewport/` | standalone window |
+| `toon-viewport` | `adapters/viewport/` | standalone window, the renderer's main evaluation host |
 
 What each can do today is the
 [capability matrix](docs/reference/CAPABILITY_MATRIX.md); where new code goes
