@@ -1,5 +1,7 @@
 # The scene's unit: a world-coordinates outline is metres in a stage of any `metersPerUnit`
 
+> Followed by [report 18](18-2026-09-28-outline-depth-bias.md): a depth bias on the hull settles §4's fight between a hull as thin as nothing and its surface.
+
 - Date: 2026-09-28
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.13`; the canonical runtime

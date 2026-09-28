@@ -64,6 +64,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
   fragment knows its view-space position.
 - A world-coordinates outline was drawn in stage units whatever the stage's
   unit; it is now drawn in metres.
+- `mtoon_outline` rasterizes with a depth bias of one resolution step plus
+  the triangle's depth slope, away from the camera, so a hull thinner than
+  the depth buffer resolves loses the depth test to the surface it outlines
+  instead of showing the outline colour across it. The headless check
+  `renderer.material.mtoon_outline` draws such a hull. Renderer report 18.
 
 ## [0.1.0] - 2026-09-28
 
