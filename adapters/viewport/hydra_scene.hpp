@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: Apache-2.0
+// A USD stage hosted through Hydra in the viewport's own frame loop (design
+// policy §31). Built only with the Hydra adapter; OpenUSD types stay in
+// hydra_scene.cpp.
+#pragma once
+
+#include "camera.hpp"
+
+#include <toon/render_world.hpp>
+
+#include <memory>
+#include <string>
+
+namespace Toon::viewport {
+
+class HydraScene {
+public:
+  // Opens the stage and populates a render index through UsdImaging's scene
+  // index chain with hdToon's render delegate, as `usdview` populates one,
+  // so a format plugin's scene index contributions reach the delegate.
+  // Throws std::runtime_error when the stage cannot be opened.
+  static std::unique_ptr<HydraScene> Open(const std::string& path);
+  virtual ~HydraScene() = default;
+
+  // Syncs the render index at the stage's time and commits the delegate's
+  // render world into `snapshot`, reusing its storage. The snapshot's camera
+  // is not the viewport's; the caller sets its own.
+  virtual void Update(FrameSnapshot& snapshot) = 0;
+
+  // The stage's metersPerUnit and upAxis, which Hydra does not carry.
+  [[nodiscard]] virtual float meters_per_unit() const noexcept = 0;
+  [[nodiscard]] virtual UpAxis up_axis() const noexcept = 0;
+};
+
+} // namespace Toon::viewport

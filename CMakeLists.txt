@@ -14,35 +14,25 @@ include(ToonWarnings)
 
 option(TOON_ENABLE_VULKAN "Probe and link the Vulkan backend capability" ON)
 
-# OST-facing build intent. The renderer keeps its project-owned option while
-# `ost renderer view` can request the co-built adapter without knowing that
-# private option name. A non-empty OST intent synchronizes both adapter options
-# so switching intents cannot retain a stale CMake cache value; an empty intent
-# leaves direct CMake option overrides in control.
+# OST-facing build intent. `ost renderer view` asks for `hydra2` and
+# `ost renderer viewport` for `viewport` without knowing the project-owned
+# option names. A requested adapter is added to what the intent's own options
+# enable, never the whole set: the `viewport-usd` intent enables the Hydra
+# adapter itself, and `ost renderer viewport` asking for the viewport alone
+# must not turn it off (ost report 07, Q1).
 set(OST_RENDERER_ADAPTERS "" CACHE STRING
   "Semicolon-separated renderer adapters requested by OpenStrata")
-set(_TOON_MANAGED_ADAPTER_INTENT OFF)
-if(NOT OST_RENDERER_ADAPTERS STREQUAL "")
-  set(_TOON_MANAGED_ADAPTER_INTENT ON)
-endif()
-set(_TOON_HYDRA2_DEFAULT OFF)
+option(TOON_ENABLE_HYDRA2 "Build the optional co-built OpenUSD Hydra 2 adapter"
+  OFF)
+option(TOON_ENABLE_VIEWPORT "Build the optional GLFW/Vulkan viewport adapter"
+  OFF)
 if("hydra2" IN_LIST OST_RENDERER_ADAPTERS)
-  set(_TOON_HYDRA2_DEFAULT ON)
-endif()
-set(_TOON_VIEWPORT_DEFAULT OFF)
-if("viewport" IN_LIST OST_RENDERER_ADAPTERS)
-  set(_TOON_VIEWPORT_DEFAULT ON)
-endif()
-if(_TOON_MANAGED_ADAPTER_INTENT)
-  set(TOON_ENABLE_HYDRA2 ${_TOON_HYDRA2_DEFAULT} CACHE BOOL
+  set(TOON_ENABLE_HYDRA2 ON CACHE BOOL
     "Build the optional co-built OpenUSD Hydra 2 adapter" FORCE)
-  set(TOON_ENABLE_VIEWPORT ${_TOON_VIEWPORT_DEFAULT} CACHE BOOL
+endif()
+if("viewport" IN_LIST OST_RENDERER_ADAPTERS)
+  set(TOON_ENABLE_VIEWPORT ON CACHE BOOL
     "Build the optional GLFW/Vulkan viewport adapter" FORCE)
-else()
-  option(TOON_ENABLE_HYDRA2 "Build the optional co-built OpenUSD Hydra 2 adapter"
-    ${_TOON_HYDRA2_DEFAULT})
-  option(TOON_ENABLE_VIEWPORT "Build the optional GLFW/Vulkan viewport adapter"
-    ${_TOON_VIEWPORT_DEFAULT})
 endif()
 option(TOON_BUILD_TESTS "Build renderer contract and install-tree tests" ON)
 

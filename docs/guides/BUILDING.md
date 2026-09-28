@@ -144,3 +144,34 @@ anti-aliasing off. In a Hydra host, the render setting `toon:msaaSamples`
 does the same. The viewport builds its own tree, `build/<target>--renderer-viewport`,
 and `ost validate --intent renderer-viewport` validates that tree and its
 launch record.
+
+Left drag orbits, a middle or Shift+left drag pans, a right drag or the
+wheel dollies; F frames the scene and R returns to the last framing.
+`--screenshot <file.ppm>` writes the last of `--frames N` frames, and P
+writes the next frame to `toon-viewport-<n>.ppm`.
+
+### A USD stage in the viewport
+
+The `viewport-usd` intent builds the Hydra adapter and the viewport into one
+tree, where `--usd` draws a stage through Hydra in the viewport's own frame
+loop ([renderer report 19](../reports/renderer/19-2026-09-28-hydra-fed-viewport.md)):
+
+```sh
+ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>
+```
+
+`ost renderer viewport` launches the viewport in the runtime's environment
+alone, so a VRM avatar draws with every material PreviewSurface. For MToon,
+run the built viewport as the command of the VRM Formation, which adds
+`vrmImaging`:
+
+```sh
+cd formations/vrm-host-session
+ost formation run formation.toml --     ../../build/cy2026-windows-x86_64-py313-lookdev--viewport-usd/adapters/viewport/toon-viewport.exe     --usd <avatar.usdz>
+```
+
+`ost renderer viewport` picks the viewport among every executable of that
+name in the tree, and the `usdview` host test installs a copy under
+`adapters/hydra2/usdview-install/`, which it may launch instead; after a
+change, run `ost test` before looking, or name the build's executable as
+above.

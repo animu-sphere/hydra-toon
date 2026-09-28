@@ -10,3 +10,12 @@ profile = "core"
 # or `usd`); the default `core` build stays OpenUSD-free.
 [build.intents.hydra]
 cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true } }
+
+# The viewport with the Hydra adapter in one tree, so `--usd <stage>` hosts
+# Hydra in the viewport's own frame loop (design policy §31):
+# `ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>`.
+[build.intents.viewport-usd]
+cache = {
+  TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true },
+  TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true }
+}

@@ -37,6 +37,11 @@ struct PresentStatistics {
   std::uint32_t swapchain_recreates = 0;
   // Samples per pixel: RenderOptions' count, as far as the device offers it.
   std::uint32_t samples = 1;
+  // Whether the swapchain encodes the pipelines' linear colour to sRGB as it
+  // is written; false only on a surface that offers no 8-bit sRGB format.
+  bool srgb_encoded = false;
+  // Frames read back to the CPU: one per capture taken, none otherwise.
+  std::uint64_t readbacks = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;
@@ -57,6 +62,16 @@ public:
   [[nodiscard]] virtual bool RenderFrame(const DrawList& draws,
       std::uint32_t width,
       std::uint32_t height, bool& presented,
+      std::string& error) = 0;
+
+  // Asks the next frame RenderFrame presents to be copied back to the CPU as
+  // well: a screenshot, never an ordinary frame (design policy §31).
+  virtual void RequestCapture() = 0;
+
+  // The captured frame's colour as presented, RGBA8 with its origin at the
+  // top left, waiting for that frame to complete. False with `error` empty
+  // while no captured frame is waiting; false with `error` set on a failure.
+  [[nodiscard]] virtual bool TakeCapture(ColorProduct& color,
       std::string& error) = 0;
 
   [[nodiscard]] virtual const PresentStatistics& statistics() const = 0;

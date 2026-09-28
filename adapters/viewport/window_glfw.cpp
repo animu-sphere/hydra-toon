@@ -116,12 +116,37 @@ private:
           self.events_.push_back(event);
         });
     glfwSetKeyCallback(
-        window_, [](GLFWwindow* window, int key, int, int action, int) {
+        window_, [](GLFWwindow* window, int key, int, int action, int mods) {
           if (action == GLFW_PRESS || action == GLFW_REPEAT) {
             Event event{EventType::KeyDown};
-            event.key = key == GLFW_KEY_ESCAPE ? Key::Escape : Key::Unknown;
+            event.key = ToKey(key);
+            event.shift = (mods & GLFW_MOD_SHIFT) != 0;
+            event.alt = (mods & GLFW_MOD_ALT) != 0;
             Self(window).events_.push_back(event);
           }
+        });
+    glfwSetMouseButtonCallback(
+        window_, [](GLFWwindow* window, int button, int action, int mods) {
+          Event event{action == GLFW_PRESS ? EventType::PointerDown
+                                           : EventType::PointerUp};
+          event.button = ToButton(button);
+          event.shift = (mods & GLFW_MOD_SHIFT) != 0;
+          event.alt = (mods & GLFW_MOD_ALT) != 0;
+          glfwGetCursorPos(window, &event.x, &event.y);
+          Self(window).events_.push_back(event);
+        });
+    glfwSetCursorPosCallback(
+        window_, [](GLFWwindow* window, double x, double y) {
+          Event event{EventType::PointerMove};
+          event.x = x;
+          event.y = y;
+          Self(window).events_.push_back(event);
+        });
+    glfwSetScrollCallback(
+        window_, [](GLFWwindow* window, double, double y) {
+          Event event{EventType::Scroll};
+          event.y = y;
+          Self(window).events_.push_back(event);
         });
     int framebuffer_width = 0;
     int framebuffer_height = 0;
@@ -132,6 +157,34 @@ private:
 
   static GlfwWindow& Self(GLFWwindow* window) {
     return *static_cast<GlfwWindow*>(glfwGetWindowUserPointer(window));
+  }
+
+  static Key ToKey(int key) {
+    switch (key) {
+    case GLFW_KEY_ESCAPE:
+      return Key::Escape;
+    case GLFW_KEY_P:
+      return Key::P;
+    case GLFW_KEY_F:
+      return Key::F;
+    case GLFW_KEY_R:
+      return Key::R;
+    default:
+      return Key::Unknown;
+    }
+  }
+
+  static PointerButton ToButton(int button) {
+    switch (button) {
+    case GLFW_MOUSE_BUTTON_LEFT:
+      return PointerButton::Left;
+    case GLFW_MOUSE_BUTTON_MIDDLE:
+      return PointerButton::Middle;
+    case GLFW_MOUSE_BUTTON_RIGHT:
+      return PointerButton::Right;
+    default:
+      return PointerButton::None;
+    }
   }
 
   bool initialized_ = false;
