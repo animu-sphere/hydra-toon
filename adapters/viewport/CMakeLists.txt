@@ -11,6 +11,7 @@ endif()
 toon_configure_viewport_dependencies()
 
 add_executable(toon-viewport
+  camera.cpp
   main.cpp
   window_glfw.cpp)
 toon_configure_warnings(toon-viewport)
@@ -22,6 +23,22 @@ target_link_libraries(toon-viewport PRIVATE
   glfw)
 target_compile_features(toon-viewport PRIVATE cxx_std_20)
 
+# With the Hydra adapter in the same build, `--usd <stage>` hosts Hydra in
+# the viewport's frame loop through the adapter's runtime library (design
+# policy §31). OpenUSD stays in hydra_scene.cpp.
+if(TOON_ENABLE_HYDRA2)
+  include(ToonOpenUSD)
+  toon_configure_openusd()
+  toon_openusd_root(TOON_PXR_ROOT)
+  target_sources(toon-viewport PRIVATE hydra_scene.cpp)
+  target_link_libraries(toon-viewport PRIVATE
+    toon-hydra2-runtime usdImaging usdGeom usd)
+  target_compile_definitions(toon-viewport PRIVATE
+    TOON_VIEWPORT_HAS_HYDRA=1
+    NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+endif()
+
 toon_copy_shaders(toon-viewport)
 
 # The installed tree reuses bin/shaders written by the project install rules.
@@ -31,8 +48,25 @@ install(TARGETS toon-viewport
 if(TOON_BUILD_TESTS)
   add_test(NAME toon-viewport-present
     COMMAND toon-viewport --hidden --frames 8 --vsync off)
-  set_tests_properties(toon-viewport-present PROPERTIES
+  # A capture reads back the frame it asks for and no other.
+  add_test(NAME toon-viewport-capture
+    COMMAND toon-viewport --hidden --frames 4 --vsync off
+      --screenshot "${CMAKE_CURRENT_BINARY_DIR}/toon-viewport-capture.ppm")
+  set_tests_properties(toon-viewport-present toon-viewport-capture PROPERTIES
     LABELS "gpu;viewport;presentation"
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
+  if(TOON_ENABLE_HYDRA2)
+    # The usdview smoke stage through Hydra: its one mesh must draw.
+    add_test(NAME toon-viewport-present-usd
+      COMMAND toon-viewport --hidden --frames 8 --vsync off
+        --usd "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/usdview-smoke.usda"
+        --expect-draws 1)
+    set_tests_properties(toon-viewport-present-usd PROPERTIES
+      LABELS "gpu;viewport;presentation;hydra"
+      SKIP_RETURN_CODE 77
+      TIMEOUT 60
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+  endif()
 endif()

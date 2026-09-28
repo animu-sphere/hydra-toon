@@ -606,14 +606,15 @@ viewport receives one: a build intent that enables both the Hydra adapter
 and the viewport, launched by `ost renderer viewport --intent <intent>
 --profile <runtime> -- --usd <stage>`. In that build the viewport links the
 adapter's runtime library (`toon-hydra2-runtime`), creates the render index
-with the render delegate itself, and runs Hydra's task in its own frame loop,
-so the scene arrives through the same adapter `usdview` exercises. The
-rendered image goes from the offscreen colour target to the swapchain by a
-GPU copy; a normal frame reads nothing back to the CPU, and only a
-screenshot, a reference check or picking asks for a readback. The change
-that builds it amends [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md)
-§4, whose rule keeps OpenUSD under `adapters/hydra2/`: the viewport's Hydra
-source joins it, in that build only.
+with the render delegate itself, populated through UsdImaging's scene index
+chain as `usdview`'s engine populates one, and syncs it in its own frame
+loop, so the scene arrives through the same adapter `usdview` exercises.
+No Hydra render pass runs: the viewport draws the delegate's committed
+render world straight into the swapchain, so there is neither an offscreen
+target nor a copy. A normal frame reads nothing back to the CPU, and only a
+screenshot, a reference check or picking asks for a readback.
+[PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §4 lets OpenUSD into
+the viewport's Hydra source, in that build only.
 
 The two hosts divide the work:
 
@@ -635,9 +636,13 @@ what is the [roadmap](../roadmap/README.md).
 
 ### 31.1 Open questions
 
-| Id | Question | Proposed answer | Resolve by |
-| --- | --- | --- | --- |
-| DP-Q1 | How the Hydra-fed viewport is populated so a VRM avatar selects MToon. `hdToon` reads the `vrm` container from the terminal scene index ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §2), which `vrmImaging`'s adapter contributes to the stage scene index; a render index populated by a classic `UsdImagingDelegate`, as `hydra-merlin`'s viewport populates it, may not carry it | Populate the render index through UsdImaging's scene index chain, as `usdview`'s engine does, with `vrmImaging` supplied to the run as a Formation supplies it; measure with the probe stage that 20 of 20 draws select MToon, as a report | v0.2.0 |
+None open. DP-Q1 — how the Hydra-fed viewport is populated so that a VRM
+avatar selects MToon, since `hdToon` reads the `vrm` container that
+`vrmImaging` contributes to the stage scene index
+([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §2) — is answered as proposed:
+through UsdImaging's scene index chain, with `vrmImaging` supplied to the
+run as a Formation supplies it. The avatar's 20 draws are 20 MToon
+([renderer report 19](../reports/renderer/19-2026-09-28-hydra-fed-viewport.md)).
 
 ## 32. Scene lighting
 

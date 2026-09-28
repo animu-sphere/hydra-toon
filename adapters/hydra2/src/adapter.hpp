@@ -178,8 +178,11 @@ public:
   void Update() override;
 
   // The scene the next frame will draw, committed without rendering it: for
-  // a check that needs no GPU.
+  // a check that needs no GPU, or a host that draws the scene itself, as the
+  // viewport does. The second fills `snapshot`, reusing its storage. Neither
+  // sets the camera or the scene's unit; the render pass does.
   Toon::FrameSnapshot CommitScene();
+  void CommitScene(Toon::FrameSnapshot& snapshot);
 
 private:
   class Impl;

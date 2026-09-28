@@ -10,6 +10,30 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The Hydra-fed viewport: the `viewport-usd` build intent builds the Hydra
+  adapter and the viewport together, and `toon-viewport --usd <stage>`
+  populates a render index through UsdImaging's scene indices with
+  `hdToon`'s delegate, syncs it each frame for the `geometry` and `proxy`
+  render tags and draws the delegate's scene into the swapchain, with no
+  render pass and no readback. `HdToonRenderDelegate::CommitScene` takes a
+  snapshot to reuse. In the VRM Formation, 20 of 20 avatar draws select
+  MToon, answering design policy DP-Q1. Renderer report 19.
+- The viewport's orbit camera: left drag orbits, middle or Shift+left drag
+  pans, right drag or the wheel dollies, F frames the visible meshes for the
+  stage's `upAxis`, R returns to the last framing.
+- Frame capture: `PresentSession::RequestCapture` and `TakeCapture` read
+  one presented frame back, counted in `PresentStatistics::readbacks`;
+  `toon-viewport --screenshot <file.ppm>` and the P key write it. The
+  viewport fails if a frame it did not capture was read back.
+- The viewport's swapchain takes an 8-bit sRGB format where the surface
+  offers one, so the scene pipelines' linear colour is encoded as it is
+  written; it had been shown unencoded, too dark and too saturated, where
+  `usdview`'s sRGB colour correction encodes the same colour.
+  `PresentStatistics::srgb_encoded` and the `Presentation:` line state it.
+- `toon-viewport --expect-draws N`, and the CTests `toon-viewport-capture`
+  and, with the Hydra adapter, `toon-viewport-present-usd` on the `usdview`
+  smoke stage.
+
 - `formations/vrm-host-session/`: the VRM `usdview` session as a committed
   OpenStrata Formation of the canonical `lookdev` runtime, `vrmImaging`
   0.10.0 and `toon` 0.1.0, each pinned by its published digest. Its declared
@@ -52,6 +76,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
   gate are in `docs/releases/README.md`.
 
 ### Changed
+
+- `OST_RENDERER_ADAPTERS` adds the adapters it names to those the build
+  intent enables, where it used to replace them, so `ost renderer viewport`
+  no longer turns an intent's Hydra adapter off (`ost` report 07, Q1).
+- `toon-viewport` prints `Selected backend:`, `Device:` and `Presentation:`,
+  which `ost renderer viewport` records in its launch record, and a summary
+  of its last frame's draws and materials.
 
 - Documentation: the 2026-09-28 direction. The dedicated viewport becomes
   the renderer's main evaluation host (design policy §31) and leads

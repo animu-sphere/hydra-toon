@@ -17,18 +17,41 @@ enum class EventType {
   Close,
   Resize,
   KeyDown,
+  PointerDown,
+  PointerUp,
+  PointerMove,
+  Scroll,
 };
 
 enum class Key {
   Unknown,
   Escape,
+  F,
+  P,
+  R,
+};
+
+enum class PointerButton {
+  None,
+  Left,
+  Middle,
+  Right,
 };
 
 struct Event {
   EventType type = EventType::Close;
   Key key = Key::Unknown;
+  PointerButton button = PointerButton::None;
+  // Held while a key or button went down.
+  bool shift = false;
+  bool alt = false;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
+  // The cursor in window pixels from the top left, for the pointer events;
+  // the wheel's vertical offset in notches, positive away from the user,
+  // for Scroll.
+  double x = 0.0;
+  double y = 0.0;
 };
 
 class Window {

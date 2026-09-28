@@ -278,6 +278,11 @@ public:
     return world_.Commit();
   }
 
+  void Commit(Toon::FrameSnapshot& snapshot) {
+    std::scoped_lock lock(mutex_);
+    world_.Commit(snapshot);
+  }
+
   // A mesh binds a material by path, and either may be synced first, so a
   // binding is resolved again whenever a material under its path appears or
   // goes away.
@@ -1416,6 +1421,10 @@ void HdToonRenderDelegate::Update() {
 
 Toon::FrameSnapshot HdToonRenderDelegate::CommitScene() {
   return impl_->state->Commit();
+}
+
+void HdToonRenderDelegate::CommitScene(Toon::FrameSnapshot& snapshot) {
+  impl_->state->Commit(snapshot);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

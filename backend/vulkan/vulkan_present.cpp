@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <string>
@@ -46,14 +47,18 @@ namespace {
 using vulkan_internal::BeginSceneRendering;
 using vulkan_internal::ChooseSampleCount;
 using vulkan_internal::CreateDeviceImage;
+using vulkan_internal::CreateHostBuffer;
 using vulkan_internal::CreateInstanceWithValidation;
 using vulkan_internal::CreateScenePipelines;
 using vulkan_internal::DestroyDeviceImage;
+using vulkan_internal::DestroyHostBuffer;
 using vulkan_internal::DestroyInstance;
 using vulkan_internal::DestroyScenePipelines;
 using vulkan_internal::DeviceImage;
+using vulkan_internal::HostBuffer;
 using vulkan_internal::ImageBarrier;
 using vulkan_internal::InstanceState;
+using vulkan_internal::InvalidateIfNeeded;
 using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
@@ -144,11 +149,22 @@ public:
       std::uint32_t height, bool& presented,
       std::string& error) override;
 
+  void RequestCapture() override {
+    capture_requested_ = true;
+  }
+
+  [[nodiscard]] bool TakeCapture(ColorProduct& color,
+      std::string& error) override;
+
   [[nodiscard]] const PresentStatistics& statistics() const override {
     return statistics_;
   }
 
 private:
+  // Whether the surface format is one TakeCapture can turn into RGBA8, and
+  // whether its bytes are in BGRA order.
+  static bool CapturableFormat(VkFormat format, bool& bgra);
+
   bool RecreateSwapchain(std::uint32_t width, std::uint32_t height,
       std::string& error);
   void DestroySwapchainObjects();
@@ -186,8 +202,31 @@ private:
   // still be in use by an outstanding present when the next frame needs it.
   std::vector<VkSemaphore> render_finished_;
   bool swapchain_created_once_ = false;
+  // Whether the swapchain images can be copied from, which a capture needs.
+  bool capture_supported_ = false;
+  bool capture_requested_ = false;
+  // The timeline value of the frame whose image `capture_` holds; 0 when
+  // none is waiting to be taken.
+  std::uint64_t capture_frame_ = 0;
+  VkExtent2D capture_extent_{};
+  HostBuffer capture_;
   PresentStatistics statistics_;
 };
+
+bool VulkanPresentSession::CapturableFormat(VkFormat format, bool& bgra) {
+  switch (format) {
+  case VK_FORMAT_B8G8R8A8_UNORM:
+  case VK_FORMAT_B8G8R8A8_SRGB:
+    bgra = true;
+    return true;
+  case VK_FORMAT_R8G8B8A8_UNORM:
+  case VK_FORMAT_R8G8B8A8_SRGB:
+    bgra = false;
+    return true;
+  default:
+    return false;
+  }
+}
 
 PresentSetupStatus VulkanPresentSession::Initialize(
     const PresentSurfaceProvider& provider, const SceneShaders& shaders,
@@ -271,14 +310,30 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     error = "the presentation surface reports no color formats";
     return PresentSetupStatus::Unavailable;
   }
+  // The scene pipelines write linear colour. An sRGB image encodes it as it
+  // is written, and blends and resolves in linear, as a Hydra host's sRGB
+  // colour correction encodes the offscreen renderer's linear AOV; a UNORM
+  // image would show linear values as if encoded, too dark.
   surface_format_ = formats.front();
-  for (const VkSurfaceFormatKHR& format : formats) {
-    if (format.format == VK_FORMAT_B8G8R8A8_UNORM ||
-        format.format == VK_FORMAT_R8G8B8A8_UNORM) {
-      surface_format_ = format;
+  bool found = false;
+  for (const VkFormat preferred :
+      {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB,
+          VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM}) {
+    for (const VkSurfaceFormatKHR& format : formats) {
+      if (format.format == preferred &&
+          format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        surface_format_ = format;
+        found = true;
+        break;
+      }
+    }
+    if (found) {
       break;
     }
   }
+  statistics_.srgb_encoded =
+      surface_format_.format == VK_FORMAT_B8G8R8A8_SRGB ||
+      surface_format_.format == VK_FORMAT_R8G8B8A8_SRGB;
 
   present_mode_ = VK_PRESENT_MODE_FIFO_KHR;
   if (!vsync) {
@@ -429,7 +484,14 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
   swapchain_create.imageColorSpace = surface_format_.colorSpace;
   swapchain_create.imageExtent = extent;
   swapchain_create.imageArrayLayers = 1;
-  swapchain_create.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  bool bgra = false;
+  capture_supported_ =
+      (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) !=
+          0 &&
+      CapturableFormat(surface_format_.format, bgra);
+  swapchain_create.imageUsage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+      (capture_supported_ ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0U);
   swapchain_create.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   swapchain_create.preTransform = capabilities.currentTransform;
   swapchain_create.compositeAlpha = composite;
@@ -532,6 +594,24 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
       !materials_.Update(draws, textures_, error)) {
     return false;
   }
+  // A capture copies this frame's image into a buffer the CPU reads; the
+  // frame before it has completed, so the buffer is free to replace.
+  const bool capture = capture_requested_;
+  if (capture) {
+    if (!capture_supported_) {
+      error = "this swapchain's images cannot be captured";
+      return false;
+    }
+    const VkDeviceSize size =
+        static_cast<VkDeviceSize>(extent_.width) * extent_.height * 4U;
+    if (capture_.capacity < size) {
+      DestroyHostBuffer(device_, capture_);
+      if (!CreateHostBuffer(physical_device_, device_, size,
+              VK_BUFFER_USAGE_TRANSFER_DST_BIT, capture_, error)) {
+        return false;
+      }
+    }
+  }
 
   if (!VulkanOk(vkResetCommandBuffer(command_, 0), "vkResetCommandBuffer",
           error)) {
@@ -580,10 +660,42 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   BeginSceneRendering(command_, attachments, extent_);
   meshes_.Record(command_, pipelines_, materials_, draws);
   vkCmdEndRendering(command_);
+  VkImageLayout rendered = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkPipelineStageFlags2 rendered_stage =
+      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  VkAccessFlags2 rendered_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+  if (capture) {
+    const VkImageMemoryBarrier2 to_transfer = ImageBarrier(
+        images_[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &to_transfer;
+    vkCmdPipelineBarrier2(command_, &dependency);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {extent_.width, extent_.height, 1};
+    vkCmdCopyImageToBuffer(command_, images_[image_index],
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, capture_.buffer, 1, &copy);
+    VkMemoryBarrier2 to_host{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    to_host.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    to_host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    to_host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    to_host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo host_dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    host_dependency.memoryBarrierCount = 1;
+    host_dependency.pMemoryBarriers = &to_host;
+    vkCmdPipelineBarrier2(command_, &host_dependency);
+    rendered = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    rendered_stage = VK_PIPELINE_STAGE_2_COPY_BIT;
+    rendered_access = VK_ACCESS_2_NONE;
+  }
   const VkImageMemoryBarrier2 to_present = ImageBarrier(images_[image_index],
-      VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_NONE,
-      VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_ASPECT_COLOR_BIT, rendered_stage, rendered_access,
+      VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, rendered,
       VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
   dependency.imageMemoryBarrierCount = 1;
   dependency.pImageMemoryBarriers = &to_present;
@@ -618,6 +730,11 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     return false;
   }
   ++submitted_;
+  if (capture) {
+    capture_requested_ = false;
+    capture_frame_ = submitted_;
+    capture_extent_ = extent_;
+  }
 
   VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
   present.waitSemaphoreCount = 1;
@@ -645,6 +762,42 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;
   }
+  return true;
+}
+
+bool VulkanPresentSession::TakeCapture(ColorProduct& color,
+    std::string& error) {
+  error.clear();
+  if (capture_frame_ == 0) {
+    return false;
+  }
+  VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+  wait.semaphoreCount = 1;
+  wait.pSemaphores = &timeline_;
+  wait.pValues = &capture_frame_;
+  if (!VulkanOk(vkWaitSemaphores(device_, &wait, kFrameTimeoutNs),
+          "vkWaitSemaphores(capture)", error) ||
+      !InvalidateIfNeeded(device_, capture_, error)) {
+    return false;
+  }
+  capture_frame_ = 0;
+  bool bgra = false;
+  CapturableFormat(surface_format_.format, bgra);
+  color.width = capture_extent_.width;
+  color.height = capture_extent_.height;
+  color.row_pitch = color.width * 4U;
+  color.pixel_format = "rgba8-unorm";
+  color.origin = "top-left";
+  color.color_space = "as-presented";
+  color.payload.resize(static_cast<std::size_t>(color.width) * color.height *
+                       4U);
+  std::memcpy(color.payload.data(), capture_.mapped, color.payload.size());
+  if (bgra) {
+    for (std::size_t pixel = 0; pixel < color.payload.size(); pixel += 4U) {
+      std::swap(color.payload[pixel], color.payload[pixel + 2U]);
+    }
+  }
+  ++statistics_.readbacks;
   return true;
 }
 
@@ -683,6 +836,7 @@ void VulkanPresentSession::Destroy() {
   if (device_ != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(device_);
     DestroySwapchainObjects();
+    DestroyHostBuffer(device_, capture_);
     meshes_.Destroy();
     textures_.Destroy();
     materials_.Destroy();

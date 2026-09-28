@@ -101,16 +101,7 @@ if(TOON_BUILD_TESTS)
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
-  if(PXR_INCLUDE_DIRS)
-    list(GET PXR_INCLUDE_DIRS 0 _toon_pxr_include)
-    get_filename_component(TOON_PXR_ROOT
-      "${_toon_pxr_include}/.." ABSOLUTE)
-  elseif(DEFINED pxr_DIR)
-    set(TOON_PXR_ROOT "${pxr_DIR}")
-  else()
-    message(FATAL_ERROR "Could not derive the OpenUSD runtime root")
-  endif()
-
+  toon_openusd_root(TOON_PXR_ROOT)
   set(_toon_pxr_runtime_modifications
     "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin"
     "PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")

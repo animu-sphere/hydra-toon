@@ -35,7 +35,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
 | `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline, Slang shaders |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
-| `adapters/viewport/` | `toon-viewport` | — | standalone GLFW window, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`) |
+| `adapters/viewport/` | `toon-viewport` | — | standalone GLFW window, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
@@ -65,6 +65,7 @@ placement rule; it does not say the component exists.
 | Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/` | `toon-viewport` |
+| The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
 
 ## 4. Dependency directions
@@ -84,8 +85,10 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    headers it lists; **a new public core header is added to that list in the
    same change.**
 3. A backend depends on `core/`, never on an adapter or on another backend.
-4. OpenUSD appears only under `adapters/hydra2/`. GLFW appears only under
-   `adapters/viewport/`.
+4. OpenUSD appears only under `adapters/hydra2/` and in
+   `adapters/viewport/hydra_scene.cpp`, which is compiled only when the
+   Hydra adapter is built too; no other viewport source includes an OpenUSD
+   header. GLFW appears only under `adapters/viewport/`.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 
@@ -96,10 +99,14 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
 | default | `ost build` | `core` (from `openstrata.toml`) | none |
 | Hydra adapter | `ost build --profile lookdev --intent hydra` | `lookdev` or `usd` (a real runtime) | yes |
 | standalone viewport | `ost renderer viewport` | `core` | none |
+| viewport hosting Hydra | `ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>` | `lookdev` or `usd` | yes |
 
-The `hydra` intent is declared in `openstrata.toml`
-(`TOON_ENABLE_HYDRA2=ON`). `ost renderer view` requests the same adapter
-through `OST_RENDERER_ADAPTERS=hydra2`.
+The `hydra` intent (`TOON_ENABLE_HYDRA2=ON`) and the `viewport-usd` intent
+(`TOON_ENABLE_HYDRA2=ON`, `TOON_ENABLE_VIEWPORT=ON`) are declared in
+`openstrata.toml`. `ost renderer view` and `ost renderer viewport` request
+their adapter through `OST_RENDERER_ADAPTERS` (`hydra2`, `viewport`); the
+project reads that list as adapters to add to what the intent's options
+enable, never as the whole set.
 
 ## 6. Install tree
 
