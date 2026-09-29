@@ -15,12 +15,13 @@ runs on a tag or a manual dry run, never on a pull request.
 | Windows Server 2022 x86_64, GitHub-hosted `windows-2022` | MSVC 14.44 (Visual Studio 2022) | `hydra` intent, Release | the same canonical `lookdev` leaf; Vulkan SDK 1.4.350.0 | none: `vkCreateInstance` fails, and OpenGL is below the 4.5 `usdview` needs | `ost build`; `ost test` 9 passed and `toon-renderer-usdview-host` `SKIP`; `ost validate` passed with every GPU and `usdview` host assertion `SKIP`; packaged twice to one archive digest | release workflow dry run [36332782445](https://github.com/animu-sphere/hydra-toon/actions/runs/36332782445) |
 | Windows 11 x86_64 | MSVC 14.44 (the release workflow's build) | the published `toon` 0.1.0 package, in `formations/vrm-host-session/` with `vrmImaging` 0.10.0 | the same canonical `lookdev` leaf | NVIDIA RTX A5000 | `ost formation doctor` passed; `ost formation run` passed on the probe stage; the avatar drew 20 of 20 draws MToon and skinned, 15 outlined | [renderer 13](../reports/renderer/13-2026-09-28-host-session-formation.md) |
 | Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | standalone viewport | OpenStrata `cy2026` `core` | NVIDIA RTX A5000 | `ost renderer viewport -- --frames 8 --hidden` presented 8 frames; `ost validate --intent renderer-viewport` passed | [renderer 01](../reports/renderer/01-2026-09-26-phase0-mesh-camera.md) |
+| Windows 11 x86_64 | MSVC 14.51 (Visual Studio 18) | the Hydra adapter and the viewport: `ost renderer viewport --intent hydra` with `vrmImaging` 0.10.0 by `--with`, and the `viewport-usd` intent | the same canonical `lookdev` leaf; `ost` 0.23.14 | NVIDIA RTX A5000 | the avatar drew 20 of 20 draws MToon; `ost validate --intent hydra--renderer-viewport` passed; `viewport-usd`: `ost test` 13/13, `ost validate --strict-renderer-evidence` passed | [`ost` 08](../reports/ost/08-2026-09-30-v0.23.14-report-07-reverified.md) |
 
 ## Requirements
 
 | Requirement | Version | Notes |
 | --- | --- | --- |
-| `ost` | 0.23.8 or newer; 0.23.11 or newer to package the `hydra` intent and compose it in a Formation | generated with 0.23.6; install smoke ported from renderer template 0.5.3, which lets `core` pass `renderer.install_tree` |
+| `ost` | 0.23.8 or newer; 0.23.11 or newer to package the `hydra` intent and compose it in a Formation; 0.23.14 or newer for `ost renderer viewport --intent hydra --with <plugin>`; the release workflow pins 0.23.14 | generated with 0.23.6; install smoke ported from renderer template 0.5.3, which lets `core` pass `renderer.install_tree` |
 | CMake | 3.24 or newer | measured with 4.4 |
 | C++ | C++20 | |
 | Vulkan | 1.3 device, loader and headers | the device needs `dynamicRendering`, `synchronization2` and `timelineSemaphore`; without a suitable device the GPU checks report an explained `SKIP`, not a failure |

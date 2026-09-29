@@ -12,8 +12,10 @@ profile = "core"
 cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true } }
 
 # The viewport with the Hydra adapter in one tree, so `--usd <stage>` hosts
-# Hydra in the viewport's own frame loop (design policy §31):
-# `ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>`.
+# Hydra in the viewport's own frame loop (design policy §31). `ost test`
+# runs the viewport's Hydra CTest here; to look at a stage, use
+# `ost renderer viewport --intent hydra --profile lookdev [--with <plugin>] -- --usd <stage>`,
+# which builds the same adapters in a tree of its own (docs/guides/BUILDING.md).
 [build.intents.viewport-usd]
 cache = {
   TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true },

@@ -80,6 +80,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - `OST_RENDERER_ADAPTERS` adds the adapters it names to those the build
   intent enables, where it used to replace them, so `ost renderer viewport`
   no longer turns an intent's Hydra adapter off (`ost` report 07, Q1).
+- `ost` 0.23.14. The release workflow bootstraps it. A VRM avatar is looked
+  at in the viewport with
+  `ost renderer viewport --intent hydra --with <vrmImaging>`, which builds
+  the two adapters in a tree of its own and adds the plugin by digest, where
+  the built viewport used to be run as the VRM Formation's command; the
+  `viewport-usd` intent stays for the viewport's Hydra CTest. `ost`
+  report 08 re-verifies report 07 against it: 20 of 20 draws MToon.
 - `toon-viewport` prints `Selected backend:`, `Device:` and `Presentation:`,
   which `ost renderer viewport` records in its launch record, and a summary
   of its last frame's draws and materials.
