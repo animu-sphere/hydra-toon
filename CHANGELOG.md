@@ -10,6 +10,21 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The viewport's telemetry (design policy §24): a present session writes
+  GPU timestamps between the parts of each frame (uploads, the swapchain
+  image wait, unlit, outline, opaque, transparent, resolve, capture,
+  overlay) and reads them a frame later, and `PresentStatistics` carries
+  them with the draw calls of each part, the triangles, the pipeline binds
+  and `RenderFrame`'s CPU wait and submit time. `toon-viewport` shows them
+  with its Hydra sync, extraction and frame interval, as mean, p95 and max
+  over the last 1,024 frames, on a Dear ImGui 1.92.8 overlay. The overlay
+  also shows the uploads and has buttons for the MSAA sample count. `O`
+  hides it, `--overlay off` turns it off, and a run ends with `Timing:`
+  lines. ImGui stays in the viewport: it hands the backend an
+  `OverlayDrawList`, which a pass of its own draws after any capture is
+  copied, so a screenshot never shows it. The CTests
+  `toon-viewport-capture-no-overlay` and
+  `toon-viewport-capture-without-overlay`, and renderer report 22.
 - The viewport's MSAA sample count changes while it runs: the keys 1, 2, 4
   and 8, and `PresentSession::SetSamples`, which waits for the frame in
   flight and rebuilds the four scene pipelines and the multisampled

@@ -4,9 +4,12 @@
 // surface-creation callback and the platform instance extensions. One frame
 // in flight, tracked by a timeline semaphore; the scene pipelines use dynamic
 // rendering, so a resize rebuilds only the swapchain and its depth image.
+// Every frame writes GPU timestamps between its parts, which the next frame
+// reads once it has waited for this one, and draws the host's overlay last.
 #include <toon/vulkan_present.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -20,6 +23,7 @@
 #include <vulkan/vulkan.h>
 
 #include "vulkan_internal.hpp"
+#include "vulkan_overlay.hpp"
 #include "vulkan_scene.hpp"
 #endif
 
@@ -62,12 +66,15 @@ using vulkan_internal::ImageBarrier;
 using vulkan_internal::InstanceState;
 using vulkan_internal::InvalidateIfNeeded;
 using vulkan_internal::LoadSceneShaders;
+using vulkan_internal::LoadSpirv;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
+using vulkan_internal::OverlayRenderer;
 using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
-using vulkan_internal::SceneShaderWords;
 using vulkan_internal::ScenePipelines;
+using vulkan_internal::SceneRecord;
+using vulkan_internal::SceneShaderWords;
 using vulkan_internal::SupportsSceneFeatures;
 using vulkan_internal::TextureCache;
 using vulkan_internal::ValidationState;
@@ -75,6 +82,23 @@ using vulkan_internal::VulkanOk;
 
 constexpr std::uint64_t kFrameTimeoutNs = 10'000'000'000ULL;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+
+// The timestamps a frame writes, in the order it writes them; each part of
+// PresentGpuTimes lies between two neighbours.
+enum Timestamp : std::uint32_t {
+  kFrameStart,
+  kUploadsEnd,
+  kImageReady,
+  // MeshCache::Record writes this one and the two after it.
+  kUnlitEnd,
+  kOutlineEnd,
+  kOpaqueEnd,
+  kTransparentEnd,
+  kResolveEnd,
+  kCaptureEnd,
+  kOverlayEnd,
+  kTimestampCount,
+};
 
 bool SupportsDepthAttachment(VkPhysicalDevice device) {
   VkFormatProperties properties{};
@@ -147,7 +171,8 @@ public:
       const SceneShaders& shaders, bool vsync, const RenderOptions& options,
       std::string& error);
 
-  [[nodiscard]] bool RenderFrame(const DrawList& draws, std::uint32_t width,
+  [[nodiscard]] bool RenderFrame(const DrawList& draws,
+      const OverlayDrawList& overlay, std::uint32_t width,
       std::uint32_t height, bool& presented,
       std::string& error) override;
 
@@ -181,6 +206,10 @@ private:
   bool ApplySamples(std::string& error);
   void DestroySwapchainObjects();
   bool WaitForCompletion(std::string& error);
+  // Reads the GPU times of the frame that wrote timestamps last, which has
+  // completed.
+  void ReadTimestamps();
+  void WriteTimestamp(Timestamp timestamp);
   void Destroy();
 
   InstanceState instance_;
@@ -203,6 +232,17 @@ private:
   MaterialCache materials_;
   TextureCache textures_;
   MeshCache meshes_;
+  std::vector<std::uint32_t> overlay_vertex_words_;
+  std::vector<std::uint32_t> overlay_fragment_words_;
+  OverlayRenderer overlay_;
+  // Null when the queue writes no timestamps.
+  VkQueryPool timestamps_ = VK_NULL_HANDLE;
+  // Nanoseconds per timestamp tick, and the bits a timestamp holds.
+  double timestamp_period_ = 0.0;
+  std::uint64_t timestamp_mask_ = 0;
+  // The timeline value of the frame whose timestamps wait to be read; 0
+  // when none do.
+  std::uint64_t timed_frame_ = 0;
   VkSemaphore image_available_ = VK_NULL_HANDLE;
   // Frame N signals value N; one frame is in flight.
   VkSemaphore timeline_ = VK_NULL_HANDLE;
@@ -252,7 +292,9 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     error = "the surface provider carries no create_surface callback";
     return PresentSetupStatus::Error;
   }
-  if (!LoadSceneShaders(shaders, words_, error)) {
+  if (!LoadSceneShaders(shaders, words_, error) ||
+      !LoadSpirv(shaders.overlay_vertex, overlay_vertex_words_, error) ||
+      !LoadSpirv(shaders.overlay_fragment, overlay_fragment_words_, error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -421,8 +463,37 @@ PresentSetupStatus VulkanPresentSession::Initialize(
       !textures_.Initialize(physical_device_, device_,
           materials_.descriptor_set(), error) ||
       !meshes_.Initialize(physical_device_, device_, pipelines_.skin_layout,
-          error)) {
+          error) ||
+      !overlay_.Initialize(physical_device_, device_, overlay_vertex_words_,
+          overlay_fragment_words_, surface_format_.format,
+          statistics_.srgb_encoded, error)) {
     return PresentSetupStatus::Error;
+  }
+
+  // A queue whose timestamps hold no bits cannot time the frame; the frame
+  // still draws, and the statistics say so.
+  std::uint32_t family_count = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &family_count,
+      nullptr);
+  std::vector<VkQueueFamilyProperties> families(family_count);
+  vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &family_count,
+      families.data());
+  const std::uint32_t valid_bits = families[queue_family_].timestampValidBits;
+  VkPhysicalDeviceProperties limits{};
+  vkGetPhysicalDeviceProperties(physical_device_, &limits);
+  if (valid_bits != 0 && limits.limits.timestampPeriod > 0.0F) {
+    VkQueryPoolCreateInfo query_create{
+        VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    query_create.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    query_create.queryCount = kTimestampCount;
+    if (!VulkanOk(vkCreateQueryPool(device_, &query_create, nullptr,
+                      &timestamps_),
+            "vkCreateQueryPool", error)) {
+      return PresentSetupStatus::Error;
+    }
+    timestamp_period_ = limits.limits.timestampPeriod;
+    timestamp_mask_ = valid_bits >= 64U ? ~0ULL : (1ULL << valid_bits) - 1U;
+    statistics_.gpu_timing = true;
   }
 
   VkSemaphoreCreateInfo semaphore_create{
@@ -612,13 +683,16 @@ bool VulkanPresentSession::ApplySamples(std::string& error) {
 }
 
 bool VulkanPresentSession::RenderFrame(const DrawList& draws,
-    std::uint32_t width,
+    const OverlayDrawList& overlay, std::uint32_t width,
     std::uint32_t height, bool& presented,
     std::string& error) {
   presented = false;
   if (width == 0 || height == 0) {
     return true;
   }
+  using Clock = std::chrono::steady_clock;
+  using Milliseconds = std::chrono::duration<double, std::milli>;
+  const auto start = Clock::now();
   if (!ApplySamples(error)) {
     return false;
   }
@@ -632,13 +706,16 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     }
   }
 
+  const auto wait_start = Clock::now();
   if (!WaitForCompletion(error)) {
     return false;
   }
+  ReadTimestamps();
   std::uint32_t image_index = 0;
   const VkResult acquire =
       vkAcquireNextImageKHR(device_, swapchain_, kFrameTimeoutNs,
           image_available_, VK_NULL_HANDLE, &image_index);
+  const Milliseconds waited = Clock::now() - wait_start;
   if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
     return RecreateSwapchain(width, height, error);
   }
@@ -646,7 +723,8 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     return VulkanOk(acquire, "vkAcquireNextImageKHR", error);
   }
   if (!meshes_.Update(draws, error) || !textures_.Update(draws, error) ||
-      !materials_.Update(draws, textures_, error)) {
+      !materials_.Update(draws, textures_, error) ||
+      !overlay_.Update(overlay, error)) {
     return false;
   }
   statistics_.topology_uploads = meshes_.topology_uploads();
@@ -655,6 +733,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   statistics_.texture_uploads = textures_.uploads();
   statistics_.skin_uploads = meshes_.skin_uploads();
   statistics_.pose_writes = meshes_.pose_writes();
+  statistics_.overlay_texture_uploads = overlay_.texture_uploads();
   // A capture copies this frame's image into a buffer the CPU reads; the
   // frame before it has completed, so the buffer is free to replace.
   const bool capture = capture_requested_;
@@ -684,7 +763,13 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
           error)) {
     return false;
   }
+  if (timestamps_ != VK_NULL_HANDLE) {
+    vkCmdResetQueryPool(command_, timestamps_, 0, kTimestampCount);
+  }
+  WriteTimestamp(kFrameStart);
   textures_.RecordUploads(command_);
+  overlay_.RecordUploads(command_);
+  WriteTimestamp(kUploadsEnd);
   // The colour transitions wait at the stage the acquire semaphore gates;
   // a resolve into the swapchain image writes it at that stage too.
   const bool multisampled = color_samples_.image != VK_NULL_HANDLE;
@@ -714,13 +799,20 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   dependency.imageMemoryBarrierCount = multisampled ? 3U : 2U;
   dependency.pImageMemoryBarriers = to_attachment;
   vkCmdPipelineBarrier2(command_, &dependency);
+  // After the transition, which waits for the image to be acquired.
+  WriteTimestamp(kImageReady);
   SceneAttachments attachments{views_[image_index], depth_.view};
   if (multisampled) {
     attachments = {color_samples_.view, depth_.view, views_[image_index]};
   }
   BeginSceneRendering(command_, attachments, extent_);
-  meshes_.Record(command_, pipelines_, materials_, draws);
+  SceneRecord record;
+  record.timestamps = timestamps_;
+  record.first_query = kUnlitEnd;
+  meshes_.Record(command_, pipelines_, materials_, draws, &record);
+  WriteTimestamp(kTransparentEnd);
   vkCmdEndRendering(command_);
+  WriteTimestamp(kResolveEnd);
   VkImageLayout rendered = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   VkPipelineStageFlags2 rendered_stage =
       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -754,6 +846,38 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     rendered_stage = VK_PIPELINE_STAGE_2_COPY_BIT;
     rendered_access = VK_ACCESS_2_NONE;
   }
+  WriteTimestamp(kCaptureEnd);
+  // The overlay loads what the scene, and any copy, left in the image.
+  std::uint32_t overlay_draws = 0;
+  if (!overlay.commands.empty()) {
+    const VkImageMemoryBarrier2 to_overlay = ImageBarrier(images_[image_index],
+        VK_IMAGE_ASPECT_COLOR_BIT, rendered_stage, rendered_access,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        rendered, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &to_overlay;
+    vkCmdPipelineBarrier2(command_, &dependency);
+    VkRenderingAttachmentInfo color_attachment{
+        VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color_attachment.imageView = views_[image_index];
+    color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    rendering.renderArea.extent = extent_;
+    rendering.layerCount = 1;
+    rendering.colorAttachmentCount = 1;
+    rendering.pColorAttachments = &color_attachment;
+    vkCmdBeginRendering(command_, &rendering);
+    overlay_draws = overlay_.Record(command_, overlay, extent_);
+    vkCmdEndRendering(command_);
+    rendered = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    rendered_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    rendered_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+  }
+  WriteTimestamp(kOverlayEnd);
   const VkImageMemoryBarrier2 to_present = ImageBarrier(images_[image_index],
       VK_IMAGE_ASPECT_COLOR_BIT, rendered_stage, rendered_access,
       VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, rendered,
@@ -791,6 +915,10 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     return false;
   }
   ++submitted_;
+  timed_frame_ = timestamps_ != VK_NULL_HANDLE ? submitted_ : 0U;
+  statistics_.draws = {record.unlit, record.outline, record.opaque,
+      record.transparent, record.triangles, record.pipeline_binds,
+      overlay_draws, static_cast<std::uint32_t>(overlay.vertices.size())};
   if (capture) {
     capture_requested_ = false;
     capture_frame_ = submitted_;
@@ -823,6 +951,9 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;
   }
+  statistics_.cpu_wait = waited.count();
+  statistics_.cpu_submit = Milliseconds(Clock::now() - start).count() -
+                           statistics_.cpu_wait;
   return true;
 }
 
@@ -874,6 +1005,45 @@ bool VulkanPresentSession::WaitForCompletion(std::string& error) {
       "vkWaitSemaphores", error);
 }
 
+void VulkanPresentSession::WriteTimestamp(Timestamp timestamp) {
+  if (timestamps_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp2(command_, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        timestamps_, timestamp);
+  }
+}
+
+void VulkanPresentSession::ReadTimestamps() {
+  if (timed_frame_ == 0) {
+    return;
+  }
+  // The frame has completed, so every timestamp it wrote is available.
+  std::uint64_t ticks[kTimestampCount]{};
+  const VkResult result = vkGetQueryPoolResults(device_, timestamps_, 0,
+      kTimestampCount, sizeof(ticks), ticks, sizeof(std::uint64_t),
+      VK_QUERY_RESULT_64_BIT);
+  const std::uint64_t frame = timed_frame_;
+  timed_frame_ = 0;
+  if (result != VK_SUCCESS) {
+    return;
+  }
+  const auto between = [&](Timestamp from, Timestamp to) {
+    const std::uint64_t elapsed = (ticks[to] - ticks[from]) & timestamp_mask_;
+    return static_cast<double>(elapsed) * timestamp_period_ * 1e-6;
+  };
+  PresentGpuTimes& gpu = statistics_.gpu;
+  gpu.uploads = between(kFrameStart, kUploadsEnd);
+  gpu.image_wait = between(kUploadsEnd, kImageReady);
+  gpu.unlit = between(kImageReady, kUnlitEnd);
+  gpu.outline = between(kUnlitEnd, kOutlineEnd);
+  gpu.opaque = between(kOutlineEnd, kOpaqueEnd);
+  gpu.transparent = between(kOpaqueEnd, kTransparentEnd);
+  gpu.resolve = between(kTransparentEnd, kResolveEnd);
+  gpu.capture = between(kResolveEnd, kCaptureEnd);
+  gpu.overlay = between(kCaptureEnd, kOverlayEnd);
+  gpu.frame = between(kFrameStart, kOverlayEnd);
+  statistics_.gpu_frame = frame;
+}
+
 void VulkanPresentSession::DestroySwapchainObjects() {
   for (VkSemaphore semaphore : render_finished_) {
     vkDestroySemaphore(device_, semaphore, nullptr);
@@ -901,6 +1071,8 @@ void VulkanPresentSession::Destroy() {
     meshes_.Destroy();
     textures_.Destroy();
     materials_.Destroy();
+    overlay_.Destroy();
+    vkDestroyQueryPool(device_, timestamps_, nullptr);
     vkDestroySemaphore(device_, timeline_, nullptr);
     vkDestroySemaphore(device_, image_available_, nullptr);
     DestroyScenePipelines(device_, pipelines_);

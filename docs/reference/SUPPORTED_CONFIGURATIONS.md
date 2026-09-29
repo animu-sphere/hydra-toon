@@ -28,6 +28,7 @@ runs on a tag or a manual dry run, never on a pull request.
 | `slangc` | bundled with the Vulkan SDK from 1.3.296 | found through `VULKAN_SDK`, then `PATH` |
 | OpenUSD | 26.08 measured | Hydra adapter only; a real `lookdev` or `usd` runtime |
 | GLFW | 3.4 | standalone viewport only; `find_package`, else a pinned FetchContent |
+| Dear ImGui | 1.92.8 at `8936b58fe26e8c3da834b8f60b06511d537b4c63` | standalone viewport only, compiled into it by a pinned FetchContent, as `hydra-merlin`'s viewport pins it; MIT, its licence installed under `share/toon/licenses/imgui` |
 
 Linux and macOS are not measured. macOS has no backend: there is no Metal
 backend ([design policy §4](../design/DESIGN_POLICY.md#4-backends)).

@@ -35,4 +35,16 @@ function(toon_configure_viewport_dependencies)
       GIT_SHALLOW FALSE)
     FetchContent_MakeAvailable(glfw)
   endif()
+
+  # Dear ImGui draws the viewport's measurements and debug controls. It is
+  # the viewport's alone: it never reaches the backend, whose overlay pass
+  # draws the plain OverlayDrawList the viewport converts ImGui's draw data
+  # into. The pin follows hydra-merlin's viewport.
+  include(FetchContent)
+  FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG 8936b58fe26e8c3da834b8f60b06511d537b4c63 # 1.92.8
+    GIT_SHALLOW FALSE)
+  FetchContent_MakeAvailable(imgui)
+  set(imgui_SOURCE_DIR "${imgui_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()

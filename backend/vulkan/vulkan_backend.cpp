@@ -24,7 +24,9 @@ SceneShaders SceneShadersIn(const std::string& directory) {
       (root / "mtoon_transparent.vert.spv").string(),
       (root / "mtoon_transparent.frag.spv").string(),
       (root / "mtoon_outline.vert.spv").string(),
-      (root / "mtoon_outline.frag.spv").string()};
+      (root / "mtoon_outline.frag.spv").string(),
+      (root / "overlay.vert.spv").string(),
+      (root / "overlay.frag.spv").string()};
 }
 
 BackendCapability ProbeVulkanBackend() {

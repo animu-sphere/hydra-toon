@@ -153,7 +153,7 @@ ost renderer viewport -- --frames 8 --hidden
 ost validate --intent renderer-viewport
 ```
 
-The first run fetches GLFW. Omit the arguments after `--` for an interactive
+The first run fetches GLFW and Dear ImGui. Omit the arguments after `--` for an interactive
 window. `--samples N` sets the MSAA samples per pixel, 4 by default; 1 turns
 anti-aliasing off. In a Hydra host, the render setting `toon:msaaSamples`
 does the same. The viewport builds its own tree, `build/<target>--renderer-viewport`,
@@ -166,6 +166,14 @@ wheel dollies; F frames the scene and R returns to the last framing.
 writes the next frame to `toon-viewport-<n>.ppm`. The keys 1, 2, 4 and 8
 set the MSAA samples per pixel while the viewport runs; the title shows the
 count, and `--samples N` sets the first.
+
+An overlay shows the frame interval, the CPU and GPU time of each part of
+the frame, the draw calls and the uploads, as mean, p95 and max over the
+last 1,024 frames; `O` hides it and `--overlay off` leaves it out. A capture
+never contains it. Every run ends with a `Timing:` line per quantity. Read
+GPU times with `--vsync off`: under vsync the GPU idles between frames and
+times the same work several times longer
+([renderer report 22](../reports/renderer/22-2026-09-30-viewport-telemetry.md)).
 
 ### A USD stage in the viewport
 
