@@ -167,26 +167,36 @@ writes the next frame to `toon-viewport-<n>.ppm`.
 
 ### A USD stage in the viewport
 
-The `viewport-usd` intent builds the Hydra adapter and the viewport into one
-tree, where `--usd` draws a stage through Hydra in the viewport's own frame
-loop ([renderer report 19](../reports/renderer/19-2026-09-28-hydra-fed-viewport.md)):
+With `ost` 0.23.14 or newer, `ost renderer viewport --intent hydra` builds
+the Hydra adapter and the viewport into a tree of its own,
+`build/<target>--hydra--renderer-viewport`, where `--usd` draws a stage
+through Hydra in the viewport's own frame loop
+([renderer report 19](../reports/renderer/19-2026-09-28-hydra-fed-viewport.md)).
+A VRM avatar selects MToon only with `vrmImaging` in the process, which
+`--with` adds by the digest the VRM Formation pins
+([`ost` report 08](../reports/ost/08-2026-09-30-v0.23.14-report-07-reverified.md)):
 
 ```sh
-ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>
+ost renderer viewport --intent hydra --profile lookdev \
+    --with sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667 \
+    -- --usd <avatar.usdz>
+ost validate --profile lookdev --intent hydra--renderer-viewport
 ```
 
-`ost renderer viewport` launches the viewport in the runtime's environment
-alone, so a VRM avatar draws with every material PreviewSurface. For MToon,
-run the built viewport as the command of the VRM Formation, which adds
-`vrmImaging`:
+Without `--with`, every VRM material draws as PreviewSurface. The digest
+must be in the local registry: pull it as
+[the VRM host session](#the-vrm-host-session) does.
+
+`ost test` does not take the workflow tree, so the viewport's Hydra CTest,
+`toon-viewport-present-usd`, runs in the `viewport-usd` intent, which builds
+the same two adapters:
 
 ```sh
-cd formations/vrm-host-session
-ost formation run formation.toml --     ../../build/cy2026-windows-x86_64-py313-lookdev--viewport-usd/adapters/viewport/toon-viewport.exe     --usd <avatar.usdz>
+ost build --profile lookdev --intent viewport-usd --jobs auto
+ost test --profile lookdev --intent viewport-usd
 ```
 
-`ost renderer viewport` picks the viewport among every executable of that
-name in the tree, and the `usdview` host test installs a copy under
-`adapters/hydra2/usdview-install/`, which it may launch instead; after a
-change, run `ost test` before looking, or name the build's executable as
-above.
+In that tree, `ost renderer viewport --intent viewport-usd` picks the
+viewport among every executable of that name, and the `usdview` host test
+installs a copy under `adapters/hydra2/usdview-install/`, which it may
+launch instead; after a change, run `ost test` there before looking.

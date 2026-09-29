@@ -127,12 +127,12 @@ jobs:
           "VULKAN_SDK=$root" >> $env:GITHUB_ENV
           "$root\Bin" >> $env:GITHUB_PATH
           & "$root\Bin\slangc.exe" -v
-      - name: Bootstrap ost 0.23.13 (pinned release asset, checksum-verified)
+      - name: Bootstrap ost 0.23.14 (pinned release asset, checksum-verified)
         shell: bash
         run: |
           set -euo pipefail
           asset="ost-cli-x86_64-pc-windows-msvc.zip"
-          base="https://github.com/animu-sphere/open-strata/releases/download/v0.23.13"
+          base="https://github.com/animu-sphere/open-strata/releases/download/v0.23.14"
           curl -fsSLo "$asset" "$base/$asset"
           curl -fsSLo "$asset.sha256" "$base/$asset.sha256"
           actual="$(sha256sum "$asset" | cut -d' ' -f1)"
@@ -152,8 +152,8 @@ jobs:
           set -euo pipefail
           version="$(ost --version)"
           echo "$version"
-          if [ "$version" != "ost 0.23.13" ]; then
-            echo "::error title=ost bootstrap::expected 'ost 0.23.13', got '$version'" ; exit 1
+          if [ "$version" != "ost 0.23.14" ]; then
+            echo "::error title=ost bootstrap::expected 'ost 0.23.14', got '$version'" ; exit 1
           fi
       # Restore and save are split so the cache holds the verified runtime
       # and nothing this job adds to the registry after it.
@@ -163,7 +163,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ost-ci-home/artifacts
-          key: ost-registry-0.23.13-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ matrix.runtime_artifact }}
+          key: ost-registry-0.23.14-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ matrix.runtime_artifact }}
       - name: Pull the pinned runtime SDK from its remote reference
         shell: bash
         run: |
@@ -194,7 +194,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ost-ci-home/artifacts
-          key: ost-registry-0.23.13-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ matrix.runtime_artifact }}
+          key: ost-registry-0.23.14-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ matrix.runtime_artifact }}
       - name: Set up host Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -220,7 +220,7 @@ jobs:
           ost validate --target ${{ matrix.platform }} --profile ${{ matrix.profile }} --intent ${{ matrix.intent }} --json | tee .ost-ci/validate.json
           # The hosted runner has no Vulkan device: the GPU checks are SKIP.
           jq -r '.data.checks[] | "\(.status)\t\(.name)\t\(.detail // "")"' .ost-ci/validate.json
-      # `ost package --json` (0.23.13) prints CMake's install log on stdout
+      # `ost package --json` (0.23.13, 0.23.14) prints CMake's install log on stdout
       # before the JSON document, so the document is cut from its first line.
       - name: Package twice and stage the package
         shell: bash
@@ -330,12 +330,12 @@ jobs:
         with:
           pattern: oci-*
           path: oci-staged
-      - name: Bootstrap ost 0.23.13 (pinned release asset, checksum-verified)
+      - name: Bootstrap ost 0.23.14 (pinned release asset, checksum-verified)
         shell: bash
         run: |
           set -euo pipefail
           asset="ost-cli-x86_64-unknown-linux-musl.tar.xz"
-          base="https://github.com/animu-sphere/open-strata/releases/download/v0.23.13"
+          base="https://github.com/animu-sphere/open-strata/releases/download/v0.23.14"
           curl -fsSLo "$asset" "$base/$asset"
           curl -fsSLo "$asset.sha256" "$base/$asset.sha256"
           actual="$(sha256sum "$asset" | cut -d' ' -f1)"
