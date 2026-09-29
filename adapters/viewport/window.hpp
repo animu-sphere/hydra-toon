@@ -29,6 +29,11 @@ enum class Key {
   F,
   P,
   R,
+  // The number row's 1, 2, 4 and 8: MSAA samples per pixel.
+  Digit1,
+  Digit2,
+  Digit4,
+  Digit8,
 };
 
 enum class PointerButton {

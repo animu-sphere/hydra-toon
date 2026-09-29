@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -50,6 +51,9 @@ struct Arguments {
   std::optional<std::uint64_t> expect_draws;
   // Where the last of `frame_limit` frames is written, as a binary PPM.
   std::string screenshot;
+  // The sample count asked for halfway through `frame_limit` frames, as the
+  // number keys ask for one: the presentation test of a live change.
+  std::optional<std::uint32_t> switch_samples;
 };
 
 std::uint64_t ReadUnsigned(std::string_view value, std::string_view name) {
@@ -92,6 +96,9 @@ Arguments ParseArguments(int argc, char** argv) {
     } else if (option == "--samples") {
       result.options.samples =
           static_cast<std::uint32_t>(ReadUnsigned(next(), option));
+    } else if (option == "--switch-samples") {
+      result.switch_samples =
+          static_cast<std::uint32_t>(ReadUnsigned(next(), option));
     } else if (option == "--hidden") {
       result.visible = false;
     } else if (option == "--usd") {
@@ -113,6 +120,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --vsync on|off           FIFO or immediate present\n"
                    "  --samples N              MSAA samples per pixel (default\n"
                    "                           4; 1 turns anti-aliasing off)\n"
+                   "  --switch-samples N       ask for N samples halfway\n"
+                   "                           through --frames N frames\n"
                    "  --hidden                 do not show the window\n"
                    "  --usd <stage>            draw a USD stage through Hydra\n"
                    "                           (a build with the Hydra adapter)\n"
@@ -123,7 +132,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "Left drag orbits, middle or Shift+left drag pans, right\n"
                    "drag or the wheel dollies; F frames the scene and R\n"
                    "returns to the last framing; P writes the next frame to\n"
-                   "toon-viewport-<n>.ppm. Esc or closing the window exits.\n";
+                   "toon-viewport-<n>.ppm; 1, 2, 4 and 8 set the MSAA\n"
+                   "samples per pixel. Esc or closing the window exits.\n";
       std::exit(0);
     } else {
       throw std::invalid_argument("unknown option: " + std::string(option));
@@ -138,6 +148,14 @@ Arguments ParseArguments(int argc, char** argv) {
   if (!result.screenshot.empty() && result.frame_limit == 0) {
     throw std::invalid_argument("--screenshot needs --frames N");
   }
+  if (result.switch_samples) {
+    if (*result.switch_samples == 0) {
+      throw std::invalid_argument("--switch-samples must be at least 1");
+    }
+    if (result.frame_limit < 2) {
+      throw std::invalid_argument("--switch-samples needs --frames N, N >= 2");
+    }
+  }
 #if !TOON_VIEWPORT_HAS_HYDRA
   if (!result.usd.empty()) {
     throw std::invalid_argument("--usd needs a build with the Hydra adapter "
@@ -148,11 +166,37 @@ Arguments ParseArguments(int argc, char** argv) {
 }
 
 std::string WindowTitle(std::string_view scene, std::string_view device,
-    std::uint32_t width, std::uint32_t height, std::uint64_t frames) {
+    std::uint32_t width, std::uint32_t height, std::uint32_t samples,
+    std::uint64_t frames) {
   std::ostringstream title;
   title << "toon-viewport | " << scene << " | " << device << " | " << width
-        << 'x' << height << " | " << frames << " frames";
+        << 'x' << height << " | " << samples << "x MSAA | " << frames
+        << " frames";
   return title.str();
+}
+
+// Everything the session has sent to the GPU, one count per upload or
+// write of any kind.
+std::uint64_t Uploads(const Toon::PresentStatistics& statistics) {
+  return statistics.topology_uploads + statistics.point_uploads +
+         statistics.material_writes + statistics.texture_uploads +
+         statistics.skin_uploads + statistics.pose_writes;
+}
+
+// The sample count a number key asks for; 0 for any other key.
+std::uint32_t SamplesForKey(Toon::viewport::Key key) {
+  switch (key) {
+  case Toon::viewport::Key::Digit1:
+    return 1;
+  case Toon::viewport::Key::Digit2:
+    return 2;
+  case Toon::viewport::Key::Digit4:
+    return 4;
+  case Toon::viewport::Key::Digit8:
+    return 8;
+  default:
+    return 0;
+  }
 }
 
 // What the last frame drew, as the Hydra host evidence counts it: which
@@ -363,6 +407,11 @@ int main(int argc, char** argv) {
     std::string capture_path;
     std::uint64_t captures = 0;
     Toon::ColorProduct capture;
+    // The count the last frame drew at, to report a change once it lands.
+    std::uint32_t samples = session->statistics().samples;
+    // Uploads before --switch-samples asked, which the change must not add
+    // to.
+    std::optional<std::uint64_t> uploads_at_switch;
     auto title_update = Clock::now();
     while (running && (arguments.frame_limit == 0 ||
                           session->statistics().frames_presented <
@@ -385,6 +434,9 @@ int main(int argc, char** argv) {
             capture_path =
                 "toon-viewport-" + std::to_string(captures + 1) + ".ppm";
             session->RequestCapture();
+          } else if (const std::uint32_t requested = SamplesForKey(event.key);
+                     requested != 0) {
+            session->SetSamples(requested);
           }
           break;
         case Toon::viewport::EventType::Resize:
@@ -412,6 +464,12 @@ int main(int argc, char** argv) {
       draws.view = camera.View(static_cast<float>(width) /
                                static_cast<float>(height));
       draws.meters_per_unit = meters_per_unit;
+      if (arguments.switch_samples && !uploads_at_switch &&
+          session->statistics().frames_presented ==
+              arguments.frame_limit / 2) {
+        uploads_at_switch = Uploads(session->statistics());
+        session->SetSamples(*arguments.switch_samples);
+      }
       if (!arguments.screenshot.empty() && capture_path.empty() &&
           session->statistics().frames_presented + 1 ==
               arguments.frame_limit) {
@@ -419,9 +477,20 @@ int main(int argc, char** argv) {
         session->RequestCapture();
       }
       bool presented = false;
+      const auto render_start = Clock::now();
       if (!session->RenderFrame(draws, width, height, presented, error)) {
         std::cerr << "toon-viewport: " << error << '\n';
         return 1;
+      }
+      if (session->statistics().samples != samples) {
+        samples = session->statistics().samples;
+        // The frame that changed the count also rebuilt the pipelines.
+        const std::chrono::duration<double, std::milli> render_time =
+            Clock::now() - render_start;
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(2) << "Samples: " << samples
+             << " per pixel, in a " << render_time.count() << " ms frame";
+        std::cout << line.str() << '\n';
       }
       if (session->TakeCapture(capture, error)) {
         WritePpm(capture_path, capture);
@@ -436,14 +505,20 @@ int main(int argc, char** argv) {
       const auto now = Clock::now();
       if (now - title_update >= std::chrono::milliseconds(250)) {
         window->SetTitle(WindowTitle(scene_name,
-            session->statistics().device_name, width, height,
+            session->statistics().device_name, width, height, samples,
             session->statistics().frames_presented));
         title_update = now;
       }
     }
 
     const Toon::PresentStatistics& statistics = session->statistics();
-    std::cout << "Scene summary: " << SceneSummary(draws) << '\n';
+    std::cout << "Scene summary: " << SceneSummary(draws) << '\n'
+              << "Uploads: topology=" << statistics.topology_uploads
+              << " points=" << statistics.point_uploads
+              << " materials=" << statistics.material_writes
+              << " textures=" << statistics.texture_uploads
+              << " skins=" << statistics.skin_uploads
+              << " poses=" << statistics.pose_writes << '\n';
     if (statistics.validation_message_count != 0) {
       std::cerr << "toon-viewport: Vulkan validation reported "
                 << statistics.validation_message_count
@@ -463,6 +538,26 @@ int main(int argc, char** argv) {
                 << " frame(s) read back for " << captures << " capture(s)\n";
       return 1;
     }
+    // A live change lands at the device's count for what was asked, only a
+    // count that differs rebuilds anything, and nothing is uploaded again.
+    if (arguments.switch_samples) {
+      if (statistics.samples > *arguments.switch_samples ||
+          statistics.sample_changes > 1) {
+        std::cerr << "toon-viewport: asked for " << *arguments.switch_samples
+                  << " sample(s), drew at " << statistics.samples
+                  << " after " << statistics.sample_changes
+                  << " change(s)\n";
+        return 1;
+      }
+      if (!uploads_at_switch || Uploads(statistics) != *uploads_at_switch) {
+        std::cerr << "toon-viewport: the sample change uploaded "
+                  << (uploads_at_switch
+                             ? Uploads(statistics) - *uploads_at_switch
+                             : 0U)
+                  << " time(s), or was never asked for\n";
+        return 1;
+      }
+    }
     if (!arguments.screenshot.empty() && captures == 0) {
       std::cerr << "toon-viewport: no frame was captured to "
                 << arguments.screenshot << '\n';
@@ -478,6 +573,7 @@ int main(int argc, char** argv) {
     std::cout << "Presented " << statistics.frames_presented << " frames on "
               << statistics.device_name
               << " (swapchain recreates: " << statistics.swapchain_recreates
+              << ", sample changes: " << statistics.sample_changes
               << ", frames read back: " << statistics.readbacks << ")\n";
     return 0;
   } catch (const std::exception& fatal) {

@@ -39,7 +39,9 @@ struct SceneShaders {
 // and `<module>.frag.spv` in one directory.
 [[nodiscard]] SceneShaders SceneShadersIn(const std::string& directory);
 
-// How a renderer rasterizes, fixed for its life.
+// How a renderer rasterizes: fixed for an offscreen renderer's life; a
+// present session starts with it and can change the count
+// (PresentSession::SetSamples).
 struct RenderOptions {
   // Multisample anti-aliasing: samples per pixel, resolved to one before a
   // frame's products are read or presented. The device's highest count at
