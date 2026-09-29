@@ -52,7 +52,14 @@ if(TOON_BUILD_TESTS)
   add_test(NAME toon-viewport-capture
     COMMAND toon-viewport --hidden --frames 4 --vsync off
       --screenshot "${CMAKE_CURRENT_BINARY_DIR}/toon-viewport-capture.ppm")
-  set_tests_properties(toon-viewport-present toon-viewport-capture PROPERTIES
+  # The sample count changes while the viewport runs, 4 to 1 halfway, as
+  # the number keys change it: the pipelines and targets are rebuilt once,
+  # and validation stays clean across the change.
+  add_test(NAME toon-viewport-samples
+    COMMAND toon-viewport --hidden --frames 8 --vsync off --samples 4
+      --switch-samples 1)
+  set_tests_properties(toon-viewport-present toon-viewport-capture
+    toon-viewport-samples PROPERTIES
     LABELS "gpu;viewport;presentation"
     SKIP_RETURN_CODE 77
     TIMEOUT 60)

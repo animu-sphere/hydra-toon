@@ -35,13 +35,25 @@ enum class PresentSetupStatus {
 struct PresentStatistics {
   std::uint64_t frames_presented = 0;
   std::uint32_t swapchain_recreates = 0;
-  // Samples per pixel: RenderOptions' count, as far as the device offers it.
+  // Samples per pixel: RenderOptions' count, or the last SetSamples, as far
+  // as the device offers it.
   std::uint32_t samples = 1;
+  // Times SetSamples changed the count: each rebuilt the four scene
+  // pipelines and the multisampled targets, and uploaded nothing.
+  std::uint32_t sample_changes = 0;
   // Whether the swapchain encodes the pipelines' linear colour to sRGB as it
   // is written; false only on a surface that offers no 8-bit sRGB format.
   bool srgb_encoded = false;
   // Frames read back to the CPU: one per capture taken, none otherwise.
   std::uint64_t readbacks = 0;
+  // What reached the GPU, as OffscreenStatistics counts it: geometry,
+  // material slots, textures, skins and poses, each only when it changed.
+  std::uint64_t topology_uploads = 0;
+  std::uint64_t point_uploads = 0;
+  std::uint64_t material_writes = 0;
+  std::uint64_t texture_uploads = 0;
+  std::uint64_t skin_uploads = 0;
+  std::uint64_t pose_writes = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;
@@ -63,6 +75,13 @@ public:
       std::uint32_t width,
       std::uint32_t height, bool& presented,
       std::string& error) = 0;
+
+  // Draws from the next RenderFrame on at the device's highest sample count
+  // at or below `requested`; 1 turns anti-aliasing off. A count that differs
+  // from the current one waits for the frame in flight and rebuilds the
+  // scene pipelines and the multisampled targets, keeping every mesh,
+  // material and texture on the GPU.
+  virtual void SetSamples(std::uint32_t requested) = 0;
 
   // Asks the next frame RenderFrame presents to be copied back to the CPU as
   // well: a screenshot, never an ordinary frame (design policy §31).

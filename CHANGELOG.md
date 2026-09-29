@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The viewport's MSAA sample count changes while it runs: the keys 1, 2, 4
+  and 8, and `PresentSession::SetSamples`, which waits for the frame in
+  flight and rebuilds the four scene pipelines and the multisampled
+  targets, keeping the set layouts, descriptor sets and everything
+  uploaded. `PresentStatistics` counts `sample_changes` and the uploads
+  `OffscreenStatistics` counts. `toon-viewport --switch-samples N`, the
+  CTest `toon-viewport-samples`, and renderer report 21.
 - The Hydra-fed viewport: the `viewport-usd` build intent builds the Hydra
   adapter and the viewport together, and `toon-viewport --usd <stage>`
   populates a render index through UsdImaging's scene indices with

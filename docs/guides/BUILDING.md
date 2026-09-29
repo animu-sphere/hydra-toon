@@ -163,7 +163,9 @@ launch record.
 Left drag orbits, a middle or Shift+left drag pans, a right drag or the
 wheel dollies; F frames the scene and R returns to the last framing.
 `--screenshot <file.ppm>` writes the last of `--frames N` frames, and P
-writes the next frame to `toon-viewport-<n>.ppm`.
+writes the next frame to `toon-viewport-<n>.ppm`. The keys 1, 2, 4 and 8
+set the MSAA samples per pixel while the viewport runs; the title shows the
+count, and `--samples N` sets the first.
 
 ### A USD stage in the viewport
 

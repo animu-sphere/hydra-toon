@@ -202,6 +202,16 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
     std::string& detail);
 void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines);
 
+// The four pipelines alone, at `samples`, over the set layouts and samplers
+// `pipelines` already holds: another sample count destroys and creates these
+// and keeps the layouts, so every descriptor set allocated from them, and
+// the material, texture and skin data they point at, stays as it is.
+bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
+    VkFormat color_format, VkFormat depth_format,
+    VkSampleCountFlagBits samples, ScenePipelines& pipelines,
+    std::string& detail);
+void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines);
+
 // A device-local 2D image with one view.
 struct DeviceImage {
   VkImage image = VK_NULL_HANDLE;

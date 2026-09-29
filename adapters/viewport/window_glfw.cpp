@@ -169,6 +169,14 @@ private:
       return Key::F;
     case GLFW_KEY_R:
       return Key::R;
+    case GLFW_KEY_1:
+      return Key::Digit1;
+    case GLFW_KEY_2:
+      return Key::Digit2;
+    case GLFW_KEY_4:
+      return Key::Digit4;
+    case GLFW_KEY_8:
+      return Key::Digit8;
     default:
       return Key::Unknown;
     }

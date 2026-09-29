@@ -49,10 +49,12 @@ using vulkan_internal::ChooseSampleCount;
 using vulkan_internal::CreateDeviceImage;
 using vulkan_internal::CreateHostBuffer;
 using vulkan_internal::CreateInstanceWithValidation;
+using vulkan_internal::CreateScenePipelineObjects;
 using vulkan_internal::CreateScenePipelines;
 using vulkan_internal::DestroyDeviceImage;
 using vulkan_internal::DestroyHostBuffer;
 using vulkan_internal::DestroyInstance;
+using vulkan_internal::DestroyScenePipelineObjects;
 using vulkan_internal::DestroyScenePipelines;
 using vulkan_internal::DeviceImage;
 using vulkan_internal::HostBuffer;
@@ -149,6 +151,10 @@ public:
       std::uint32_t height, bool& presented,
       std::string& error) override;
 
+  void SetSamples(std::uint32_t requested) override {
+    requested_samples_ = std::max(requested, 1U);
+  }
+
   void RequestCapture() override {
     capture_requested_ = true;
   }
@@ -167,6 +173,12 @@ private:
 
   bool RecreateSwapchain(std::uint32_t width, std::uint32_t height,
       std::string& error);
+  // The depth image and, multisampled, the colour samples, at `extent_` and
+  // the pipelines' sample count.
+  bool CreateSampleTargets(std::string& error);
+  // Rebuilds the pipelines and the sample targets at the device's count for
+  // `requested_samples_`, when that differs from theirs.
+  bool ApplySamples(std::string& error);
   void DestroySwapchainObjects();
   bool WaitForCompletion(std::string& error);
   void Destroy();
@@ -182,7 +194,12 @@ private:
   VkCommandBuffer command_ = VK_NULL_HANDLE;
   VkSurfaceFormatKHR surface_format_{};
   VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_FIFO_KHR;
+  SceneShaderWords words_;
   ScenePipelines pipelines_;
+  // What SetSamples last asked for, and what the pipelines were last made
+  // for; ApplySamples looks at the device only when the two differ.
+  std::uint32_t requested_samples_ = 1;
+  std::uint32_t applied_samples_ = 1;
   MaterialCache materials_;
   TextureCache textures_;
   MeshCache meshes_;
@@ -235,8 +252,7 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     error = "the surface provider carries no create_surface callback";
     return PresentSetupStatus::Error;
   }
-  SceneShaderWords words;
-  if (!LoadSceneShaders(shaders, words, error)) {
+  if (!LoadSceneShaders(shaders, words_, error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -393,10 +409,12 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     return PresentSetupStatus::Error;
   }
 
+  requested_samples_ = std::max(options.samples, 1U);
+  applied_samples_ = requested_samples_;
   const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
-      surface_format_.format, kDepthFormat, options.samples);
+      surface_format_.format, kDepthFormat, requested_samples_);
   statistics_.samples = static_cast<std::uint32_t>(samples);
-  if (!CreateScenePipelines(device_, words, surface_format_.format,
+  if (!CreateScenePipelines(device_, words_, surface_format_.format,
           kDepthFormat, samples, pipelines_, error) ||
       !materials_.Initialize(physical_device_, device_,
           pipelines_.material_layout, error) ||
@@ -532,6 +550,18 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
     }
   }
 
+  extent_ = extent;
+  if (!CreateSampleTargets(error)) {
+    return false;
+  }
+  if (swapchain_created_once_) {
+    ++statistics_.swapchain_recreates;
+  }
+  swapchain_created_once_ = true;
+  return true;
+}
+
+bool VulkanPresentSession::CreateSampleTargets(std::string& error) {
   // Only the resolved colour outlives the pass.
   const VkSampleCountFlagBits samples = pipelines_.samples;
   const VkImageUsageFlags transient =
@@ -539,23 +569,45 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
                                        : 0U;
   if (!CreateDeviceImage(physical_device_, device_, kDepthFormat,
           VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | transient,
-          VK_IMAGE_ASPECT_DEPTH_BIT, extent.width, extent.height, depth_, error,
-          1, samples)) {
+          VK_IMAGE_ASPECT_DEPTH_BIT, extent_.width, extent_.height, depth_,
+          error, 1, samples)) {
     return false;
   }
-  if (samples != VK_SAMPLE_COUNT_1_BIT &&
-      !CreateDeviceImage(physical_device_, device_, surface_format_.format,
-          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | transient,
-          VK_IMAGE_ASPECT_COLOR_BIT, extent.width, extent.height,
-          color_samples_, error, 1, samples)) {
-    return false;
-  }
+  return samples == VK_SAMPLE_COUNT_1_BIT ||
+         CreateDeviceImage(physical_device_, device_, surface_format_.format,
+             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | transient,
+             VK_IMAGE_ASPECT_COLOR_BIT, extent_.width, extent_.height,
+             color_samples_, error, 1, samples);
+}
 
-  extent_ = extent;
-  if (swapchain_created_once_) {
-    ++statistics_.swapchain_recreates;
+bool VulkanPresentSession::ApplySamples(std::string& error) {
+  if (requested_samples_ == applied_samples_) {
+    return true;
   }
-  swapchain_created_once_ = true;
+  applied_samples_ = requested_samples_;
+  const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
+      surface_format_.format, kDepthFormat, requested_samples_);
+  if (samples == pipelines_.samples) {
+    return true;
+  }
+  // Nothing in flight may use the pipelines or the targets. The swapchain
+  // images, the caches and their descriptor sets stay.
+  if (!WaitForCompletion(error)) {
+    return false;
+  }
+  DestroyScenePipelineObjects(device_, pipelines_);
+  if (!CreateScenePipelineObjects(device_, words_, surface_format_.format,
+          kDepthFormat, samples, pipelines_, error)) {
+    return false;
+  }
+  DestroyDeviceImage(device_, depth_);
+  DestroyDeviceImage(device_, color_samples_);
+  if (swapchain_ != VK_NULL_HANDLE && extent_.width != 0 &&
+      extent_.height != 0 && !CreateSampleTargets(error)) {
+    return false;
+  }
+  statistics_.samples = static_cast<std::uint32_t>(samples);
+  ++statistics_.sample_changes;
   return true;
 }
 
@@ -566,6 +618,9 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   presented = false;
   if (width == 0 || height == 0) {
     return true;
+  }
+  if (!ApplySamples(error)) {
+    return false;
   }
   if (swapchain_ == VK_NULL_HANDLE || width != extent_.width ||
       height != extent_.height) {
@@ -594,6 +649,12 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
       !materials_.Update(draws, textures_, error)) {
     return false;
   }
+  statistics_.topology_uploads = meshes_.topology_uploads();
+  statistics_.point_uploads = meshes_.point_uploads();
+  statistics_.material_writes = materials_.writes();
+  statistics_.texture_uploads = textures_.uploads();
+  statistics_.skin_uploads = meshes_.skin_uploads();
+  statistics_.pose_writes = meshes_.pose_writes();
   // A capture copies this frame's image into a buffer the CPU reads; the
   // frame before it has completed, so the buffer is free to replace.
   const bool capture = capture_requested_;

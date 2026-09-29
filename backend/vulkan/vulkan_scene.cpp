@@ -450,7 +450,6 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
     VkFormat color_format, VkFormat depth_format,
     VkSampleCountFlagBits samples, ScenePipelines& pipelines,
     std::string& detail) {
-  pipelines.samples = samples;
   // Trilinear, since glTF's filters are not on the stage; one sampler per
   // wrap pair, so a material's wrap is an index, not a descriptor.
   for (std::uint32_t index = 0; index < kSamplerCount; ++index) {
@@ -512,6 +511,15 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
     return false;
   }
 
+  return CreateScenePipelineObjects(device, words, color_format, depth_format,
+      samples, pipelines, detail);
+}
+
+bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
+    VkFormat color_format, VkFormat depth_format,
+    VkSampleCountFlagBits samples, ScenePipelines& pipelines,
+    std::string& detail) {
+  pipelines.samples = samples;
   PipelineDescription mesh;
   mesh.vertex_words = &words.mesh_vertex;
   mesh.fragment_words = &words.mesh_fragment;
@@ -551,11 +559,15 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
              depth_format, pipelines.mtoon_outline, detail);
 }
 
-void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
+void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines) {
   DestroyScenePipeline(device, pipelines.mtoon_outline);
   DestroyScenePipeline(device, pipelines.mtoon_transparent);
   DestroyScenePipeline(device, pipelines.mtoon);
   DestroyScenePipeline(device, pipelines.mesh);
+}
+
+void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines) {
+  DestroyScenePipelineObjects(device, pipelines);
   vkDestroyDescriptorSetLayout(device, pipelines.material_layout, nullptr);
   vkDestroyDescriptorSetLayout(device, pipelines.skin_layout, nullptr);
   for (VkSampler sampler : pipelines.samplers) {
