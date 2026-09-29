@@ -35,7 +35,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
 | `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline, Slang shaders |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
-| `adapters/viewport/` | `toon-viewport` | — | standalone GLFW window, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
+| `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
@@ -88,7 +88,9 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
 4. OpenUSD appears only under `adapters/hydra2/` and in
    `adapters/viewport/hydra_scene.cpp`, which is compiled only when the
    Hydra adapter is built too; no other viewport source includes an OpenUSD
-   header. GLFW appears only under `adapters/viewport/`.
+   header. GLFW and Dear ImGui appear only under `adapters/viewport/`; the
+   backend draws the viewport's overlay from `include/toon/overlay.hpp`'s
+   plain data.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 

@@ -1324,7 +1324,15 @@ void MeshCache::Release(Entry& entry) {
 
 void MeshCache::Record(VkCommandBuffer command,
     const ScenePipelines& pipelines, const MaterialCache& materials,
-    const DrawList& draws) {
+    const DrawList& draws, SceneRecord* record) {
+  SceneRecord unused;
+  SceneRecord& counts = record != nullptr ? *record : unused;
+  const auto mark = [&](std::uint32_t part) {
+    if (counts.timestamps != VK_NULL_HANDLE) {
+      vkCmdWriteTimestamp2(command, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+          counts.timestamps, counts.first_query + part);
+    }
+  };
   const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
   const auto mtoon_material =
       [&materials](const MeshSnapshot& mesh) -> const MaterialCache::Entry* {
@@ -1336,6 +1344,7 @@ void MeshCache::Record(VkCommandBuffer command,
 
   vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
       pipelines.mesh.pipeline);
+  ++counts.pipeline_binds;
   for (const MeshSnapshot& mesh : draws.draws) {
     const auto found = entries_.find(mesh.id);
     if (found == entries_.end() || mtoon_material(mesh) != nullptr) {
@@ -1362,7 +1371,10 @@ void MeshCache::Record(VkCommandBuffer command,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
     vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
+    ++counts.unlit;
+    counts.triangles += entry.index_count / 3U;
   }
+  mark(0);
 
   // Every MToon pipeline shares the layout, the streams and the constants;
   // they differ in shaders, blending and which faces they cull. Their
@@ -1382,6 +1394,7 @@ void MeshCache::Record(VkCommandBuffer command,
     }
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline.pipeline);
+    ++counts.pipeline_binds;
     if (bound == nullptr) {
       vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
           pipeline.layout, 0, 1, &material_set, 0, nullptr);
@@ -1429,6 +1442,7 @@ void MeshCache::Record(VkCommandBuffer command,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
     vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
+    counts.triangles += entry.index_count / 3U;
   };
 
   // The opaque pass, Mask included: every hull, then every surface. The
@@ -1457,7 +1471,9 @@ void MeshCache::Record(VkCommandBuffer command,
           outline                  ? VK_CULL_MODE_FRONT_BIT
           : material->double_sided ? VK_CULL_MODE_NONE
                                    : VK_CULL_MODE_BACK_BIT);
+      ++(outline ? counts.outline : counts.opaque);
     }
+    mark(outline ? 1U : 2U);
   }
 
   // The transparent pass, back to front by render queue and, within one
@@ -1477,12 +1493,15 @@ void MeshCache::Record(VkCommandBuffer command,
     if (material.double_sided) {
       draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
           VK_CULL_MODE_FRONT_BIT);
+      ++counts.transparent;
     }
     draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
         VK_CULL_MODE_BACK_BIT);
+    ++counts.transparent;
     if (material.outline) {
       draw_mtoon(pipelines.mtoon_outline, mesh, entry, material,
           VK_CULL_MODE_FRONT_BIT);
+      ++counts.transparent;
     }
   }
 }

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <toon/extraction.hpp>
+#include <toon/overlay.hpp>
 #include <toon/vulkan_backend.hpp>
 
 namespace Toon {
@@ -32,6 +33,44 @@ enum class PresentSetupStatus {
   Error,
 };
 
+// The GPU's time for each part of one frame, in milliseconds, between
+// timestamps the frame wrote as it ran.
+struct PresentGpuTimes {
+  // Textures copied and mipmapped before the scene.
+  double uploads = 0.0;
+  // Waiting for the swapchain image the frame draws into to be released by
+  // the presentation engine: long under vsync, not the renderer's work.
+  double image_wait = 0.0;
+  // The scene pass in the order it draws: unlit meshes, opaque MToon's
+  // outline hulls, its surfaces, and the transparent draws with their hulls
+  // (design policy §24). `resolve` ends the pass, averaging the samples into
+  // the swapchain image when multisampled.
+  double unlit = 0.0;
+  double outline = 0.0;
+  double opaque = 0.0;
+  double transparent = 0.0;
+  double resolve = 0.0;
+  // The copy a capture reads back; 0 in a frame without one.
+  double capture = 0.0;
+  double overlay = 0.0;
+  // From the first timestamp to the last, the image wait included.
+  double frame = 0.0;
+};
+
+// What one frame recorded.
+struct PresentDrawCounts {
+  // Draw calls in each of the scene pass's parts, as PresentGpuTimes names
+  // them; a double-sided transparent surface is two.
+  std::uint32_t unlit = 0;
+  std::uint32_t outline = 0;
+  std::uint32_t opaque = 0;
+  std::uint32_t transparent = 0;
+  std::uint64_t triangles = 0;
+  std::uint32_t pipeline_binds = 0;
+  std::uint32_t overlay = 0;
+  std::uint32_t overlay_vertices = 0;
+};
+
 struct PresentStatistics {
   std::uint64_t frames_presented = 0;
   std::uint32_t swapchain_recreates = 0;
@@ -54,6 +93,22 @@ struct PresentStatistics {
   std::uint64_t texture_uploads = 0;
   std::uint64_t skin_uploads = 0;
   std::uint64_t pose_writes = 0;
+  // Overlay textures uploaded: one per new texture or pixel change.
+  std::uint64_t overlay_texture_uploads = 0;
+  // The last frame RenderFrame recorded.
+  PresentDrawCounts draws;
+  // The CPU's time in the last RenderFrame that presented, in milliseconds:
+  // waiting for the frame in flight and for a swapchain image, then the rest
+  // (a sample change, uploads, recording, submitting and presenting).
+  double cpu_wait = 0.0;
+  double cpu_submit = 0.0;
+  // Whether the queue writes timestamps; without them `gpu` stays zero.
+  bool gpu_timing = false;
+  // The GPU times of the latest frame known to have completed, and that
+  // frame's number, counting every frame submitted from 1. One frame is in
+  // flight, so they arrive with the frame after it.
+  PresentGpuTimes gpu;
+  std::uint64_t gpu_frame = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;
@@ -61,18 +116,20 @@ struct PresentStatistics {
 };
 
 // One swapchain presentation session drawing a scene's DrawList, through the
-// same mesh pipeline as the offscreen renderer. One frame in flight, FIFO
-// present mode when vsync is on, IMMEDIATE (when available) otherwise.
+// same mesh pipeline as the offscreen renderer, and an OverlayDrawList over
+// it. One frame in flight, FIFO present mode when vsync is on, IMMEDIATE
+// (when available) otherwise.
 class PresentSession {
 public:
   virtual ~PresentSession() = default;
 
-  // Render and present one frame at the window's current framebuffer extent.
-  // A zero extent (minimized window) is not an error: the frame is skipped
-  // and `presented` reports false. Swapchain recreation on resize or
-  // out-of-date presentation is handled internally.
+  // Render and present one frame at the window's current framebuffer extent,
+  // `overlay` drawn over the scene after any capture is copied. A zero
+  // extent (minimized window) is not an error: the frame is skipped and
+  // `presented` reports false. Swapchain recreation on resize or out-of-date
+  // presentation is handled internally.
   [[nodiscard]] virtual bool RenderFrame(const DrawList& draws,
-      std::uint32_t width,
+      const OverlayDrawList& overlay, std::uint32_t width,
       std::uint32_t height, bool& presented,
       std::string& error) = 0;
 

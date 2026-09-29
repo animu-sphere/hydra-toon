@@ -27,6 +27,7 @@ enum class Key {
   Unknown,
   Escape,
   F,
+  O,
   P,
   R,
   // The number row's 1, 2, 4 and 8: MSAA samples per pixel.
@@ -73,6 +74,9 @@ public:
   virtual void SetTitle(std::string_view title) = 0;
   [[nodiscard]] virtual std::uint32_t width() const noexcept = 0;
   [[nodiscard]] virtual std::uint32_t height() const noexcept = 0;
+  // The monitor's scale for content, 1 at 96 DPI on Windows: what the
+  // overlay scales its text and spacing by.
+  [[nodiscard]] virtual float content_scale() const noexcept = 0;
 };
 
 // Bundles the GLFW-required instance extensions and the surface-creation

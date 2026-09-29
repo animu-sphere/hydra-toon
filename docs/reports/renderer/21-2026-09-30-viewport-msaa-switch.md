@@ -1,5 +1,7 @@
 # The viewport's sample count changes while it runs: four pipelines and two targets are rebuilt, nothing is uploaded, and the image is the one a fresh start at that count draws
 
+> Followed by [report 22](22-2026-09-30-viewport-telemetry.md): an ordinary frame is timed now, on the CPU and the GPU, where §4 found no frame timing.
+
 - Date: 2026-09-30
 - Machine: Windows 11, MSVC 14.51, NVIDIA RTX A5000
 - Tooling: `ost 0.23.14`; the canonical CY2026 `lookdev` runtime (OpenUSD

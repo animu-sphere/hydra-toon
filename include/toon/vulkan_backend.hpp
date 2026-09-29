@@ -33,6 +33,10 @@ struct SceneShaders {
   // outline (material policy §5).
   std::string mtoon_outline_vertex;
   std::string mtoon_outline_fragment;
+  // overlay: a present session's 2D overlay (OverlayDrawList). The offscreen
+  // renderer draws none and does not read these.
+  std::string overlay_vertex;
+  std::string overlay_fragment;
 };
 
 // The shaders as the build and install trees lay them out: `<module>.vert.spv`

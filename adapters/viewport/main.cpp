@@ -2,10 +2,14 @@
 // Standalone viewport host, the renderer's main evaluation host (design
 // policy §31). It draws the bootstrap triangle scene or, in a build with the
 // Hydra adapter, a USD stage through Hydra (`--usd <stage>`), through its own
-// orbit camera. `ost renderer viewport` builds and launches this executable;
-// it also runs headless-style as a GPU smoke test (`--hidden --frames N`).
+// orbit camera, and an overlay over it with the frame's CPU and GPU times and
+// the renderer's statistics (design policy §24). `ost renderer viewport`
+// builds and launches this executable; it also runs headless-style as a GPU
+// smoke test (`--hidden --frames N`).
 // Exit codes: 0 success, 1 failure, 77 skip (the environment cannot present).
 #include "camera.hpp"
+#include "overlay.hpp"
+#include "telemetry.hpp"
 #include "window.hpp"
 
 #if TOON_VIEWPORT_HAS_HYDRA
@@ -44,6 +48,8 @@ struct Arguments {
   std::uint64_t frame_limit = 0;
   bool visible = true;
   bool vsync = true;
+  // Whether the overlay is laid out and drawn; O shows and hides it.
+  bool overlay = true;
   Toon::RenderOptions options;
   // A USD stage to draw through Hydra instead of the bootstrap scene.
   std::string usd;
@@ -113,11 +119,19 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--vsync must be on or off");
       }
       result.vsync = value == "on";
+    } else if (option == "--overlay") {
+      const auto value = next();
+      if (value != "on" && value != "off") {
+        throw std::invalid_argument("--overlay must be on or off");
+      }
+      result.overlay = value == "on";
     } else if (option == "--help") {
       std::cout << "Usage: toon-viewport [options]\n"
                    "  --width N --height N     window size (default 1280x720)\n"
                    "  --frames N               exit after N presented frames\n"
                    "  --vsync on|off           FIFO or immediate present\n"
+                   "  --overlay on|off         the measurements over the\n"
+                   "                           scene (default on)\n"
                    "  --samples N              MSAA samples per pixel (default\n"
                    "                           4; 1 turns anti-aliasing off)\n"
                    "  --switch-samples N       ask for N samples halfway\n"
@@ -132,8 +146,9 @@ Arguments ParseArguments(int argc, char** argv) {
                    "Left drag orbits, middle or Shift+left drag pans, right\n"
                    "drag or the wheel dollies; F frames the scene and R\n"
                    "returns to the last framing; P writes the next frame to\n"
-                   "toon-viewport-<n>.ppm; 1, 2, 4 and 8 set the MSAA\n"
-                   "samples per pixel. Esc or closing the window exits.\n";
+                   "toon-viewport-<n>.ppm, without the overlay; 1, 2, 4\n"
+                   "and 8 set the MSAA samples per pixel; O shows or hides\n"
+                   "the overlay. Esc or closing the window exits.\n";
       std::exit(0);
     } else {
       throw std::invalid_argument("unknown option: " + std::string(option));
@@ -175,12 +190,10 @@ std::string WindowTitle(std::string_view scene, std::string_view device,
   return title.str();
 }
 
-// Everything the session has sent to the GPU, one count per upload or
-// write of any kind.
+// Everything the session has sent to the GPU for the scene, one count per
+// upload or write of any kind.
 std::uint64_t Uploads(const Toon::PresentStatistics& statistics) {
-  return statistics.topology_uploads + statistics.point_uploads +
-         statistics.material_writes + statistics.texture_uploads +
-         statistics.skin_uploads + statistics.pose_writes;
+  return Toon::viewport::UploadCounts::Of(statistics).scene();
 }
 
 // The sample count a number key asks for; 0 for any other key.
@@ -202,24 +215,20 @@ std::uint32_t SamplesForKey(Toon::viewport::Key key) {
 // What the last frame drew, as the Hydra host evidence counts it: which
 // model each material selected, and how many draws selected MToon, blended,
 // added a hull, were skinned and drew authored normals.
-std::string SceneSummary(const Toon::DrawList& draws) {
-  std::size_t preview_materials{};
-  std::size_t mtoon_materials{};
+Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
+  Toon::viewport::SceneCounts counts;
+  counts.draws = draws.draws.size();
+  counts.textures = draws.textures.size();
   for (const Toon::MaterialSnapshot& material : draws.materials) {
     if (material.material.model == Toon::ToonShadingModel::PreviewSurface) {
-      ++preview_materials;
+      ++counts.preview_materials;
     } else if (material.material.model == Toon::ToonShadingModel::MToon) {
-      ++mtoon_materials;
+      ++counts.mtoon_materials;
     }
   }
-  std::size_t mtoon_draws{};
-  std::size_t transparent_draws{};
-  std::size_t outline_draws{};
-  std::size_t skinned_draws{};
-  std::size_t authored_normal_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
-    skinned_draws += Toon::IsSkinned(mesh) ? 1U : 0U;
-    authored_normal_draws += mesh.authored_normals ? 1U : 0U;
+    counts.skinned += Toon::IsSkinned(mesh) ? 1U : 0U;
+    counts.authored_normals += mesh.authored_normals ? 1U : 0U;
     const auto material = std::lower_bound(draws.materials.begin(),
         draws.materials.end(), mesh.material,
         [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
@@ -227,21 +236,30 @@ std::string SceneSummary(const Toon::DrawList& draws) {
         });
     if (material != draws.materials.end() && material->id == mesh.material &&
         material->material.model == Toon::ToonShadingModel::MToon) {
-      ++mtoon_draws;
-      transparent_draws += Toon::IsTransparent(material->material) ? 1U : 0U;
-      outline_draws += Toon::HasOutline(material->material) ? 1U : 0U;
+      ++counts.mtoon;
+      counts.transparent += Toon::IsTransparent(material->material) ? 1U : 0U;
+      counts.outline += Toon::HasOutline(material->material) ? 1U : 0U;
     }
   }
+  return counts;
+}
+
+std::string SceneSummary(const Toon::DrawList& draws) {
+  const Toon::viewport::SceneCounts counts = CountScene(draws);
   std::ostringstream summary;
-  summary << "draws=" << draws.draws.size() << " draws_mtoon=" << mtoon_draws
-          << " draws_transparent=" << transparent_draws
-          << " draws_outline=" << outline_draws
-          << " draws_skinned=" << skinned_draws
-          << " draws_authored_normals=" << authored_normal_draws
-          << " materials_preview=" << preview_materials
-          << " materials_mtoon=" << mtoon_materials
-          << " textures=" << draws.textures.size();
+  summary << "draws=" << counts.draws << " draws_mtoon=" << counts.mtoon
+          << " draws_transparent=" << counts.transparent
+          << " draws_outline=" << counts.outline
+          << " draws_skinned=" << counts.skinned
+          << " draws_authored_normals=" << counts.authored_normals
+          << " materials_preview=" << counts.preview_materials
+          << " materials_mtoon=" << counts.mtoon_materials
+          << " textures=" << counts.textures;
   return summary.str();
+}
+
+double Milliseconds(Clock::duration duration) {
+  return std::chrono::duration<double, std::milli>(duration).count();
 }
 
 // A binary PPM: RGB, first row at the top, as the capture is laid out.
@@ -401,6 +419,20 @@ int main(int argc, char** argv) {
               << "Scene: " << (bootstrap ? "bootstrap" : arguments.usd)
               << '\n';
 
+    std::unique_ptr<Toon::viewport::Overlay> overlay;
+    if (arguments.overlay) {
+      overlay =
+          std::make_unique<Toon::viewport::Overlay>(window->content_scale());
+    }
+    bool overlay_shown = overlay != nullptr;
+    Toon::OverlayDrawList overlay_draws;
+    Toon::viewport::FrameTelemetry telemetry;
+    std::uint64_t gpu_frame = 0;
+    Toon::viewport::UploadCounts uploads_before;
+    Toon::viewport::UploadCounts frame_uploads;
+    std::optional<Clock::time_point> last_present;
+    auto last_overlay = Clock::now();
+
     bool running = true;
     PointerState pointer;
     // Where the capture under way is written, and how many were written.
@@ -418,6 +450,12 @@ int main(int argc, char** argv) {
                               arguments.frame_limit)) {
       Toon::viewport::Event event;
       while (window->PollEvent(event)) {
+        // The overlay sees every event; a press or the wheel over it is not
+        // the camera's.
+        const bool over_overlay = overlay_shown && overlay->WantsPointer();
+        if (overlay_shown) {
+          overlay->HandleEvent(event);
+        }
         switch (event.type) {
         case Toon::viewport::EventType::Close:
           running = false;
@@ -429,6 +467,12 @@ int main(int argc, char** argv) {
             camera.Frame(Toon::viewport::SceneBounds(snapshot));
           } else if (event.key == Toon::viewport::Key::R) {
             camera.Reset();
+          } else if (event.key == Toon::viewport::Key::O &&
+                     overlay != nullptr) {
+            overlay_shown = !overlay_shown;
+            if (!overlay_shown) {
+              Toon::viewport::Overlay::Hide(overlay_draws);
+            }
           } else if (event.key == Toon::viewport::Key::P &&
                      capture_path.empty()) {
             capture_path =
@@ -440,6 +484,12 @@ int main(int argc, char** argv) {
           }
           break;
         case Toon::viewport::EventType::Resize:
+          break;
+        case Toon::viewport::EventType::PointerDown:
+        case Toon::viewport::EventType::Scroll:
+          if (!over_overlay) {
+            HandlePointer(event, pointer, camera, window->height());
+          }
           break;
         default:
           HandlePointer(event, pointer, camera, window->height());
@@ -455,12 +505,18 @@ int main(int argc, char** argv) {
         window->WaitForEvent();
         continue;
       }
+      Toon::viewport::CpuSample cpu;
+      const auto hydra_start = Clock::now();
 #if TOON_VIEWPORT_HAS_HYDRA
       if (hydra != nullptr) {
         hydra->Update(snapshot);
       }
 #endif
+      const auto extract_start = Clock::now();
+      cpu.hydra = Milliseconds(extract_start - hydra_start);
       Toon::ExtractDrawList(snapshot, draws);
+      const auto overlay_start = Clock::now();
+      cpu.extract = Milliseconds(overlay_start - extract_start);
       draws.view = camera.View(static_cast<float>(width) /
                                static_cast<float>(height));
       draws.meters_per_unit = meters_per_unit;
@@ -476,20 +532,61 @@ int main(int argc, char** argv) {
         capture_path = arguments.screenshot;
         session->RequestCapture();
       }
+      // The overlay shows the frame before this one: its statistics are
+      // the last RenderFrame's.
+      if (overlay_shown) {
+        Toon::viewport::OverlayFrame shown;
+        shown.scene = scene_name;
+        shown.width = width;
+        shown.height = height;
+        shown.vsync = arguments.vsync;
+        shown.statistics = &session->statistics();
+        shown.telemetry = &telemetry;
+        shown.counts = CountScene(draws);
+        shown.frame_uploads = frame_uploads;
+        shown.uploads = Toon::viewport::UploadCounts::Of(session->statistics());
+        const Toon::viewport::OverlayControls controls = overlay->Build(shown,
+            Milliseconds(overlay_start - last_overlay) / 1000.0,
+            overlay_draws);
+        last_overlay = overlay_start;
+        if (controls.samples != 0) {
+          session->SetSamples(controls.samples);
+        }
+      }
       bool presented = false;
       const auto render_start = Clock::now();
-      if (!session->RenderFrame(draws, width, height, presented, error)) {
+      cpu.overlay = Milliseconds(render_start - overlay_start);
+      if (!session->RenderFrame(draws, overlay_draws, width, height,
+              presented, error)) {
         std::cerr << "toon-viewport: " << error << '\n';
         return 1;
       }
+      const auto render_end = Clock::now();
+      if (presented) {
+        cpu.wait = session->statistics().cpu_wait;
+        cpu.submit = session->statistics().cpu_submit;
+        // The first frame has no interval before it.
+        if (last_present) {
+          cpu.interval = Milliseconds(render_end - *last_present);
+          telemetry.PushCpu(cpu);
+        }
+        last_present = render_end;
+      }
+      if (session->statistics().gpu_frame != gpu_frame) {
+        gpu_frame = session->statistics().gpu_frame;
+        telemetry.PushGpu(session->statistics().gpu);
+      }
+      const auto uploads_after =
+          Toon::viewport::UploadCounts::Of(session->statistics());
+      frame_uploads = uploads_after - uploads_before;
+      uploads_before = uploads_after;
       if (session->statistics().samples != samples) {
         samples = session->statistics().samples;
         // The frame that changed the count also rebuilt the pipelines.
-        const std::chrono::duration<double, std::milli> render_time =
-            Clock::now() - render_start;
         std::ostringstream line;
         line << std::fixed << std::setprecision(2) << "Samples: " << samples
-             << " per pixel, in a " << render_time.count() << " ms frame";
+             << " per pixel, in a "
+             << Milliseconds(render_end - render_start) << " ms frame";
         std::cout << line.str() << '\n';
       }
       if (session->TakeCapture(capture, error)) {
@@ -518,7 +615,20 @@ int main(int argc, char** argv) {
               << " materials=" << statistics.material_writes
               << " textures=" << statistics.texture_uploads
               << " skins=" << statistics.skin_uploads
-              << " poses=" << statistics.pose_writes << '\n';
+              << " poses=" << statistics.pose_writes
+              << " overlay_textures=" << statistics.overlay_texture_uploads
+              << '\n'
+              << "Draw calls: unlit=" << statistics.draws.unlit
+              << " outline=" << statistics.draws.outline
+              << " opaque=" << statistics.draws.opaque
+              << " transparent=" << statistics.draws.transparent
+              << " triangles=" << statistics.draws.triangles
+              << " pipeline_binds=" << statistics.draws.pipeline_binds
+              << " overlay=" << statistics.draws.overlay << '\n'
+              << telemetry.Report();
+    if (!statistics.gpu_timing) {
+      std::cout << "Timing: this queue writes no GPU timestamps\n";
+    }
     if (statistics.validation_message_count != 0) {
       std::cerr << "toon-viewport: Vulkan validation reported "
                 << statistics.validation_message_count

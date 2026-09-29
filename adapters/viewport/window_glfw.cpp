@@ -78,6 +78,12 @@ public:
   std::uint32_t height() const noexcept override {
     return height_;
   }
+  float content_scale() const noexcept override {
+    float x = 1.0F;
+    float y = 1.0F;
+    glfwGetWindowContentScale(window_, &x, &y);
+    return x > 0.0F ? x : 1.0F;
+  }
 
   [[nodiscard]] GLFWwindow* native() const noexcept {
     return window_;
@@ -167,6 +173,8 @@ private:
       return Key::P;
     case GLFW_KEY_F:
       return Key::F;
+    case GLFW_KEY_O:
+      return Key::O;
     case GLFW_KEY_R:
       return Key::R;
     case GLFW_KEY_1:

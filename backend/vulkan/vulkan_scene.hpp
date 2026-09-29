@@ -410,6 +410,22 @@ private:
   std::uint64_t writes_ = 0;
 };
 
+// What MeshCache::Record drew, part by part, and where it marks the parts'
+// ends on the GPU.
+struct SceneRecord {
+  // Timestamps written into `timestamps` as the unlit draws, the opaque
+  // hulls and the opaque surfaces end, at `first_query` and the two after
+  // it; none when it is null.
+  VkQueryPool timestamps = VK_NULL_HANDLE;
+  std::uint32_t first_query = 0;
+  std::uint32_t unlit = 0;
+  std::uint32_t outline = 0;
+  std::uint32_t opaque = 0;
+  std::uint32_t transparent = 0;
+  std::uint64_t triangles = 0;
+  std::uint32_t pipeline_binds = 0;
+};
+
 // GPU copies of mesh geometry, keyed by mesh id. Points, normals and
 // indices are re-uploaded only when their own revision changes, into the
 // existing buffer when it is large enough.
@@ -435,9 +451,11 @@ public:
   // draw whose material selected MToon, a Mask one by alpha to coverage
   // when `pipelines` are multisampled. Transparent MToon draws come last,
   // ordered by their material's render queue and then as `draws` lists
-  // them, each surface followed by its hull (material policy §6).
+  // them, each surface followed by its hull (material policy §6). `record`,
+  // when given, counts what was drawn and marks where each part ends.
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
-      const MaterialCache& materials, const DrawList& draws);
+      const MaterialCache& materials, const DrawList& draws,
+      SceneRecord* record = nullptr);
   void Destroy();
 
   [[nodiscard]] std::uint64_t topology_uploads() const {

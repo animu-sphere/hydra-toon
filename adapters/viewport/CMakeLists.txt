@@ -10,9 +10,28 @@ endif()
 
 toon_configure_viewport_dependencies()
 
+# Dear ImGui's core alone: the viewport feeds it the window's events and
+# converts its draw data for the present session's overlay pass, so neither
+# of ImGui's platform or renderer backends is compiled.
+add_library(toon-viewport-imgui STATIC
+  "${imgui_SOURCE_DIR}/imgui.cpp"
+  "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+  "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+  "${imgui_SOURCE_DIR}/imgui_widgets.cpp")
+target_include_directories(toon-viewport-imgui SYSTEM PUBLIC
+  "${imgui_SOURCE_DIR}")
+target_compile_features(toon-viewport-imgui PUBLIC cxx_std_20)
+if(MSVC)
+  target_compile_options(toon-viewport-imgui PRIVATE /W0)
+else()
+  target_compile_options(toon-viewport-imgui PRIVATE -w)
+endif()
+
 add_executable(toon-viewport
   camera.cpp
   main.cpp
+  overlay.cpp
+  telemetry.cpp
   window_glfw.cpp)
 toon_configure_warnings(toon-viewport)
 target_link_libraries(toon-viewport PRIVATE
@@ -20,7 +39,8 @@ target_link_libraries(toon-viewport PRIVATE
   Toon::RenderExtraction
   Toon::Vulkan
   Vulkan::Vulkan
-  glfw)
+  glfw
+  toon-viewport-imgui)
 target_compile_features(toon-viewport PRIVATE cxx_std_20)
 
 # With the Hydra adapter in the same build, `--usd <stage>` hosts Hydra in
@@ -44,6 +64,9 @@ toon_copy_shaders(toon-viewport)
 # The installed tree reuses bin/shaders written by the project install rules.
 install(TARGETS toon-viewport
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+# Dear ImGui is MIT-licensed and compiled into the viewport.
+install(FILES "${imgui_SOURCE_DIR}/LICENSE.txt"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/licenses/imgui")
 
 if(TOON_BUILD_TESTS)
   add_test(NAME toon-viewport-present
@@ -58,8 +81,23 @@ if(TOON_BUILD_TESTS)
   add_test(NAME toon-viewport-samples
     COMMAND toon-viewport --hidden --frames 8 --vsync off --samples 4
       --switch-samples 1)
+  # The same capture without the overlay: the two files must be the same
+  # image, since the overlay is drawn after the copy.
+  add_test(NAME toon-viewport-capture-no-overlay
+    COMMAND toon-viewport --hidden --frames 4 --vsync off --overlay off
+      --screenshot
+        "${CMAKE_CURRENT_BINARY_DIR}/toon-viewport-capture-no-overlay.ppm")
+  add_test(NAME toon-viewport-capture-without-overlay
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIRST=${CMAKE_CURRENT_BINARY_DIR}/toon-viewport-capture.ppm"
+      "-DSECOND=${CMAKE_CURRENT_BINARY_DIR}/toon-viewport-capture-no-overlay.ppm"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_captures.cmake")
+  set_tests_properties(toon-viewport-capture-without-overlay PROPERTIES
+    DEPENDS "toon-viewport-capture;toon-viewport-capture-no-overlay"
+    SKIP_REGULAR_EXPRESSION "SKIP:"
+    LABELS "gpu;viewport;presentation")
   set_tests_properties(toon-viewport-present toon-viewport-capture
-    toon-viewport-samples PROPERTIES
+    toon-viewport-samples toon-viewport-capture-no-overlay PROPERTIES
     LABELS "gpu;viewport;presentation"
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
