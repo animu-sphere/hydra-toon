@@ -37,6 +37,16 @@ rendering is `hydra-merlin`'s.
 
 - Base colour, roughness, metallic, normal, emissive, opacity, their textures
   and basic texture transforms, in `preview_surface`: a basic PBR fallback.
+- glTF metallic-roughness PBR materials mixed with MToon in a VRM avatar,
+  consumed through the imported `UsdPreviewSurface` network. Preserve base
+  colour and textures, metallic and roughness, normals, emission including
+  its strength, and Opaque, Mask and Blend behaviour through that network.
+- Seed-san reproduction checks for `backpack_metal`, `backpack_nm`,
+  `backpack_plastic` and `anim_logo`, plus `wear_metal`, `green_emit` and
+  `glass`: retain the backpack's texture, the logo's colour and the green
+  emission, and let the glass reveal the surface behind it. Cover these
+  behaviours with redistributable controlled fixtures and a local avatar
+  comparison against a reference renderer; keep MToon materials unchanged.
 - Generic textured meshes: face-varying `st` and the other mesh data
   ordinary assets author.
 - A fallback for materials the renderer does not support.
