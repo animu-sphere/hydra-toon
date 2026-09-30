@@ -309,6 +309,402 @@ Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// The remaining MToon surface inputs and UV animation, using texel centres
+// so image comparisons test semantics rather than filtering thresholds.
+Check MToonRestCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_rest";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (!renderer) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+  Toon::RenderWorld world;
+  world.SetBootstrapTriangle();
+  const auto mesh = world.Commit().meshes.front().id;
+  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(3, {0.25F, 0.75F}));
+  const auto material = world.CreateMaterial();
+  world.SetMeshMaterial(mesh, material);
+  const auto texture = world.CreateTexture();
+  Toon::ToonTexture image;
+  image.width = image.height = 2;
+  image.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255,
+          0, 0, 255, 255, 255, 255, 255, 64});
+  world.SetTexture(texture, image);
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = toon.mtoon.shade_color = {};
+  toon.emissive = {1, 1, 1};
+  toon.emissive_texture.texture = texture;
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  const auto render = [&]() {
+    world.SetMaterial(material, toon);
+    return renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+        color, depth, detail);
+  };
+  const auto is_color = [&](int channel) {
+    const auto pixel = CenterPixel(color);
+    return pixel[channel] > 240 && pixel[(channel + 1) % 3] < 10 &&
+           pixel[(channel + 2) % 3] < 10;
+  };
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "emissive texture did not sample red: " + detail};
+  }
+  const auto first = renderer->statistics();
+  // A middle sRGB texel decodes to roughly level 55 on the headless
+  // linear UNORM target. Treating it as linear would keep level 128.
+  const auto grey_texture = world.CreateTexture();
+  Toon::ToonTexture grey;
+  grey.width = grey.height = 1;
+  grey.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 128, 128, 255});
+  world.SetTexture(grey_texture, grey);
+  toon.emissive_texture.texture = grey_texture;
+  if (!render() || CenterPixel(color)[0] < 53 || CenterPixel(color)[0] > 57) {
+    return {id, "fail", "emissive images must decode sRGB before shading"};
+  }
+  world.RemoveTexture(grey_texture);
+  toon.emissive_texture.texture = texture;
+  toon.mtoon.uv_scroll_x_speed = 0.5F;
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  const auto animated = renderer->statistics();
+  world.SetTimeSeconds(1.0);
+  if (!render() || !is_color(1)) {
+    return {id, "fail", "UV scroll must reach the emissive texture"};
+  }
+  const auto moved = renderer->statistics();
+  if (moved.material_writes != animated.material_writes ||
+      moved.texture_uploads != animated.texture_uploads ||
+      moved.point_uploads != first.point_uploads ||
+      moved.pipelines_created != first.pipelines_created) {
+    return {id, "fail", "time must change no material, texture, geometry or pipeline"};
+  }
+  // Rotation is around the UV centre; rotation then scroll, with each
+  // role's transform applied after the animation.
+  toon.mtoon.uv_scroll_x_speed = 0;
+  toon.mtoon.uv_rotation_speed = 1.5707963268F;
+  if (!render() || !is_color(2)) {
+    return {id, "fail", "UV rotation must turn the top left to the bottom left"};
+  }
+  toon.mtoon.uv_scroll_x_speed = 0.5F;
+  toon.emissive_texture.scale = {0.5F, 1};
+  toon.emissive_texture.offset = {-0.125F, -0.5F};
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "animation must precede the role's transform"};
+  }
+  toon.emissive_texture = {};
+  toon.emissive_texture.texture = texture;
+  toon.mtoon.uv_rotation_speed = 0;
+  const auto mask = world.CreateTexture();
+  Toon::ToonTexture data;
+  data.width = data.height = 1;
+  data.encoding = Toon::ToonTextureEncoding::Linear;
+  const auto set_data = [&](std::vector<std::uint8_t> pixels) {
+    data.pixels = std::make_shared<const std::vector<std::uint8_t>>(std::move(pixels));
+    world.SetTexture(mask, data);
+  };
+  set_data({255, 255, 0, 255});
+  toon.mtoon.uv_animation_mask_texture.texture = mask;
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "the mask's B=0 must stop animation independently of R/G"};
+  }
+  const auto frozen = renderer->statistics();
+  set_data({0, 0, 255, 255});
+  if (!render() || !is_color(1) ||
+      renderer->statistics().material_writes != frozen.material_writes) {
+    return {id, "fail", "a mask pixel edit must restore animation without a slot write"};
+  }
+  // A transformed, unanimated mask samples its own role. A half mask
+  // must scale both rotation and scrolling rather than the final UV.
+  data.width = 2;
+  data.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255, 255, 255, 255, 0, 0, 0, 255});
+  world.SetTexture(mask, data);
+  toon.mtoon.uv_animation_mask_texture.offset = {0.5F, 0};
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "the UV mask must use its own transform without animation"};
+  }
+  data.width = 1;
+  set_data({0, 255, 128, 255});
+  toon.mtoon.uv_animation_mask_texture.offset = {};
+  toon.mtoon.uv_scroll_x_speed = 1;
+  if (!render() || !is_color(1)) {
+    return {id, "fail", "linear B mask must multiply the scroll speed"};
+  }
+  toon.mtoon.uv_animation_mask_texture = {};
+  toon.mtoon.uv_scroll_x_speed = 0;
+  world.SetTimeSeconds(0);
+  toon.emissive_texture.rotation = 1.5707963268F;
+  toon.emissive_texture.scale = {2, 1};
+  toon.emissive_texture.offset = {0.5F, 0.75F};
+  if (!render() || !is_color(1)) {
+    return {id, "fail", "KHR rotation, nonuniform scale and offset must compose"};
+  }
+  // No map, no UVs, and an unresolved image must keep emission unchanged.
+  toon.emissive_texture.texture = 999999;
+  if (!render() || CenterPixel(color)[0] < 240 || CenterPixel(color)[2] < 240) {
+    return {id, "fail", "missing emissive images must sample white"};
+  }
+  // Base, shade and rim samples use the same animation-before-transform
+  // order as emission, in both opaque and transparent pipelines.
+  for (int role = 0; role < 3; ++role) {
+    toon = {};
+    toon.model = Toon::ToonShadingModel::MToon;
+    toon.base_color = toon.mtoon.shade_color = {};
+    Toon::ToonTextureRef* ref = nullptr;
+    if (role == 0) {
+      toon.base_color = {1, 1, 1};
+      ref = &toon.base_texture;
+    } else if (role == 1) {
+      toon.mtoon.shading_shift = -2;
+      toon.mtoon.shade_color = {1, 1, 1};
+      ref = &toon.mtoon.shade_texture;
+    } else {
+      toon.mtoon.rim_color = {1, 1, 1};
+      toon.mtoon.rim_lift = 1;
+      toon.mtoon.rim_lighting_mix = 0;
+      ref = &toon.mtoon.rim_multiply_texture;
+    }
+    ref->texture = texture;
+    ref->rotation = 1.5707963268F;
+    ref->scale = {2, 1};
+    ref->offset = {0.5F, 0.75F};
+    world.SetTimeSeconds(0);
+    if (!render() || !is_color(1)) {
+      return {id, "fail", "a colour role must apply rotation, nonuniform scale and offset"};
+    }
+    ref->rotation = 0;
+    ref->scale = {0.5F, 1};
+    ref->offset = {-0.125F, -0.5F};
+    toon.mtoon.uv_scroll_x_speed = 0.5F;
+    toon.mtoon.uv_rotation_speed = 1.5707963268F;
+    world.SetTimeSeconds(1);
+    for (const auto mode : {Toon::ToonAlphaMode::Opaque, Toon::ToonAlphaMode::Blend}) {
+      toon.alpha_mode = mode;
+      if (!render() || !is_color(0)) {
+        return {id, "fail", "opaque and Blend colour roles must animate before transforming"};
+      }
+    }
+  }
+  // Mask follows the animated base alpha. Opaque ignores that alpha.
+  toon = {};
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = toon.mtoon.shade_color = {};
+  toon.emissive = {0, 1, 0};
+  toon.base_texture.texture = texture;
+  toon.alpha_mode = Toon::ToonAlphaMode::Mask;
+  toon.mtoon.uv_scroll_x_speed = toon.mtoon.uv_scroll_y_speed = 0.5F;
+  world.SetTimeSeconds(0);
+  if (!render() || !is_color(1)) {
+    return {id, "fail", "Mask must retain the opaque base texel"};
+  }
+  world.SetTimeSeconds(1);
+  if (!render() || CenterPixel(color)[1] > 100) {
+    return {id, "fail", "Mask must cut the animated low-alpha base texel"};
+  }
+  toon.alpha_mode = Toon::ToonAlphaMode::Opaque;
+  if (!render() || !is_color(1)) {
+    return {id, "fail", "Opaque must ignore animated base alpha"};
+  }
+  // Shift uses linear R times its contribution scale, with a zero fallback.
+  toon = {};
+  toon.model = Toon::ToonShadingModel::MToon;
+  world.SetTimeSeconds(0);
+  toon.emissive = {};
+  toon.base_color = {1, 0, 0};
+  toon.mtoon.shade_color = {0, 0, 1};
+  toon.mtoon.shading_shift = -1.15F;
+  toon.mtoon.shading_shift_texture.texture = mask;
+  set_data({128, 0, 0, 255});
+  toon.mtoon.shading_shift_texture_scale = 0;
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  const auto shade = CenterPixel(color);
+  toon.mtoon.shading_shift_texture_scale = 1;
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "linear R shift must move the lit/shade boundary"};
+  }
+  toon.mtoon.shading_shift_texture.texture = 999999;
+  if (!render() || CenterPixel(color) != shade) {
+    return {id, "fail", "missing shading shift images must add zero"};
+  }
+  data.width = 2;
+  data.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{0, 255, 255, 255, 128, 0, 0, 255});
+  world.SetTexture(mask, data);
+  toon.mtoon.shading_shift_texture.texture = mask;
+  toon.mtoon.shading_shift_texture.offset = {0.5F, 0};
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "shift textures must sample their own transform"};
+  }
+  toon.mtoon.shading_shift_texture.offset = {};
+  toon.mtoon.uv_scroll_x_speed = 0.5F;
+  if (!render() || CenterPixel(color) != shade) {
+    return {id, "fail", "G/B data must not contribute to shading shift"};
+  }
+  world.SetTimeSeconds(1);
+  if (!render() || !is_color(0)) {
+    return {id, "fail", "UV animation must reach shading shift textures"};
+  }
+  world.SetMeshUVs(mesh, {});
+  if (!render() || CenterPixel(color) != shade) {
+    return {id, "fail", "a shift role without UVs must add zero"};
+  }
+  const auto final = renderer->statistics();
+  if (final.validation_message_count != 0) {
+    return {id, "fail", final.validation_detail};
+  }
+  return {id, "pass", "emission, linear shift, transformed B mask and timed UVs; time rewrites no material"};
+}
+
+Check MToonNormalCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mtoon_normal";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (!renderer) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+  Toon::RenderWorld world;
+  world.SetBootstrapTriangle();
+  const auto mesh = world.Commit().meshes.front().id;
+  // Planar authored +z normals, with glTF V increasing down the surface.
+  world.SetMeshNormals(mesh, std::vector<Toon::Float3>(3, {0, 0, 1}));
+  const std::vector<Toon::Float2> uvs{{0, 0}, {1, 0}, {0.5F, 1}};
+  world.SetMeshUVs(mesh, uvs);
+  const auto material = world.CreateMaterial();
+  world.SetMeshMaterial(mesh, material);
+  const auto texture = world.CreateTexture();
+  Toon::ToonTexture image;
+  image.width = image.height = 1;
+  image.encoding = Toon::ToonTextureEncoding::Linear;
+  image.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 255, 128, 255});
+  world.SetTexture(texture, image);
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1, 0, 0};
+  toon.mtoon.shade_color = {0, 0, 1};
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  const auto render = [&]() {
+    world.SetMaterial(material, toon);
+    return renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+        color, depth, detail);
+  };
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  const auto flat = CenterPixel(color);
+  toon.normal_texture.texture = texture;
+  if (!render() || CenterPixel(color)[2] < 200 || CenterPixel(color)[0] > 180) {
+    return {id, "fail", "a tangent-space +Y normal must point down in glTF UV space"};
+  }
+  const auto mapped = CenterPixel(color);
+  // A role transform changes sampling, without degenerating the tangent
+  // frame when the sampling scale is zero. Then animate the same sample.
+  image.width = 2;
+  image.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 255, 128, 255, 128, 128, 255, 255});
+  world.SetTexture(texture, image);
+  toon.normal_texture.scale = {0, 0};
+  toon.normal_texture.offset = {0.25F, 0.5F};
+  if (!render() || CenterPixel(color) != mapped) {
+    return {id, "fail", "normal sampling transforms must preserve the original tangent frame"};
+  }
+  toon.normal_texture.offset.x = 0.75F;
+  if (!render() || CenterPixel(color) != flat) {
+    return {id, "fail", "normal maps must sample through their own transform"};
+  }
+  toon.normal_texture.scale = {0.25F, 0};
+  toon.normal_texture.offset.x = 0.125F;
+  if (!render() || CenterPixel(color) != mapped) {
+    return {id, "fail", "normal texture transform must select the tilted map"};
+  }
+  toon.mtoon.uv_scroll_x_speed = 2;
+  world.SetTimeSeconds(1);
+  if (!render() || CenterPixel(color) != flat) {
+    return {id, "fail", "UV animation must reach the normal map before its transform"};
+  }
+  toon.mtoon.uv_scroll_x_speed = 0;
+  toon.normal_texture = {};
+  toon.normal_texture.texture = texture;
+  image.width = 1;
+  world.SetTimeSeconds(0);
+  toon.normal_scale = 0;
+  // Use a map with positive Z so zero XY scale recovers the vertex normal.
+  image.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 255, 255, 255});
+  world.SetTexture(texture, image);
+  if (!render() || CenterPixel(color) != flat) {
+    return {id, "fail", "normal scale zero must preserve the authored normal"};
+  }
+  toon.normal_scale = 1;
+  toon.normal_texture.texture = 999999;
+  if (!render() || CenterPixel(color) != flat) {
+    return {id, "fail", "a missing normal map must preserve the vertex normal"};
+  }
+  toon.normal_texture.texture = texture;
+  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(3, {0.25F, 0.75F}));
+  if (!render() || CenterPixel(color) != flat) {
+    return {id, "fail", "degenerate UVs must retain the vertex normal"};
+  }
+  world.SetMeshUVs(mesh, {});
+  if (!render() || CenterPixel(color) != flat) {
+    return {id, "fail", "absent UVs must disable normal mapping"};
+  }
+  world.SetMeshUVs(mesh, uvs);
+  image.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 255, 128, 255});
+  world.SetTexture(texture, image);
+  Toon::ToonSkin skin;
+  skin.influences_per_point = 1;
+  skin.constant = true;
+  skin.influences = {{0, 1}};
+  world.SetMeshSkin(mesh, skin);
+  Toon::ToonSkinPose pose;
+  pose.joints.resize(1);
+  world.SetMeshSkinPose(mesh, pose);
+  Toon::Matrix4 transform;
+  transform.m[0] = -1;
+  transform.m[5] = 0.7F;
+  world.SetMeshTransform(mesh, transform);
+  if (!render() || CenterPixel(color) != mapped) {
+    return {id, "fail", "a mirrored, nonuniform, skinned surface must preserve tangent handedness"};
+  }
+  // Reverse the winding. Every alpha mode must cull a one-sided back face
+  // and keep a double-sided one, including after a mirrored transform.
+  world.SetMeshTopology(mesh, {0, 2, 1});
+  toon.double_sided = true;
+  if (!render() || CenterPixel(color)[0] < 240 || CenterPixel(color)[2] > 10) {
+    return {id, "fail", "a double-sided mapped back normal must reverse for lighting"};
+  }
+  toon.normal_texture = {};
+  toon.base_color = toon.mtoon.shade_color = {};
+  toon.emissive = {0, 1, 0};
+  for (const auto mode : {Toon::ToonAlphaMode::Opaque, Toon::ToonAlphaMode::Mask,
+           Toon::ToonAlphaMode::Blend}) {
+    toon.alpha_mode = mode;
+    toon.double_sided = false;
+    if (!render() || CenterPixel(color)[1] > 100) {
+      return {id, "fail", "one-sided back faces must be culled in every alpha mode"};
+    }
+    toon.double_sided = true;
+    if (!render() || CenterPixel(color)[1] < 240) {
+      return {id, "fail", "double-sided back faces must draw in every alpha mode"};
+    }
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass", "normal handedness, scale, UV fallbacks, GPU skinning and all alpha-mode culls"};
+}
+
 // An octahedron of radius 0.5 with UVs of zero, seen along -z through an
 // orthographic camera: a diamond |x| + |y| <= 0.5 on screen, whose smooth
 // normals point along x and y at the four rim corners and along +z at the
@@ -626,6 +1022,36 @@ Check OutlineSamplingCheck(const Toon::SceneShaders& shaders) {
     if (!render(false, 1)) {
       return {id, "fail", detail + "; linear filtering must interpolate half width"};
     }
+    // The vertex stage animates before the width role's transform, with
+    // frame time rather than material edits. Missing masks multiply by 1.
+    world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6, {0.25F, 0.75F}));
+    toon.mtoon.outline_width_texture.offset = {};
+    toon.mtoon.uv_scroll_x_speed = 0.5F;
+    world.SetTimeSeconds(0);
+    world.SetMaterial(material, toon);
+    if (!render(false, 1)) {
+      return {id, "fail", detail + "; time zero must sample zero width"};
+    }
+    const auto before_time = renderer->statistics().material_writes;
+    world.SetTimeSeconds(1);
+    if (!render(true, 1) || renderer->statistics().material_writes != before_time) {
+      return {id, "fail", detail + "; time must animate hull width without a slot write"};
+    }
+    toon.mtoon.uv_scroll_x_speed = 0;
+    toon.mtoon.uv_rotation_speed = 1.5707963268F;
+    // (.25,.25) rotates around .5 to (.25,.75); the role rotates it
+    // around zero to (.75,-.25), then offsets V into the image.
+    toon.mtoon.outline_width_texture.rotation = 1.5707963268F;
+    toon.mtoon.outline_width_texture.offset = {0, 0.75F};
+    world.SetMaterial(material, toon);
+    if (!render(true, 1)) {
+      return {id, "fail", detail + "; hull UV rotation must precede its transform"};
+    }
+    toon.mtoon.uv_rotation_speed = 0;
+    toon.mtoon.outline_width_texture.rotation = 0;
+    world.SetTimeSeconds(0);
+    world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
+    toon.mtoon.outline_width_texture.offset.y = 0;
     toon.mtoon.outline_width_texture.offset.x = 0.75F;
     world.SetMaterial(material, toon);
     if (!render(false, 0, false) || !render(true, 1)) {
@@ -981,6 +1407,22 @@ Check MToonRimCheck(const Toon::SceneShaders& shaders) {
       last.topology_uploads != first.topology_uploads) {
     return {id, "fail",
         "a rim edit must rewrite one slot, and a texture upload once"};
+  }
+  toon.mtoon.rim_multiply_texture = {};
+  toon.mtoon.rim_lighting_mix = 0;
+  toon.mtoon.uv_scroll_x_speed = 0.5F;
+  toon.mtoon.uv_rotation_speed = 1.5707963268F;
+  world.SetMaterial(material, toon);
+  world.SetTimeSeconds(0);
+  Shot unanimated_matcap;
+  if (!render(unanimated_matcap)) {
+    return {id, "fail", detail};
+  }
+  const auto matcap_image = color.payload;
+  world.SetTimeSeconds(1);
+  Shot animated_matcap;
+  if (!render(animated_matcap) || color.payload != matcap_image) {
+    return {id, "fail", "UV animation must leave MatCap sampling unchanged"};
   }
   return {id, "pass", ""};
 }
@@ -1637,6 +2079,8 @@ int main(int argc, char** argv) {
                          "pipelines, one target allocation and mesh upload"});
     checks.push_back(MToonOpaqueCheck(shaders));
     checks.push_back(MToonTexturedCheck(shaders));
+    checks.push_back(MToonRestCheck(shaders));
+    checks.push_back(MToonNormalCheck(shaders));
     checks.push_back(MToonOutlineCheck(shaders));
     checks.push_back(OutlineSamplingCheck(shaders));
     checks.push_back(OutlineWidthCheck(shaders));
@@ -1652,6 +2096,8 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.frame.persistence", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_rest", "skip", dependent});
+    checks.push_back({"renderer.material.mtoon_normal", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_outline", "skip", dependent});
     checks.push_back({"renderer.outline.sampling", "skip", dependent});
     checks.push_back({"renderer.outline.width", "skip", dependent});

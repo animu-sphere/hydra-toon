@@ -209,6 +209,12 @@ struct ToonMaterial {
   bool double_sided = false;
   // Linear, with any strength multiplier already applied.
   Float3 emissive;
+  // Colour, multiplied into emission; absent images sample white.
+  ToonTextureRef emissive_texture;
+  // Linear tangent-space normal, scaled in XY. Absent images keep the
+  // vertex normal. The tangent frame follows the original mesh UVs.
+  ToonTextureRef normal_texture;
+  float normal_scale = 1.0F;
   // Whether the source asks for an outline, its width in the unit the
   // model states (MToon: `outline_width_mode`), and its linear colour.
   bool outline = false;
@@ -221,6 +227,9 @@ struct ToonMaterial {
     // MToon's shadeMultiplyTexture: multiplies the shade colour.
     ToonTextureRef shade_texture;
     float shading_shift = 0.0F;
+    // Linear R, added to shading shift after the contribution scale.
+    ToonTextureRef shading_shift_texture;
+    float shading_shift_texture_scale = 1.0F;
     float shading_toony = 0.9F;
     float gi_equalization = 0.9F;
     // matcapFactor, which multiplies the MatCap texture. A material without
@@ -244,6 +253,8 @@ struct ToonMaterial {
     float uv_scroll_x_speed = 0.0F;
     float uv_scroll_y_speed = 0.0F;
     float uv_rotation_speed = 0.0F;
+    // Linear B at unanimated UVs, multiplying each animation speed.
+    ToonTextureRef uv_animation_mask_texture;
     std::int32_t render_queue_offset = 0;
     bool transparent_with_z_write = false;
 
@@ -297,6 +308,8 @@ struct FrameSnapshot {
   // it: what a length MToon gives in metres, a world-coordinates outline
   // width, is divided by to become a length in the scene.
   float meters_per_unit = 1.0F;
+  // Host evaluation time in seconds, independent of material revisions.
+  double time_seconds = 0.0;
   // Ordered by id.
   std::vector<MeshSnapshot> meshes;
   // Ordered by id.
@@ -332,6 +345,8 @@ public:
   // The scene's linear unit in metres, 1 until set. A value that is not
   // positive and finite changes nothing.
   void SetMetersPerUnit(float meters);
+  // Finite evaluation time; zero until the host supplies it.
+  void SetTimeSeconds(double seconds);
 
   // A new material is the default `ToonMaterial`: the fallback material.
   [[nodiscard]] MaterialId CreateMaterial();
@@ -373,6 +388,7 @@ private:
   ToonView view_;
   std::uint64_t view_revision_ = 0;
   float meters_per_unit_ = 1.0F;
+  double time_seconds_ = 0.0;
   std::map<MeshId, MeshRecord> meshes_;
   MaterialId next_material_ = 1;
   std::map<MaterialId, MaterialSnapshot> materials_;

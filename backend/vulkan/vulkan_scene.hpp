@@ -111,8 +111,20 @@ struct MToonParameters {
   std::uint32_t rim_textures[4];
   float matcap_uv[8];
   float rim_uv[8];
+  // x emissive entry, y sampler; z normal entry, w sampler.
+  std::uint32_t surface_textures[4];
+  float emissive_uv[8];
+  float normal_uv[8];
+  // x shift entry, y sampler; z animation mask entry, w sampler.
+  std::uint32_t animation_textures[4];
+  float shift_uv[8];
+  float mask_uv[8];
+  // x normal scale, y shading shift texture scale.
+  float surface[4];
+  // xy scroll UV/s, z rotation rad/s.
+  float animation[4];
 };
-static_assert(sizeof(MToonParameters) == 352);
+static_assert(sizeof(MToonParameters) == 544);
 
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
 // pass or framebuffer to rebuild on resize), Synchronization2 and timeline
@@ -349,6 +361,10 @@ struct MaterialEntries {
   std::uint32_t outline = 0;
   std::uint32_t matcap = 0;
   std::uint32_t rim = 0;
+  std::uint32_t emissive = 0;
+  std::uint32_t normal = 0;
+  std::uint32_t shift = 0;
+  std::uint32_t mask = 0;
 
   friend bool operator==(const MaterialEntries&,
       const MaterialEntries&) = default;
@@ -406,6 +422,8 @@ private:
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkDescriptorSet set_ = VK_NULL_HANDLE;
   HostBuffer buffer_;
+  // One float4 of per-frame values; changing time rewrites no material.
+  HostBuffer frame_buffer_;
   std::uint32_t capacity_ = 0;
   std::uint32_t next_slot_ = 0;
   std::vector<std::uint32_t> free_slots_;

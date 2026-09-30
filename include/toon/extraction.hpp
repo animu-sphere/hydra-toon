@@ -16,6 +16,7 @@ struct DrawList {
   std::uint64_t view_revision = 0;
   // The snapshot's unit in metres.
   float meters_per_unit = 1.0F;
+  double time_seconds = 0.0;
   // Evaluation switch: omit hulls without changing material slots or uploads.
   bool outlines = true;
   std::vector<MeshSnapshot> draws;

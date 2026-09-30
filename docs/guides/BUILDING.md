@@ -127,6 +127,14 @@ setting turns it into the stage's units. In a `testusdview` script,
 sets it for a stage of centimetres
 ([renderer report 17](../reports/renderer/17-2026-09-28-outline-meters-per-unit.md)).
 
+UV animation uses seconds. The standalone viewport converts its selected
+USD time code by the stage's `timeCodesPerSecond` automatically. In a
+`usdview` host, supply the same value through the renderer setting
+`toon:timeSeconds` when selecting a USD time; without it UV animation stays
+at time zero. A time update rewrites no material slot. The controlled
+viewport comparison and remaining MToon texture checks are recorded in
+[renderer report 25](../reports/renderer/25-2026-09-30-mtoon-rest.md).
+
 `TOON_HYDRA_EVIDENCE` and `TOON_HYDRA_IMAGE` keep the frame evidence and the
 image; unset, they go to a temporary directory the check prints
 ([renderer report 13](../reports/renderer/13-2026-09-28-host-session-formation.md)).

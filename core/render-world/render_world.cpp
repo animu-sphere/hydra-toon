@@ -273,6 +273,12 @@ bool IsStructuralChange(const ToonMaterial& before,
   return before.model != after.model ||
          before.alpha_mode != after.alpha_mode ||
          before.double_sided != after.double_sided ||
+         before.emissive_texture.texture != after.emissive_texture.texture ||
+         before.normal_texture.texture != after.normal_texture.texture ||
+         before.mtoon.shading_shift_texture.texture !=
+             after.mtoon.shading_shift_texture.texture ||
+         before.mtoon.uv_animation_mask_texture.texture !=
+             after.mtoon.uv_animation_mask_texture.texture ||
          before.base_texture.texture != after.base_texture.texture ||
          before.mtoon.shade_texture.texture !=
              after.mtoon.shade_texture.texture ||
@@ -292,6 +298,13 @@ MaterialId RenderWorld::CreateMaterial() {
   material.structure_revision = material.parameters_revision;
   dirty_ = true;
   return id;
+}
+
+void RenderWorld::SetTimeSeconds(double seconds) {
+  if (std::isfinite(seconds) && time_seconds_ != seconds) {
+    time_seconds_ = seconds;
+    dirty_ = true;
+  }
 }
 
 void RenderWorld::RemoveMaterial(MaterialId material) {
@@ -370,6 +383,7 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   snapshot.view = view_;
   snapshot.view_revision = view_revision_;
   snapshot.meters_per_unit = meters_per_unit_;
+  snapshot.time_seconds = time_seconds_;
   snapshot.meshes.clear();
   for (auto& entry : meshes_) {
     MeshRecord& record = entry.second;

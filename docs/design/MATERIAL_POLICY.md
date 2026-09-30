@@ -70,8 +70,8 @@ model-specific block:
 
 | Part | Holds |
 | --- | --- |
-| common | shading model; base colour and alpha; base texture; alpha mode and cutoff; cull mode (double-sidedness); emissive; outline enable, width, colour; sort key |
-| MToon block | shade colour and texture; shading shift and toony; GI equalization; MatCap; parametric rim and rim texture; outline width mode and lighting mix; UV animation and mask; render-queue offset; transparent-with-Z-write |
+| common | shading model; base colour and alpha; base texture; normal texture and scale; alpha mode and cutoff; cull mode (double-sidedness); emissive and its texture; outline enable, width, colour; sort key |
+| MToon block | shade colour and texture; shading shift, its texture and contribution scale, and toony; GI equalization; MatCap; parametric rim and rim texture; outline width mode and lighting mix; UV animation and mask; render-queue offset; transparent-with-Z-write |
 | MMD block | specular colour and power; ambient; sphere texture and mode; toon source, texture or shared index; shadow flags; vertex-colour and draw-points / lines flags |
 
 Only what is truly the same goes into the common part. MMD-only concepts —
@@ -142,6 +142,13 @@ feature a material does not use is a zero or a disabled flag in its slot, not
 a pipeline variant.
 
 ## 8. Values that change at run time
+
+UV animation takes the host's evaluation time in seconds as a frame value,
+outside material slots. The viewport divides its USD time code by the
+stage's `timeCodesPerSecond`; a Hydra render-pass host supplies
+`toon:timeSeconds`. A new time changes the frame buffer, not any material
+revision. Each texture retains its own transform after UV animation; the
+mask is sampled before animation and MatCap remains view-mapped.
 
 The canonical inputs of both models are varying, so a runtime can override or
 time-sample them: a VRM expression's material binds

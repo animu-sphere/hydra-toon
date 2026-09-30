@@ -179,6 +179,7 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
   const SdfPath b_id("/Looks/TexturedB");
   const SdfPath unresolved_id("/Looks/Unresolved");
   const SdfPath other_set_id("/Looks/OtherSet");
+  const auto normal_scale = std::make_shared<float>(0.4F);
   scene.AddPrims({
       {a_id, HdPrimTypeTokens->material, TexturedPrim({
           {"baseColor", role({
@@ -194,6 +195,10 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
           {"outlineWidthMultiply", role({})},
           {"matcap", role({})},
           {"rimMultiply", role({})},
+          {"emissive", role({})},
+          {"normal", role({{"scale", SharedFloatDataSource::New(normal_scale)}})},
+          {"shadingShift", role({{"scale", Value(0.7F)}})},
+          {"uvAnimationMask", role({})},
       })},
       {b_id, HdPrimTypeTokens->material,
           TexturedPrim({{"baseColor", role({})}})},
@@ -236,11 +241,18 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
                      shared &&
                  a->GetToonMaterial().mtoon.rim_multiply_texture.texture ==
                      shared &&
+                 a->GetToonMaterial().emissive_texture.texture == shared &&
                  b->GetToonMaterial().base_texture.texture == shared,
           "one image must be one texture across roles and materials") ||
       !Check(outline_width != 0 && outline_width != shared,
           "the outline width role must read the same image as data, a "
           "texture of its own") ||
+      !Check(a->GetToonMaterial().normal_texture.texture == outline_width &&
+                 a->GetToonMaterial().mtoon.shading_shift_texture.texture == outline_width &&
+                 a->GetToonMaterial().mtoon.uv_animation_mask_texture.texture == outline_width &&
+                 a->GetToonMaterial().normal_scale == 0.4F &&
+                 a->GetToonMaterial().mtoon.shading_shift_texture_scale == 0.7F,
+          "normal, shift and mask must share linear data and read contribution scales") ||
       !Check(base.wrap_s == Toon::ToonWrap::ClampToEdge &&
                  base.wrap_t == Toon::ToonWrap::MirroredRepeat &&
                  base.offset == Toon::Float2{0.5F, 0.25F} &&
@@ -254,6 +266,38 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
       !Check(other_set->GetToonMaterial().mtoon.matcap_texture.texture ==
                  shared,
           "MatCap samples no TEXCOORD set, so any set must be read")) {
+    return 1;
+  }
+
+  // Every MToon role owns a separate transform, including the unanimated
+  // mask and view-mapped MatCap. Contribution scale stays outside it.
+  const std::array<const char*, kHdToonTextureRoles> role_names{
+      "baseColor", "shadeMultiply", "outlineWidthMultiply", "matcap",
+      "rimMultiply", "emissive", "normal", "shadingShift", "uvAnimationMask"};
+  for (std::size_t slot = 0; slot < role_names.size(); ++slot) {
+    auto source = HdToonReadMaterial(TexturedPrim({{role_names[slot], role({
+        {"transform", Container({
+            {"offset", Value(GfVec2f(0.2F, 0.3F))},
+            {"rotation", Value(0.7F)},
+            {"scale", Value(GfVec2f(2.0F, 0.5F))},
+        })},
+    })}}));
+    const auto refs = HdToonTextureRefs(source.values);
+    if (!Check(refs[slot]->offset == Toon::Float2{0.2F, 0.3F} &&
+                   refs[slot]->rotation == 0.7F &&
+                   refs[slot]->scale == Toon::Float2{2.0F, 0.5F},
+            "every role must read its own texture transform")) {
+      return 1;
+    }
+  }
+  *normal_scale = 0.6F;
+  scene.DirtyPrims({{a_id, HdDataSourceLocatorSet(
+      HdDataSourceLocator(TfToken("vrm"), TfToken("textureInfo"),
+          TfToken("normal"), TfToken("scale")))}});
+  index.GetRenderDelegate()->Update();
+  if (!Check(a->GetToonMaterial().normal_scale == 0.6F &&
+                 a->GetToonMaterial().normal_texture.texture == outline_width,
+          "a contribution-scale value edit must keep its texture identity")) {
     return 1;
   }
 

@@ -1,0 +1,14 @@
+#usda 1.0
+# SPDX-License-Identifier: Apache-2.0
+(
+    subLayers = [@mtoon-uv-animation.usda@]
+)
+
+over "Test"
+{
+    over "Material"
+    {
+        float inputs:vrm:mtoon:uvAnimationScrollXSpeedFactor = 0
+        float2 inputs:vrm:textureInfo:emissive:transform:offset = (0.5, 0)
+    }
+}

@@ -456,5 +456,39 @@ int main() {
           "an empty skin must unskin the mesh")) {
     return 1;
   }
+  const auto before_time = world.Commit();
+  world.SetTimeSeconds(1.25);
+  const auto timed = world.Commit();
+  if (!Check(timed.time_seconds == 1.25 &&
+                 timed.revision != before_time.revision &&
+                 timed.meshes[0].points_revision == before_time.meshes[0].points_revision &&
+                 timed.materials[0].parameters_revision == before_time.materials[0].parameters_revision &&
+                 Toon::ExtractDrawList(timed).time_seconds == 1.25,
+          "time must reach extraction without geometry or material changes")) {
+    return 1;
+  }
+  world.SetTimeSeconds(1.25);
+  world.SetTimeSeconds(std::numeric_limits<double>::infinity());
+  if (!Check(world.Commit().revision == timed.revision,
+          "unchanged or invalid time must change nothing")) {
+    return 1;
+  }
+  const Toon::ToonMaterial defaults;
+  for (int role = 0; role < 4; ++role) {
+    auto changed = defaults;
+    const std::array<Toon::ToonTextureRef*, 4> refs{&changed.emissive_texture,
+        &changed.normal_texture, &changed.mtoon.shading_shift_texture,
+        &changed.mtoon.uv_animation_mask_texture};
+    refs[role]->rotation = 1.0F;
+    if (!Check(!Toon::IsStructuralChange(defaults, changed),
+            "a new role's transform is value-only")) {
+      return 1;
+    }
+    refs[role]->texture = 1;
+    if (!Check(Toon::IsStructuralChange(defaults, changed),
+            "a new role's texture identity is structural")) {
+      return 1;
+    }
+  }
   return 0;
 }
