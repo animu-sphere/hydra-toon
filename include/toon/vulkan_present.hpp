@@ -69,6 +69,8 @@ struct PresentDrawCounts {
   std::uint32_t pipeline_binds = 0;
   std::uint32_t overlay = 0;
   std::uint32_t overlay_vertices = 0;
+  // All hulls, including those counted in transparent above.
+  std::uint32_t hulls = 0;
 };
 
 struct PresentStatistics {

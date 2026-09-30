@@ -98,6 +98,11 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    keeping the swapchain, overlay and cumulative statistics. The
    backend draws the viewport's overlay from `include/toon/overlay.hpp`'s
    plain data.
+   Deterministic animation evaluation sets USD time in `hydra_scene.cpp`;
+   the viewport's frame loop chooses the time code per presented frame.
+   The outline comparison switch is `DrawList::outlines`, consumed during
+   backend command recording without changing scene materials. Texture
+   zero-width metadata stays in the backend's revision-keyed texture cache.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 

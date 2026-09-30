@@ -850,6 +850,13 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
     }
     Point(resident.entry, resident.image.view);
     resident.revision = snapshot.revision;
+    resident.zero_green = true;
+    for (std::size_t pixel = 1; pixel < texture.pixels->size(); pixel += 4) {
+      if ((*texture.pixels)[pixel] != 0) {
+        resident.zero_green = false;
+        break;
+      }
+    }
     ++uploads_;
   }
   for (auto texture = textures_.begin(); texture != textures_.end();) {
@@ -866,9 +873,9 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
 void TextureCache::RecordUploads(VkCommandBuffer command) {
   for (const Upload& upload : pending_) {
     Barrier(command, MipBarrier(upload.image, 0, upload.mip_levels,
-        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-        VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
+                         VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                         VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
     VkBufferImageCopy copy{};
     copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     copy.imageSubresource.layerCount = 1;
@@ -881,10 +888,10 @@ void TextureCache::RecordUploads(VkCommandBuffer command) {
     std::int32_t height = static_cast<std::int32_t>(upload.height);
     for (std::uint32_t level = 1; level < upload.mip_levels; ++level) {
       Barrier(command, MipBarrier(upload.image, level - 1U, 1,
-          VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
-          VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT,
-          VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL));
+                           VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                           VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL));
       const std::int32_t next_width = std::max(width / 2, 1);
       const std::int32_t next_height = std::max(height / 2, 1);
       VkImageBlit blit{};
@@ -905,19 +912,22 @@ void TextureCache::RecordUploads(VkCommandBuffer command) {
     const std::uint32_t last = upload.mip_levels - 1U;
     if (last > 0U) {
       Barrier(command, MipBarrier(upload.image, 0, last,
-          VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_NONE,
-          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+                           VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
     }
     Barrier(command, MipBarrier(upload.image, last, 1,
-        VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
-        VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+                         VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+                         VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
     recorded_.push_back(upload.staging);
   }
   pending_.clear();
@@ -926,6 +936,12 @@ void TextureCache::RecordUploads(VkCommandBuffer command) {
 std::uint32_t TextureCache::Entry(TextureId texture) const {
   const auto found = textures_.find(texture);
   return found == textures_.end() ? 0U : found->second.entry;
+}
+
+bool TextureCache::ZeroGreen(TextureId texture) const {
+  const auto found = textures_.find(texture);
+  return found != textures_.end() && found->second.entry != 0 &&
+         found->second.zero_green;
 }
 
 void TextureCache::Destroy() {
@@ -1041,6 +1057,10 @@ bool MaterialCache::Update(const DrawList& draws,
     }
     Entry& entry = found->second;
     const MaterialEntries entries = EntriesOf(material.material, textures);
+    // Pixel edits can change this without changing a material or its table
+    // entry. No slot write is needed: it only controls command recording.
+    entry.zero_width_texture =
+        textures.ZeroGreen(material.material.mtoon.outline_width_texture.texture);
     if (entry.parameters_revision != material.parameters_revision ||
         entry.entries != entries) {
       auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
@@ -1463,7 +1483,8 @@ void MeshCache::Record(VkCommandBuffer command,
         }
         continue;
       }
-      if (outline && !material->outline) {
+      if (outline && (!draws.outlines || !material->outline ||
+                         (found->second.has_uvs && material->zero_width_texture))) {
         continue;
       }
       draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
@@ -1472,6 +1493,7 @@ void MeshCache::Record(VkCommandBuffer command,
           : material->double_sided ? VK_CULL_MODE_NONE
                                    : VK_CULL_MODE_BACK_BIT);
       ++(outline ? counts.outline : counts.opaque);
+      counts.hulls += outline ? 1U : 0U;
     }
     mark(outline ? 1U : 2U);
   }
@@ -1498,10 +1520,12 @@ void MeshCache::Record(VkCommandBuffer command,
     draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
         VK_CULL_MODE_BACK_BIT);
     ++counts.transparent;
-    if (material.outline) {
+    if (draws.outlines && material.outline &&
+        (!entry.has_uvs || !material.zero_width_texture)) {
       draw_mtoon(pipelines.mtoon_outline, mesh, entry, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;
+      ++counts.hulls;
     }
   }
 }

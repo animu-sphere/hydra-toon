@@ -334,6 +334,8 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
         controls.samples = samples;
       }
     }
+    controls.outlines = frame.outlines;
+    controls.outlines_changed = ImGui::Checkbox("Outlines", &controls.outlines);
 
     const Summary& interval =
         state_->cpu.empty() ? Summary{} : state_->cpu.front();
@@ -349,6 +351,7 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
     ImGui::Text("%u draw calls  %llu triangles",
         draws.unlit + draws.outline + draws.opaque + draws.transparent,
         static_cast<unsigned long long>(draws.triangles));
+    ImGui::Text("%u hull draw calls", draws.hulls);
 
     if (ImGui::CollapsingHeader("CPU", ImGuiTreeNodeFlags_DefaultOpen)) {
       TimingTable("cpu", cpu_rows, state_->cpu);

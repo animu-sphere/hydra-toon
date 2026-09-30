@@ -931,7 +931,8 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   timed_frame_ = timestamps_ != VK_NULL_HANDLE ? submitted_ : 0U;
   statistics_.draws = {record.unlit, record.outline, record.opaque,
       record.transparent, record.triangles, record.pipeline_binds,
-      overlay_draws, static_cast<std::uint32_t>(overlay.vertices.size())};
+      overlay_draws, static_cast<std::uint32_t>(overlay.vertices.size()),
+      record.hulls};
   if (capture) {
     capture_requested_ = false;
     capture_frame_ = submitted_;

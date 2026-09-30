@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -51,6 +52,10 @@ struct Arguments {
   bool vsync = true;
   // Whether the overlay is laid out and drawn; O shows and hides it.
   bool overlay = true;
+  bool outlines = true;
+  std::optional<double> time;
+  std::optional<double> time_step;
+  std::optional<std::uint64_t> expect_hulls;
   Toon::RenderOptions options;
   // A USD stage to draw through Hydra instead of the bootstrap scene.
   std::string usd;
@@ -116,6 +121,22 @@ Arguments ParseArguments(int argc, char** argv) {
       result.usd = next();
     } else if (option == "--expect-draws") {
       result.expect_draws = ReadUnsigned(next(), option);
+    } else if (option == "--expect-hulls") {
+      result.expect_hulls = ReadUnsigned(next(), option);
+    } else if (option == "--time" || option == "--time-step") {
+      const std::string value(next());
+      std::size_t consumed = 0;
+      const double number = std::stod(value, &consumed);
+      if (consumed != value.size() || !std::isfinite(number)) {
+        throw std::invalid_argument(std::string(option) + " must be finite");
+      }
+      (option == "--time" ? result.time : result.time_step) = number;
+    } else if (option == "--outlines") {
+      const auto value = next();
+      if (value != "on" && value != "off") {
+        throw std::invalid_argument("--outlines must be on or off");
+      }
+      result.outlines = value == "on";
     } else if (option == "--screenshot") {
       result.screenshot = next();
     } else if (option == "--vsync") {
@@ -137,6 +158,11 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --vsync on|off           FIFO or immediate present\n"
                    "  --overlay on|off         the measurements over the\n"
                    "                           scene (default on)\n"
+                   "  --outlines on|off        draw hulls (default on)\n"
+                   "  --time T                 initial USD time code\n"
+                   "  --time-step T            USD time codes per presented\n"
+                   "                           frame (deterministic evaluation)\n"
+                   "  --expect-hulls N         check actual last-frame hulls\n"
                    "  --samples N              MSAA samples per pixel (default\n"
                    "                           4; 1 turns anti-aliasing off)\n"
                    "  --switch-samples N       ask for N samples halfway\n"
@@ -181,11 +207,15 @@ Arguments ParseArguments(int argc, char** argv) {
     }
   }
 #if !TOON_VIEWPORT_HAS_HYDRA
-  if (!result.usd.empty() || !result.switch_file.empty()) {
+  if (!result.usd.empty() || !result.switch_file.empty() || result.time ||
+      result.time_step) {
     throw std::invalid_argument("--usd needs a build with the Hydra adapter "
                                 "(the viewport-usd intent)");
   }
 #endif
+  if ((result.time || result.time_step) && result.usd.empty()) {
+    throw std::invalid_argument("--time and --time-step need --usd <stage>");
+  }
   if (!result.switch_file.empty() && result.frame_limit < 2) {
     throw std::invalid_argument("--switch-file needs --frames N, N >= 2");
   }
@@ -258,7 +288,7 @@ Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
         material->material.model == Toon::ToonShadingModel::MToon) {
       ++counts.mtoon;
       counts.transparent += Toon::IsTransparent(material->material) ? 1U : 0U;
-      counts.outline += Toon::HasOutline(material->material) ? 1U : 0U;
+      counts.outline += draws.outlines && Toon::HasOutline(material->material) ? 1U : 0U;
     }
   }
   return counts;
@@ -382,6 +412,9 @@ int RunViewport(int argc, char** argv) {
     std::unique_ptr<Toon::viewport::HydraScene> hydra;
     if (!arguments.usd.empty()) {
       hydra = Toon::viewport::HydraScene::Open(arguments.usd);
+      if (arguments.time) {
+        hydra->SetTime(*arguments.time);
+      }
       hydra->Update(snapshot);
       up_axis = hydra->up_axis();
       meters_per_unit = hydra->meters_per_unit();
@@ -445,6 +478,7 @@ int RunViewport(int argc, char** argv) {
           std::make_unique<Toon::viewport::Overlay>(window->content_scale());
     }
     bool overlay_shown = overlay != nullptr;
+    bool outlines = arguments.outlines;
     Toon::OverlayDrawList overlay_draws;
     Toon::viewport::FrameTelemetry telemetry;
     std::uint64_t gpu_frame = 0;
@@ -459,18 +493,23 @@ int RunViewport(int argc, char** argv) {
     std::string open_error;
 #if TOON_VIEWPORT_HAS_HYDRA
     bool file_switched = false;
+    std::uint64_t time_origin_frame = 0;
     // Prepare the whole replacement before changing the active scene. A
     // failed open leaves its camera, snapshot and GPU resources untouched.
     const auto open_file = [&](const std::string& path) {
       open_error.clear();
       try {
         auto next_scene = Toon::viewport::HydraScene::Open(path);
+        if (arguments.time) {
+          next_scene->SetTime(*arguments.time);
+        }
         Toon::FrameSnapshot next_snapshot;
         next_scene->Update(next_snapshot);
         Toon::viewport::OrbitCamera next_camera(next_scene->up_axis());
         next_camera.Frame(Toon::viewport::SceneBounds(next_snapshot));
         std::string next_name = FileName(path);
         hydra = std::move(next_scene);
+        time_origin_frame = session->statistics().frames_presented;
         snapshot = std::move(next_snapshot);
         camera = next_camera;
         meters_per_unit = hydra->meters_per_unit();
@@ -581,6 +620,16 @@ int RunViewport(int argc, char** argv) {
       const auto hydra_start = Clock::now();
 #if TOON_VIEWPORT_HAS_HYDRA
       if (hydra != nullptr) {
+        if (arguments.time_step) {
+          const double time = arguments.time.value_or(hydra->start_time()) +
+                              *arguments.time_step *
+                                  static_cast<double>(session->statistics().frames_presented -
+                                                      time_origin_frame);
+          if (!std::isfinite(time)) {
+            throw std::runtime_error("animation time overflow");
+          }
+          hydra->SetTime(time);
+        }
         hydra->Update(snapshot);
       }
 #endif
@@ -592,6 +641,7 @@ int RunViewport(int argc, char** argv) {
       draws.view = camera.View(static_cast<float>(width) /
                                static_cast<float>(height));
       draws.meters_per_unit = meters_per_unit;
+      draws.outlines = outlines;
       if (arguments.switch_samples && !uploads_at_switch &&
           session->statistics().frames_presented ==
               arguments.frame_limit / 2) {
@@ -614,6 +664,7 @@ int RunViewport(int argc, char** argv) {
         shown.width = width;
         shown.height = height;
         shown.vsync = arguments.vsync;
+        shown.outlines = outlines;
         shown.statistics = &session->statistics();
         shown.telemetry = &telemetry;
         shown.counts = CountScene(draws);
@@ -626,6 +677,11 @@ int RunViewport(int argc, char** argv) {
         open_file_requested = controls.open_file;
         if (controls.samples != 0) {
           session->SetSamples(controls.samples);
+        }
+        if (controls.outlines_changed) {
+          outlines = controls.outlines;
+          draws.outlines = outlines;
+          telemetry = {};
         }
       }
       bool presented = false;
@@ -700,6 +756,7 @@ int RunViewport(int argc, char** argv) {
               << " triangles=" << statistics.draws.triangles
               << " pipeline_binds=" << statistics.draws.pipeline_binds
               << " overlay=" << statistics.draws.overlay << '\n'
+              << "Hull draws: " << statistics.draws.hulls << '\n'
               << telemetry.Report();
     if (!statistics.gpu_timing) {
       std::cout << "Timing: this queue writes no GPU timestamps\n";
@@ -753,6 +810,11 @@ int RunViewport(int argc, char** argv) {
       std::cerr << "toon-viewport: the last frame drew "
                 << draws.draws.size() << " mesh(es), not "
                 << *arguments.expect_draws << '\n';
+      return 1;
+    }
+    if (arguments.expect_hulls && statistics.draws.hulls != *arguments.expect_hulls) {
+      std::cerr << "toon-viewport: expected " << *arguments.expect_hulls
+                << " hulls, recorded " << statistics.draws.hulls << '\n';
       return 1;
     }
     std::cout << "Presented " << statistics.frames_presented << " frames on "

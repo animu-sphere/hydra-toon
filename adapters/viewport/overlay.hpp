@@ -58,6 +58,7 @@ struct OverlayFrame {
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   bool vsync = true;
+  bool outlines = true;
   const PresentStatistics* statistics = nullptr;
   const FrameTelemetry* telemetry = nullptr;
   SceneCounts counts;
@@ -71,6 +72,8 @@ struct OverlayControls {
   bool open_file = false;
   // MSAA samples per pixel; 0 when unchanged.
   std::uint32_t samples = 0;
+  bool outlines_changed = false;
+  bool outlines = true;
 };
 
 class Overlay {

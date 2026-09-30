@@ -108,6 +108,32 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    add_test(NAME toon-viewport-motion
+      COMMAND toon-viewport --hidden --frames 9 --vsync off --overlay off
+        --usd "${CMAKE_CURRENT_SOURCE_DIR}/tests/outline-motion.usda"
+        --time 1 --time-step 0.25 --expect-draws 1 --expect-hulls 0
+        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/motion.ppm")
+    add_test(NAME toon-viewport-motion-reference
+      COMMAND toon-viewport --hidden --frames 9 --vsync off --overlay off
+        --usd "${CMAKE_CURRENT_SOURCE_DIR}/tests/outline-motion.usda"
+        --time 1 --expect-draws 1
+        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/motion-reference.ppm")
+    set_tests_properties(toon-viewport-motion PROPERTIES
+      FAIL_REGULAR_EXPRESSION "toon-viewport:"
+      PASS_REGULAR_EXPRESSION
+        "Uploads: topology=1 points=1 materials=1 textures=0 skins=1 poses=9")
+    set_tests_properties(toon-viewport-motion toon-viewport-motion-reference PROPERTIES
+      LABELS "gpu;viewport;presentation;hydra" SKIP_RETURN_CODE 77 TIMEOUT 60
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    add_test(NAME toon-viewport-motion-return-image
+      COMMAND "${CMAKE_COMMAND}"
+        "-DFIRST=${CMAKE_CURRENT_BINARY_DIR}/motion-reference.ppm"
+        "-DSECOND=${CMAKE_CURRENT_BINARY_DIR}/motion.ppm"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_captures.cmake")
+    set_tests_properties(toon-viewport-motion-return-image PROPERTIES
+      DEPENDS "toon-viewport-motion;toon-viewport-motion-reference"
+      SKIP_REGULAR_EXPRESSION "SKIP:" LABELS "gpu;viewport;presentation;hydra")
     # All three switches use the interactive file-open path. Compare their
     # captures to opening the final stage at startup, including overlapping
     # mesh ids/revisions, changed geometry, up axis and metres per unit.

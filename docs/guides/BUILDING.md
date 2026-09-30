@@ -176,6 +176,13 @@ GPU times with `--vsync off`: under vsync the GPU idles between frames and
 times the same work several times longer
 ([renderer report 22](../reports/renderer/22-2026-09-30-viewport-telemetry.md)).
 
+The Outlines checkbox or `--outlines off` omits hulls without rewriting
+materials or re-uploading geometry. `Hull draws:` and the overlay count
+the actual hull calls, including those in the transparent part;
+`--expect-hulls N` fails when the last frame differs. Compare total GPU
+`work` with outlines on and off: the GPU overlaps passes, so the first
+pass that fetches geometry also carries that cost.
+
 ### A USD stage in the viewport
 
 In a build with Hydra, `Open File...` on the overlay or Ctrl+O opens the
@@ -212,6 +219,28 @@ ost validate --profile lookdev --intent hydra--renderer-viewport
 Without `--with`, every VRM material draws as PreviewSurface. The digest
 must be in the local registry: pull it as
 [the VRM host session](#the-vrm-host-session) does.
+
+For repeatable animation evaluation, `--time T` sets an initial USD time
+code and `--time-step S` advances by S time codes per presented frame.
+Without `--time`, stepping starts at the stage's start time. With neither,
+an animated stage stays at its start, and a static stage at Default.
+This is a fixed sequence, independent of wall time, with no looping;
+time codes outside the authored range use USD's sampling behavior. Both
+options require `--usd`; opening a replacement restarts its sequence.
+For example, this committed fixture moves a joint and returns to its
+initial pose in nine frames:
+
+```sh
+ost renderer viewport --intent viewport-usd --profile lookdev -- \
+    --usd adapters/viewport/tests/outline-motion.usda \
+    --time 1 --time-step 0.25 --hidden --frames 9 --vsync off --overlay off
+```
+
+For a VRM stage with the material and file plugins registered, use the same
+time options with `--samples 1`, `4` or `8` and `--outlines on` or `off`.
+[Renderer report 24](../reports/renderer/24-2026-09-30-outline-stability-cost.md)
+records that comparison. Increasing MSAA reduces sampled silhouette
+variation; it does not provide temporal filtering.
 
 Opening a raw `.vrm` also needs `usdVrmFileFormat` and
 `usdVrmPackageResolver` for embedded textures; `vrmImaging` alone handles

@@ -254,7 +254,7 @@ struct ToonMaterial {
 };
 
 // Whether a material's draws add an outline (material policy §5): an MToon
-// material whose width mode is not None, with a width above zero.
+// material whose width mode is not None, with a finite width above zero.
 [[nodiscard]] bool HasOutline(const ToonMaterial& material);
 
 // Whether a material's draws blend over what is behind them: its alpha mode
