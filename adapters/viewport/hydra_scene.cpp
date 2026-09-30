@@ -83,7 +83,7 @@ public:
     }
     index_->InsertSceneIndex(indices_.finalSceneIndex,
         SdfPath::AbsoluteRootPath());
-    // A stage with animation is shown at its start; playback is later work.
+    // Leave static stages at Default until an explicit time is requested.
     indices_.stageSceneIndex->SetTime(stage_->HasAuthoredTimeCodeRange()
                                           ? UsdTimeCode(
                                                 stage_->GetStartTimeCode())
@@ -104,6 +104,14 @@ public:
     index_->EnqueueCollectionToSync(collection_);
     index_->SyncAll(&tasks_, &context_);
     delegate_.CommitScene(snapshot);
+  }
+
+  void SetTime(double time) override {
+    indices_.stageSceneIndex->SetTime(UsdTimeCode(time));
+  }
+
+  double start_time() const noexcept override {
+    return stage_->GetStartTimeCode();
   }
 
   float meters_per_unit() const noexcept override {

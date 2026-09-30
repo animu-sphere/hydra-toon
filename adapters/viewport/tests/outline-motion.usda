@@ -1,0 +1,45 @@
+#usda 1.0
+(
+    doc = "A rigidly skinned octahedron: a pose moves and returns without changing rest geometry."
+    startTimeCode = 1
+    endTimeCode = 3
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+def SkelRoot "Root"
+{
+    def Skeleton "Skel" (prepend apiSchemas = ["SkelBindingAPI"])
+    {
+        uniform token[] joints = ["root"]
+        uniform matrix4d[] bindTransforms = [((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))]
+        uniform matrix4d[] restTransforms = [((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))]
+        rel skel:animationSource = </Root/Anim>
+    }
+    def SkelAnimation "Anim"
+    {
+        uniform token[] joints = ["root"]
+        float3[] translations.timeSamples = {
+            1: [(0,0,0)], 2: [(0.25,0,0)], 3: [(0,0,0)]
+        }
+        quatf[] rotations = [(1,0,0,0)]
+        half3[] scales = [(1,1,1)]
+    }
+    def Mesh "Diamond" (prepend apiSchemas = ["SkelBindingAPI"])
+    {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [3,3,3,3,3,3,3,3]
+        int[] faceVertexIndices = [0,2,4,1,4,2,0,4,3,1,3,4,0,5,2,1,2,5,0,3,5,1,5,3]
+        point3f[] points = [(0.5,0,0),(-0.5,0,0),(0,0.5,0),(0,-0.5,0),(0,0,0.5),(0,0,-0.5)]
+        normal3f[] primvars:normals = [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)] (interpolation = "vertex")
+        color3f[] primvars:displayColor = [(1,0,0)]
+        int[] primvars:skel:jointIndices = [0] (
+            elementSize = 1
+            interpolation = "constant"
+        )
+        float[] primvars:skel:jointWeights = [1] (
+            elementSize = 1
+            interpolation = "constant"
+        )
+        rel skel:skeleton = </Root/Skel>
+    }
+}

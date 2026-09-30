@@ -26,6 +26,9 @@ public:
   // render world into `snapshot`, reusing its storage. The snapshot's camera
   // is not the viewport's; the caller sets its own.
   virtual void Update(FrameSnapshot& snapshot) = 0;
+  // Explicit USD time codes for repeatable animation evaluation.
+  virtual void SetTime(double time) = 0;
+  [[nodiscard]] virtual double start_time() const noexcept = 0;
 
   // The stage's metersPerUnit and upAxis, which Hydra does not carry.
   [[nodiscard]] virtual float meters_per_unit() const noexcept = 0;

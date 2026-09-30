@@ -361,7 +361,9 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
         depth_.view};
   }
   BeginSceneRendering(command_, attachments, {width_, height_});
-  meshes_.Record(command_, pipelines_, materials_, draws);
+  vulkan_internal::SceneRecord record;
+  meshes_.Record(command_, pipelines_, materials_, draws, &record);
+  statistics_.outline_draws = record.hulls;
   vkCmdEndRendering(command_);
 
   const VkImageMemoryBarrier2 to_transfer[] = {

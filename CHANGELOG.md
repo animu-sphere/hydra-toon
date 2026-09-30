@@ -10,6 +10,19 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Outline evaluation in the viewport: `--time` and `--time-step` select
+  reproducible USD poses, and `--outlines on|off` and the overlay's Outlines
+  checkbox compare hulls without material edits or uploads. Actual hull
+  draw counts include transparent hulls; `--expect-hulls` checks them.
+  GPU checks cover perspective and scaled outline width, width-texture
+  sampling, subpixel motion at 1x/4x/8x, and nearly coincident skinned hulls.
+  Renderer report 24 records the animated VRM's draw and GPU cost and the
+  remaining subpixel coverage variation at 4x.
+- All-zero G width textures omit their hull draw calls, for Opaque and
+  Blend, with the decision refreshed only on texture revision changes.
+  Missing textures and meshes without UVs retain their white fallback.
+  Zero, negative and non-finite outline widths emit no hull.
+
 - The viewport's `Open File...` button and Ctrl+O use Native File Dialog
   Extended 1.3.0, following hydra-merlin. USD, VRM and PMX filters pass the
   selected UTF-8 path to OpenUSD's registered format plugins. A successful
@@ -106,6 +119,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
   gate are in `docs/releases/README.md`.
 
 ### Changed
+
+- Texture upload barriers make transferred pixels visible to both the
+  vertex and fragment stages; the outline vertex shader samples width
+  textures, which previously had only fragment-stage synchronization.
 
 - Right-button camera dolly uses horizontal motion: dragging right zooms
   in and dragging left zooms out, at the existing sensitivity.

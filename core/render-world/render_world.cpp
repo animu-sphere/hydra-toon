@@ -239,7 +239,7 @@ void RenderWorld::SetMetersPerUnit(float meters) {
 bool HasOutline(const ToonMaterial& material) {
   return material.model == ToonShadingModel::MToon && material.outline &&
          material.mtoon.outline_width_mode != ToonOutlineWidthMode::None &&
-         material.outline_width > 0.0F;
+         material.outline_width > 0.0F && std::isfinite(material.outline_width);
 }
 
 bool IsTransparent(const ToonMaterial& material) {

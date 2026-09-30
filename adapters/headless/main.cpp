@@ -450,11 +450,43 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
   if (!render(coincident)) {
     return {id, "fail", detail};
   }
+  // Tilt the almost coincident back face through GPU skinning. At every
+  // slope its image must equal the surface alone, including covered edges.
+  Toon::ToonSkin skin;
+  skin.influences_per_point = 1;
+  skin.constant = true;
+  skin.influences = {{0, 1}};
+  world.SetMeshSkin(quad, skin);
+  for (int frame = 0; frame < 12; ++frame) {
+    const float angle = static_cast<float>(frame) * 0.1F;
+    Toon::Matrix4 joint;
+    joint.m[0] = joint.m[10] = std::cos(angle);
+    joint.m[2] = -std::sin(angle);
+    joint.m[8] = std::sin(angle);
+    Toon::ToonSkinPose pose;
+    pose.joints = {joint};
+    world.SetMeshSkinPose(quad, pose);
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
+      return {id, "fail", detail};
+    }
+    const auto outlined = color.payload;
+    draws.outlines = false;
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
+      return {id, "fail", detail};
+    }
+    if (outlined != color.payload) {
+      return {id, "fail", "a nearly coincident animated hull changed the surface"};
+    }
+  }
 
   const Toon::OffscreenStatistics& first = world_width.statistics;
   const Toon::OffscreenStatistics& last = textured.statistics;
   if (coincident.statistics.validation_message_count != 0) {
     return {id, "fail", coincident.statistics.validation_detail};
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
   }
   const auto is_outline = [](const std::array<std::uint8_t, 4>& pixel) {
     return pixel[1] > 200U && pixel[0] < 50U && pixel[2] < 50U;
@@ -480,6 +512,11 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
     return {id, "fail",
         "a width texture whose G is 0 must take the outline away"};
   }
+  if (world_width.statistics.outline_draws != 1 ||
+      none.statistics.outline_draws != 0 ||
+      textured.statistics.outline_draws != 0) {
+    return {id, "fail", "disabled and all-zero width hulls must not be recorded"};
+  }
   if (coincident.center[1] > 50U || coincident.center[0] < 150U) {
     return {id, "fail",
         "a hull at its surface's depth must lose the depth test to it"};
@@ -498,6 +535,308 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
         "edit nothing at all"};
   }
   return {id, "pass", ""};
+}
+
+// Width sampling uses linear G at mip 0 and the role's UV transform. Pixel
+// changes affect hull omission without rewriting a material slot; no UVs
+// and missing images use white, just as the shader does.
+Check OutlineSamplingCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.outline.sampling";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (!renderer) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+  Toon::RenderWorld world;
+  const auto mesh = AddOctahedron(world);
+  const auto material = world.CreateMaterial();
+  const auto texture = world.CreateTexture();
+  Toon::ToonTexture image;
+  image.width = 2;
+  image.height = 1;
+  image.encoding = Toon::ToonTextureEncoding::Linear;
+  const auto pixels = [&](std::uint8_t left, std::uint8_t right) {
+    image.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+        std::vector<std::uint8_t>{255, left, 255, 255, 255, right, 255, 255});
+    world.SetTexture(texture, image);
+  };
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1, 0, 0};
+  toon.mtoon.shade_color = {1, 0, 0};
+  toon.outline = true;
+  toon.outline_width = 0.1F;
+  toon.outline_color = {0, 1, 0};
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::Screen;
+  toon.mtoon.outline_width_texture.texture = texture;
+  toon.mtoon.outline_width_texture.offset = {0.75F, 0.5F};
+  toon.mtoon.outline_lighting_mix = 0.0F;
+  world.SetMeshMaterial(mesh, material);
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  const auto render = [&](bool visible, std::uint32_t hulls, bool enabled = true) {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.outlines = enabled;
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
+      return false;
+    }
+    const auto rim = PixelAt(color, 52, 32);
+    if ((rim[1] > 200U) != visible ||
+        renderer->statistics().outline_draws != hulls) {
+      detail = "width sampling: G=" + std::to_string(rim[1]) +
+               ", hulls=" + std::to_string(renderer->statistics().outline_draws) +
+               ", expected G visible=" + std::to_string(visible) +
+               ", hulls=" + std::to_string(hulls);
+      return false;
+    }
+    return true;
+  };
+  for (auto alpha : {Toon::ToonAlphaMode::Opaque, Toon::ToonAlphaMode::Blend}) {
+    toon.alpha_mode = alpha;
+    toon.mtoon.outline_width_texture.offset.x = 0.75F;
+    world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
+    world.SetMaterial(material, toon);
+    pixels(0, 255);
+    if (!render(true, 1)) {
+      return {id, "fail", detail};
+    }
+    const auto writes = renderer->statistics().material_writes;
+    pixels(0, 0);
+    if (!render(false, 0) || renderer->statistics().material_writes != writes) {
+      return {id, "fail", detail + "; a pixel edit must not rewrite a slot"};
+    }
+    // The vertex stage bypasses textures without UVs, so this hull must stay.
+    world.SetMeshUVs(mesh, {});
+    if (!render(true, 1)) {
+      return {id, "fail", detail + "; no UVs must sample white"};
+    }
+    world.SetMeshUVs(mesh, std::vector<Toon::Float2>(6));
+    pixels(0, 255);
+    if (!render(true, 1) || renderer->statistics().material_writes != writes) {
+      return {id, "fail", detail + "; a nonzero pixel must restore the hull"};
+    }
+    toon.mtoon.outline_width_texture.offset.x = 0.25F;
+    world.SetMaterial(material, toon);
+    if (!render(false, 1)) {
+      return {id, "fail", detail + "; the UV offset must select the zero texel"};
+    }
+    toon.mtoon.outline_width_texture.offset.x = 0.5F;
+    world.SetMaterial(material, toon);
+    if (!render(false, 1)) {
+      return {id, "fail", detail + "; linear filtering must interpolate half width"};
+    }
+    toon.mtoon.outline_width_texture.offset.x = 0.75F;
+    world.SetMaterial(material, toon);
+    if (!render(false, 0, false) || !render(true, 1)) {
+      return {id, "fail", detail + "; the evaluation switch must omit all hulls"};
+    }
+    image.pixels = {};
+    world.SetTexture(texture, image);
+    if (!render(true, 1)) {
+      return {id, "fail", detail + "; a missing image must sample white"};
+    }
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass", "opaque and Blend: linear G, UV offset, zero/nonzero pixel "
+                      "edits, no UVs, missing image and hull switch"};
+}
+
+// Perspective distance changes a world's projected width, but not a screen
+// ratio. Compensated object scale and orthographic zoom leave screen width
+// alone as well, including a mirrored transform.
+Check OutlineWidthCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.outline.width";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (!renderer) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+  Toon::RenderWorld world;
+  const auto mesh = AddOctahedron(world);
+  const auto material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1, 0, 0};
+  toon.mtoon.shade_color = {1, 0, 0};
+  toon.outline = true;
+  toon.outline_width = 0.05F;
+  toon.outline_color = {0, 1, 0};
+  toon.mtoon.outline_lighting_mix = 0;
+  world.SetMeshMaterial(mesh, material);
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  const auto extent = [&](bool outlined) {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.outlines = outlined;
+    if (!renderer->Render(draws, 128, 128, color, depth, detail)) {
+      return -1;
+    }
+    int right = -1;
+    for (std::uint32_t row = 0; row < color.height; ++row) {
+      for (std::uint32_t column = 0; column < color.width; ++column) {
+        if (PixelAt(color, column, row)[outlined ? 1 : 0] > 128U) {
+          right = std::max(right, static_cast<int>(column));
+        }
+      }
+    }
+    return right;
+  };
+  const auto width = [&]() {
+    const int hull = extent(true);
+    const int surface = extent(false);
+    return hull >= 0 && surface >= 0 ? hull - surface : -1;
+  };
+  const auto perspective = [&](float distance) {
+    Toon::ToonView view;
+    view.view.m[14] = -distance;
+    view.projection.m[0] = view.projection.m[5] = 2;
+    view.projection.m[10] = -10.1F / 9.9F;
+    view.projection.m[11] = -1;
+    view.projection.m[14] = -2.0F / 9.9F;
+    view.projection.m[15] = 0;
+    world.SetView(view);
+  };
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::Screen;
+  world.SetMaterial(material, toon);
+  perspective(2);
+  const int screen_near = width();
+  perspective(4);
+  const int screen_far = width();
+  toon.outline_width = 0.1F;
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  world.SetMaterial(material, toon);
+  perspective(2);
+  const int world_near = width();
+  perspective(4);
+  const int world_far = width();
+  toon.outline_width = 0.05F;
+  toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::Screen;
+  world.SetMaterial(material, toon);
+  Toon::ToonView view;
+  view.projection.m[10] = -1;
+  world.SetView(view);
+  const int ortho = width();
+  Toon::Matrix4 transform;
+  transform.m[0] = -2;
+  transform.m[5] = 2;
+  world.SetMeshTransform(mesh, transform);
+  view.projection.m[0] = view.projection.m[5] = 0.5F;
+  world.SetView(view);
+  const int scaled = width();
+  if (screen_near < 4 || std::abs(screen_near - screen_far) > 1 ||
+      world_near < 4 || world_far < 1 || world_far >= world_near ||
+      ortho < 4 || std::abs(ortho - scaled) > 1) {
+    return {id, "fail", "projected width changed incorrectly: screen=" + std::to_string(screen_near) + "/" + std::to_string(screen_far) + ", world=" + std::to_string(world_near) + "/" + std::to_string(world_far) + ", ortho=" + std::to_string(ortho) + "/" + std::to_string(scaled)};
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass", "128px target, perspective distances 2/4: screen " + std::to_string(screen_near) + "/" + std::to_string(screen_far) + "px, world " + std::to_string(world_near) + "/" + std::to_string(world_far) + "px; orthographic/mirrored nonuniform scale " + std::to_string(ortho) + "/" + std::to_string(scaled) + "px"};
+}
+
+// Measure a subpixel hull under GPU skinning, separating its coverage from
+// the moving surface with the evaluation switch. Repeating a pose must be
+// pixel-identical; pose edits must leave geometry and materials resident.
+Check OutlineMotionCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.outline.motion";
+  std::string detail;
+  struct Result {
+    double minimum = 1e30;
+    double maximum = 0;
+    Toon::OffscreenStatistics statistics;
+  };
+  const auto run = [&](std::uint32_t samples, Result& result) {
+    Toon::FrameStatus status = Toon::FrameStatus::Fail;
+    Toon::RenderOptions options;
+    options.samples = samples;
+    auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+    if (!renderer) {
+      return false;
+    }
+    Toon::RenderWorld world;
+    const auto mesh = AddOctahedron(world);
+    Toon::ToonSkin skin;
+    skin.influences_per_point = 1;
+    skin.constant = true;
+    skin.influences = {{0, 1}};
+    world.SetMeshSkin(mesh, skin);
+    const auto material = world.CreateMaterial();
+    Toon::ToonMaterial toon;
+    toon.model = Toon::ToonShadingModel::MToon;
+    toon.base_color = {1, 0, 0};
+    toon.mtoon.shade_color = {1, 0, 0};
+    toon.outline = true;
+    toon.outline_width = 0.75F / 64.0F;
+    toon.outline_color = {0, 1, 0};
+    toon.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::Screen;
+    toon.mtoon.outline_lighting_mix = 0;
+    world.SetMaterial(material, toon);
+    world.SetMeshMaterial(mesh, material);
+    Toon::ColorProduct outlined;
+    Toon::ColorProduct surface;
+    Toon::ColorProduct repeated;
+    Toon::DepthProduct depth;
+    for (int frame = 0; frame <= 64; ++frame) {
+      Toon::ToonSkinPose pose;
+      Toon::Matrix4 joint;
+      joint.m[12] = static_cast<float>(frame) / (64.0F * 32.0F);
+      pose.joints = {joint};
+      world.SetMeshSkinPose(mesh, pose);
+      auto draws = Toon::ExtractDrawList(world.Commit());
+      if (!renderer->Render(draws, 64, 64, outlined, depth, detail) ||
+          !renderer->Render(draws, 64, 64, repeated, depth, detail)) {
+        return false;
+      }
+      if (outlined.payload != repeated.payload) {
+        detail = "a repeated pose changed the outline image";
+        return false;
+      }
+      draws.outlines = false;
+      if (!renderer->Render(draws, 64, 64, surface, depth, detail)) {
+        return false;
+      }
+      double coverage = 0;
+      for (std::size_t pixel = 1; pixel < outlined.payload.size(); pixel += 4) {
+        coverage += static_cast<double>(outlined.payload[pixel]) - surface.payload[pixel];
+      }
+      coverage /= 255.0;
+      result.minimum = std::min(result.minimum, coverage);
+      result.maximum = std::max(result.maximum, coverage);
+      const auto center = CenterPixel(outlined);
+      if (center[0] < 150U || center[1] > 50U) {
+        detail = "the animated hull covered the surface's centre";
+        return false;
+      }
+    }
+    result.statistics = renderer->statistics();
+    const auto& stats = result.statistics;
+    if (stats.pose_writes != 65 || stats.skin_uploads != 1 ||
+        stats.point_uploads != 1 || stats.topology_uploads != 1 ||
+        stats.material_writes != 1 || stats.validation_message_count != 0) {
+      detail = "motion must rewrite only the joint buffer, with clean validation";
+      return false;
+    }
+    return true;
+  };
+  Result single;
+  Result multi;
+  Result eight;
+  if (!run(1, single) || !run(4, multi) || !run(8, eight)) {
+    return {id, "fail", detail};
+  }
+  if (multi.statistics.samples == 1) {
+    return {id, "skip", "device offers no MSAA"};
+  }
+  if (multi.minimum <= 0 ||
+      multi.maximum - multi.minimum >= single.maximum - single.minimum) {
+    return {id, "fail", "MSAA must reduce thin-hull coverage fluctuation"};
+  }
+  return {id, "pass", "0.75 pixel hull, 65 poses across one pixel: coverage " + std::to_string(single.minimum) + ".." + std::to_string(single.maximum) + " at 1x, " + std::to_string(multi.minimum) + ".." + std::to_string(multi.maximum) + " at " + std::to_string(multi.statistics.samples) + "x, " + std::to_string(eight.minimum) + ".." + std::to_string(eight.maximum) + " at " + std::to_string(eight.statistics.samples) + "x; repeats identical, "
+                                                                                                                                                                                                                                                                                                                                                                                                                                    "65 pose writes and one geometry/skin/material upload"};
 }
 
 // MToon's rim (material policy §4's MToon block), on AddOctahedron's diamond
@@ -1299,6 +1638,9 @@ int main(int argc, char** argv) {
     checks.push_back(MToonOpaqueCheck(shaders));
     checks.push_back(MToonTexturedCheck(shaders));
     checks.push_back(MToonOutlineCheck(shaders));
+    checks.push_back(OutlineSamplingCheck(shaders));
+    checks.push_back(OutlineWidthCheck(shaders));
+    checks.push_back(OutlineMotionCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
@@ -1311,6 +1653,9 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_outline", "skip", dependent});
+    checks.push_back({"renderer.outline.sampling", "skip", dependent});
+    checks.push_back({"renderer.outline.width", "skip", dependent});
+    checks.push_back({"renderer.outline.motion", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});

@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -334,6 +335,19 @@ int main() {
   textured.outline = true;
   textured.outline_width = 0.01F;
   textured.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+  if (!Check(Toon::HasOutline(textured), "a positive finite width must draw a hull")) {
+    return 1;
+  }
+  for (float invalid_width : {0.0F, -1.0F,
+           std::numeric_limits<float>::infinity(),
+           std::numeric_limits<float>::quiet_NaN()}) {
+    auto invalid_outline = textured;
+    invalid_outline.outline_width = invalid_width;
+    if (!Check(!Toon::HasOutline(invalid_outline),
+            "a zero, negative or non-finite width must draw no hull")) {
+      return 1;
+    }
+  }
   world.SetMaterial(bound, textured);
   const Toon::MaterialSnapshot outlined = world.Commit().materials[0];
   if (!Check(outlined.parameters_revision != shaded.parameters_revision &&

@@ -289,6 +289,8 @@ public:
   // The table entry a texture samples through: 0, the placeholder, when it
   // is none, has no pixels or did not fit in the table.
   [[nodiscard]] std::uint32_t Entry(TextureId texture) const;
+  // True only for a resident image whose entire G channel is zero.
+  [[nodiscard]] bool ZeroGreen(TextureId texture) const;
   void Destroy();
 
   [[nodiscard]] std::uint64_t uploads() const {
@@ -306,6 +308,7 @@ private:
     VkFormat format = VK_FORMAT_UNDEFINED;
     std::uint64_t revision = 0;
     std::uint64_t generation = 0;
+    bool zero_green = false;
   };
   struct Upload {
     VkImage image = VK_NULL_HANDLE;
@@ -369,6 +372,7 @@ public:
     // Whether a draw with this material also draws mtoon_outline's hull:
     // an MToon material that asks for an outline of some width.
     bool outline = false;
+    bool zero_width_texture = false;
     // Whether its draws go through mtoon_transparent, in `queue` order
     // after every opaque draw, and whether they write depth.
     bool transparent = false;
@@ -413,6 +417,8 @@ private:
 // What MeshCache::Record drew, part by part, and where it marks the parts'
 // ends on the GPU.
 struct SceneRecord {
+  // All recorded hulls, including those in the transparent part.
+  std::uint32_t hulls = 0;
   // Timestamps written into `timestamps` as the unlit draws, the opaque
   // hulls and the opaque surfaces end, at `first_query` and the two after
   // it; none when it is null.
