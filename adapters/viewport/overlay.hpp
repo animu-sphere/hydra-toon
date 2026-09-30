@@ -53,6 +53,8 @@ struct UploadCounts {
 // What the overlay shows of one frame.
 struct OverlayFrame {
   std::string_view scene;
+  bool can_open_file = false;
+  std::string_view open_error;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   bool vsync = true;
@@ -66,6 +68,7 @@ struct OverlayFrame {
 
 // What the overlay's controls asked for this frame.
 struct OverlayControls {
+  bool open_file = false;
   // MSAA samples per pixel; 0 when unchanged.
   std::uint32_t samples = 0;
 };

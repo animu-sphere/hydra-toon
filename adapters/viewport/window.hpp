@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include <toon/vulkan_present.hpp>
@@ -51,6 +52,7 @@ struct Event {
   // Held while a key or button went down.
   bool shift = false;
   bool alt = false;
+  bool control = false;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   // The cursor in window pixels from the top left, for the pointer events;
@@ -77,6 +79,9 @@ public:
   // The monitor's scale for content, 1 at 96 DPI on Windows: what the
   // overlay scales its text and spacing by.
   [[nodiscard]] virtual float content_scale() const noexcept = 0;
+  // UTF-8 scene path selected by the native dialog. Empty on cancellation or
+  // failure; only a failure sets `error`. Built with the Hydra adapter.
+  [[nodiscard]] virtual std::string OpenFile(std::string& error) = 0;
 };
 
 // Bundles the GLFW-required instance extensions and the surface-creation

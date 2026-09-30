@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [23](23-2026-09-30-viewport-file-open.md) | Native Open File and Ctrl+O: scene replacement with GPU cache invalidation, Japanese paths and failed-open image retention; raw VRM opened through existing format and imaging plugins |
 | [01](01-2026-09-26-phase0-mesh-camera.md) | Renderer Phase 0 lands: scene meshes through the Hydra camera at the AOV's resolution, one pipeline, uploads only on change; a skinned avatar draws once ext computations run |
 | [02](02-2026-09-26-mat-q1-material-inputs.md) | MAT-Q1 measured: canonical material values reach a classic delegate only through `vrmImaging`'s `vrm` container; a value-only change produces no Sync, and the delegate's terminal-scene-index hooks see it |
 | [03](03-2026-09-26-material-sprim.md) | `hdToon`'s material Sprim: MToon selected from `vrmImaging`'s container and normalized into `ToonMaterial`; every material is PreviewSurface without the plugins |

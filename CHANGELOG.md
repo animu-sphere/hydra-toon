@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The viewport's `Open File...` button and Ctrl+O use Native File Dialog
+  Extended 1.3.0, following hydra-merlin. USD, VRM and PMX filters pass the
+  selected UTF-8 path to OpenUSD's registered format plugins. A successful
+  open replaces and frames the scene; a failure retains it and displays an
+  error. `PresentSession::ResetScene` releases the previous scene's cached
+  resources after its GPU frame completes. Seven regression tests cover
+  replacement from bootstrap and USD, overlapping mesh ids, Japanese paths
+  and failed opens, with byte-for-byte capture comparisons.
 - The viewport's telemetry (design policy §24): a present session writes
   GPU timestamps between the parts of each frame (uploads, the swapchain
   image wait, unlit, outline, opaque, transparent, resolve, capture,
@@ -99,6 +107,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Right-button camera dolly uses horizontal motion: dragging right zooms
+  in and dragging left zooms out, at the existing sensitivity.
 - `OST_RENDERER_ADAPTERS` adds the adapters it names to those the build
   intent enables, where it used to replace them, so `ost renderer viewport`
   no longer turns an intent's Hydra adapter off (`ost` report 07, Q1).

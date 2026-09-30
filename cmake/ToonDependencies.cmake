@@ -47,4 +47,26 @@ function(toon_configure_viewport_dependencies)
     GIT_SHALLOW FALSE)
   FetchContent_MakeAvailable(imgui)
   set(imgui_SOURCE_DIR "${imgui_SOURCE_DIR}" PARENT_SCOPE)
+
+  if(TOON_ENABLE_HYDRA2)
+    if(APPLE)
+      enable_language(OBJC)
+    endif()
+    set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(NFD_BUILD_SDL2_TESTS OFF CACHE BOOL "" FORCE)
+    set(NFD_BUILD_GLFW3_TESTS OFF CACHE BOOL "" FORCE)
+    set(NFD_INSTALL OFF CACHE BOOL "" FORCE)
+    if(UNIX AND NOT APPLE)
+      set(NFD_PORTAL ON CACHE BOOL "" FORCE)
+      set(NFD_X11 OFF CACHE BOOL "" FORCE)
+      set(NFD_WAYLAND OFF CACHE BOOL "" FORCE)
+    endif()
+    # Native File Dialog Extended 1.3.0, as pinned by hydra-merlin.
+    FetchContent_Declare(nfd
+      GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+      GIT_TAG 3cd252a8f7ca32419b1ca235c2990ba6a0ecba7c
+      GIT_SHALLOW FALSE)
+    FetchContent_MakeAvailable(nfd)
+    set(nfd_SOURCE_DIR "${nfd_SOURCE_DIR}" PARENT_SCOPE)
+  endif()
 endfunction()

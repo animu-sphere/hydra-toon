@@ -88,7 +88,14 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
 4. OpenUSD appears only under `adapters/hydra2/` and in
    `adapters/viewport/hydra_scene.cpp`, which is compiled only when the
    Hydra adapter is built too; no other viewport source includes an OpenUSD
-   header. GLFW and Dear ImGui appear only under `adapters/viewport/`; the
+   header. GLFW, Dear ImGui and Native File Dialog Extended appear only under
+   `adapters/viewport/`; the file dialog is linked only in Hydra builds, with
+   its zlib licence installed under `share/toon/licenses/nativefiledialog-extended`.
+   The window returns a UTF-8 path to the frame loop, which prepares a new
+   Hydra scene and snapshot before replacing the active scene. Source-format
+   parsing stays with OpenUSD's registered plugins. `PresentSession::ResetScene`
+   clears the old mesh, material and texture caches after the frame in flight,
+   keeping the swapchain, overlay and cumulative statistics. The
    backend draws the viewport's overlay from `include/toon/overlay.hpp`'s
    plain data.
 5. No target links a format repository
