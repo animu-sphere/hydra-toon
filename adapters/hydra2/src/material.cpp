@@ -72,6 +72,10 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (outlineWidthMultiply)
     (matcap)
     (rimMultiply)
+    (emissive)
+    (normal)
+    (shadingShift)
+    (uvAnimationMask)
     (file)
     (texCoord)
     (wrapS)
@@ -241,7 +245,9 @@ std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
     Toon::ToonMaterial& material) {
   return {&material.base_texture, &material.mtoon.shade_texture,
       &material.mtoon.outline_width_texture, &material.mtoon.matcap_texture,
-      &material.mtoon.rim_multiply_texture};
+      &material.mtoon.rim_multiply_texture, &material.emissive_texture,
+      &material.normal_texture, &material.mtoon.shading_shift_texture,
+      &material.mtoon.uv_animation_mask_texture};
 }
 
 bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
@@ -268,8 +274,8 @@ HdToonMaterialSource HdToonReadMaterial(
     ReadCommon(material, result);
   }
   ReadMToon(mtoon, result);
-  // The schema fixes colour or data by role: every role here is colour but
-  // the outline width, a factor in G.
+  // Colour roles are sRGB; normal, shift (R), width (G) and mask (B) are
+  // linear data. Metallic/roughness and occlusion are not MToon inputs.
   struct Role {
     TfToken name;
     Toon::ToonTextureEncoding encoding;
@@ -281,13 +287,23 @@ HdToonMaterialSource HdToonReadMaterial(
       {_tokens->outlineWidthMultiply, Toon::ToonTextureEncoding::Linear,
           true},
       {_tokens->matcap, Toon::ToonTextureEncoding::Srgb, false},
-      {_tokens->rimMultiply, Toon::ToonTextureEncoding::Srgb, true}};
+      {_tokens->rimMultiply, Toon::ToonTextureEncoding::Srgb, true},
+      {_tokens->emissive, Toon::ToonTextureEncoding::Srgb, true},
+      {_tokens->normal, Toon::ToonTextureEncoding::Linear, true},
+      {_tokens->shadingShift, Toon::ToonTextureEncoding::Linear, true},
+      {_tokens->uvAnimationMask, Toon::ToonTextureEncoding::Linear, true}};
   const HdContainerDataSourceHandle textures =
       Group(vrm, _tokens->textureInfo);
   const auto references = HdToonTextureRefs(result);
   for (std::size_t role = 0; role < kHdToonTextureRoles; ++role) {
     ReadTexture(Group(textures, roles[role].name), roles[role].encoding,
         roles[role].samples_st, source.textures[role], *references[role]);
+  }
+  if (const auto normal = Group(textures, _tokens->normal)) {
+    Read(normal, _tokens->scale, result.normal_scale);
+  }
+  if (const auto shift = Group(textures, _tokens->shadingShift)) {
+    Read(shift, _tokens->scale, result.mtoon.shading_shift_texture_scale);
   }
   return source;
 }

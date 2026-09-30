@@ -10,6 +10,19 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MToon's remaining texture inputs: sRGB emissive, linear normal with its
+  scale, shading shift's linear R and scale, and UV animation mask's linear
+  B. All nine MToon texture roles retain their own wrap and transform;
+  normal mapping derives a tangent frame from deformed positions and mesh
+  UVs, retaining vertex normals when the image or usable UVs are absent.
+- Timed MToon UV scroll and rotation before each role's texture transform,
+  including outline width in the vertex stage; the mask stays unanimated
+  and MatCap stays view-mapped. `RenderWorld::SetTimeSeconds` and Hydra's
+  `toon:timeSeconds` feed one frame buffer, without material writes or
+  geometry uploads. The viewport converts USD time codes by the stage's
+  `timeCodesPerSecond`. Renderer report 25 records GPU channel, transform,
+  Mask and culling checks and the viewport's static-reference comparison.
+
 - Outline evaluation in the viewport: `--time` and `--time-step` select
   reproducible USD poses, and `--outlines on|off` and the overlay's Outlines
   checkbox compare hulls without material edits or uploads. Actual hull

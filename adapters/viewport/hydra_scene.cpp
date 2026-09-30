@@ -88,6 +88,9 @@ public:
                                           ? UsdTimeCode(
                                                 stage_->GetStartTimeCode())
                                           : UsdTimeCode::Default());
+    if (stage_->HasAuthoredTimeCodeRange()) {
+      SetTime(stage_->GetStartTimeCode());
+    }
     meters_per_unit_ =
         static_cast<float>(UsdGeomGetStageMetersPerUnit(stage_));
     up_axis_ = UsdGeomGetStageUpAxis(stage_) == UsdGeomTokens->z ? UpAxis::Z
@@ -108,6 +111,8 @@ public:
 
   void SetTime(double time) override {
     indices_.stageSceneIndex->SetTime(UsdTimeCode(time));
+    delegate_.SetRenderSetting(TfToken("toon:timeSeconds"),
+        VtValue(time / stage_->GetTimeCodesPerSecond()));
   }
 
   double start_time() const noexcept override {

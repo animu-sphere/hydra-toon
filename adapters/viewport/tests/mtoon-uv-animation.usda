@@ -1,0 +1,41 @@
+#usda 1.0
+# SPDX-License-Identifier: Apache-2.0
+(
+    defaultPrim = "Test"
+    startTimeCode = 0
+    endTimeCode = 30
+    timeCodesPerSecond = 30
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "Test"
+{
+    def Material "Material" (
+        prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI", "VrmTextureInfoAPI:emissive"]
+    )
+    {
+        color3f inputs:vrm:material:baseColorFactor = (0, 0, 0)
+        color3f inputs:vrm:material:emissiveFactor = (1, 1, 1)
+        color3f inputs:vrm:mtoon:shadeColorFactor = (0, 0, 0)
+        float inputs:vrm:mtoon:uvAnimationScrollXSpeedFactor = 0.5
+        asset inputs:vrm:textureInfo:emissive:file = @mtoon-texels.png@
+    }
+
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        uniform token subdivisionScheme = "none"
+        point3f[] points = [(-0.5, -0.5, 0), (0.5, -0.5, 0), (0.5, 0.5, 0), (-0.5, 0.5, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0.25, 0.75), (0.25, 0.75), (0.25, 0.75), (0.25, 0.75)] (
+            interpolation = "vertex"
+        )
+        rel material:binding = </Test/Material>
+    }
+}

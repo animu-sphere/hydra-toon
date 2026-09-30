@@ -49,7 +49,9 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
   if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity ||
       limits.maxDescriptorSetSampledImages < kTextureCapacity ||
       limits.maxPerStageDescriptorSamplers < kSamplerCount ||
-      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 2U) {
+      limits.maxPerStageDescriptorStorageBuffers < 4U ||
+      limits.maxDescriptorSetStorageBuffers < 4U ||
+      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 4U) {
     detail = std::string(properties.deviceName) + " cannot bind a table of " +
              std::to_string(kTextureCapacity) + " textures";
     return false;
@@ -336,7 +338,11 @@ MaterialEntries EntriesOf(const ToonMaterial& material,
       textures.Entry(material.mtoon.shade_texture.texture),
       textures.Entry(material.mtoon.outline_width_texture.texture),
       textures.Entry(material.mtoon.matcap_texture.texture),
-      textures.Entry(material.mtoon.rim_multiply_texture.texture)};
+      textures.Entry(material.mtoon.rim_multiply_texture.texture),
+      textures.Entry(material.emissive_texture.texture),
+      textures.Entry(material.normal_texture.texture),
+      textures.Entry(material.mtoon.shading_shift_texture.texture),
+      textures.Entry(material.mtoon.uv_animation_mask_texture.texture)};
 }
 
 void WriteParameters(const ToonMaterial& material,
@@ -388,6 +394,23 @@ void WriteParameters(const ToonMaterial& material,
   slot.rim_textures[3] = SamplerIndex(material.mtoon.rim_multiply_texture);
   WriteUvRows(material.mtoon.matcap_texture, slot.matcap_uv);
   WriteUvRows(material.mtoon.rim_multiply_texture, slot.rim_uv);
+  slot.surface_textures[0] = entries.emissive;
+  slot.surface_textures[1] = SamplerIndex(material.emissive_texture);
+  slot.surface_textures[2] = entries.normal;
+  slot.surface_textures[3] = SamplerIndex(material.normal_texture);
+  WriteUvRows(material.emissive_texture, slot.emissive_uv);
+  WriteUvRows(material.normal_texture, slot.normal_uv);
+  slot.animation_textures[0] = entries.shift;
+  slot.animation_textures[1] = SamplerIndex(material.mtoon.shading_shift_texture);
+  slot.animation_textures[2] = entries.mask;
+  slot.animation_textures[3] = SamplerIndex(material.mtoon.uv_animation_mask_texture);
+  WriteUvRows(material.mtoon.shading_shift_texture, slot.shift_uv);
+  WriteUvRows(material.mtoon.uv_animation_mask_texture, slot.mask_uv);
+  slot.surface[0] = material.normal_scale;
+  slot.surface[1] = material.mtoon.shading_shift_texture_scale;
+  slot.animation[0] = material.mtoon.uv_scroll_x_speed;
+  slot.animation[1] = material.mtoon.uv_scroll_y_speed;
+  slot.animation[2] = material.mtoon.uv_rotation_speed;
 }
 
 // Every level down to 1x1.
@@ -472,7 +495,7 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   // from the same slot and table the fragment stages do.
   const VkShaderStageFlags material_stages =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding material_bindings[3]{};
+  VkDescriptorSetLayoutBinding material_bindings[4]{};
   material_bindings[0].binding = 0;
   material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[0].descriptorCount = 1;
@@ -486,9 +509,13 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   material_bindings[2].descriptorCount = kSamplerCount;
   material_bindings[2].stageFlags = material_stages;
   material_bindings[2].pImmutableSamplers = pipelines.samplers;
+  material_bindings[3].binding = 3;
+  material_bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  material_bindings[3].descriptorCount = 1;
+  material_bindings[3].stageFlags = material_stages;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create.bindingCount = 3;
+  set_layout_create.bindingCount = 4;
   set_layout_create.pBindings = material_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.material_layout),
@@ -1009,7 +1036,7 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
   device_ = device;
   VkDescriptorPoolSize pool_sizes[3]{};
   pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_sizes[0].descriptorCount = 1;
+  pool_sizes[0].descriptorCount = 2;
   pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   pool_sizes[1].descriptorCount = kTextureCapacity;
   pool_sizes[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -1033,11 +1060,29 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
     return false;
   }
   // The set is valid before any material exists.
+  if (!CreateHostBuffer(physical_device_, device_, 16,
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_buffer_, detail)) {
+    return false;
+  }
+  std::memset(frame_buffer_.mapped, 0, 16);
+  VkDescriptorBufferInfo frame_info{frame_buffer_.buffer, 0, 16};
+  VkWriteDescriptorSet frame_write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  frame_write.dstSet = set_;
+  frame_write.dstBinding = 3;
+  frame_write.descriptorCount = 1;
+  frame_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  frame_write.pBufferInfo = &frame_info;
+  vkUpdateDescriptorSets(device_, 1, &frame_write, 0, nullptr);
   return Reserve(64, detail);
 }
 
 bool MaterialCache::Update(const DrawList& draws,
     const TextureCache& textures, std::string& detail) {
+  static_cast<float*>(frame_buffer_.mapped)[0] =
+      static_cast<float>(draws.time_seconds);
+  if (!FlushIfNeeded(device_, frame_buffer_, detail)) {
+    return false;
+  }
   ++generation_;
   bool written = false;
   for (const MaterialSnapshot& material : draws.materials) {
@@ -1096,6 +1141,7 @@ const MaterialCache::Entry* MaterialCache::Find(MaterialId material) const {
 
 void MaterialCache::Destroy() {
   DestroyHostBuffer(device_, buffer_);
+  DestroyHostBuffer(device_, frame_buffer_);
   // Frees the set with it.
   vkDestroyDescriptorPool(device_, pool_, nullptr);
   pool_ = VK_NULL_HANDLE;

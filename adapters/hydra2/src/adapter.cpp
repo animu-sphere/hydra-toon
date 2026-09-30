@@ -195,7 +195,8 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
 // The delegate's render settings.
 TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
     ((msaaSamples, "toon:msaaSamples"))
-    ((metersPerUnit, "toon:metersPerUnit")));
+    ((metersPerUnit, "toon:metersPerUnit"))
+    ((timeSeconds, "toon:timeSeconds")));
 
 constexpr int kDefaultSamples = static_cast<int>(Toon::RenderOptions{}.samples);
 
@@ -220,6 +221,12 @@ float RequestedMetersPerUnit(const HdRenderDelegate& delegate) {
   return value.IsHolding<double>()
              ? static_cast<float>(value.UncheckedGet<double>())
              : 1.0F;
+}
+
+double RequestedTimeSeconds(const HdRenderDelegate& delegate) {
+  const auto value = VtValue::Cast<double>(
+      delegate.GetRenderSetting(SettingTokens->timeSeconds));
+  return value.IsHolding<double>() ? value.UncheckedGet<double>() : 0.0;
 }
 
 } // namespace
@@ -281,6 +288,11 @@ public:
   void SetMeshSkinPose(Toon::MeshId mesh, Toon::ToonSkinPose pose) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshSkinPose(mesh, std::move(pose));
+  }
+
+  void SetTimeSeconds(double seconds) {
+    std::scoped_lock lock(mutex_);
+    world_.SetTimeSeconds(seconds);
   }
 
   Toon::FrameSnapshot Commit() {
@@ -384,7 +396,7 @@ public:
   }
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
-      std::uint32_t samples, float meters_per_unit) {
+      std::uint32_t samples, float meters_per_unit, double time_seconds) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
         pass_state->GetAovBindings();
@@ -408,6 +420,7 @@ public:
     world_.SetView({ToToon(pass_state->GetWorldToViewMatrix()),
         ToToon(pass_state->GetProjectionMatrix())});
     world_.SetMetersPerUnit(meters_per_unit);
+    world_.SetTimeSeconds(time_seconds);
     world_.Commit(snapshot_);
     Toon::ExtractDrawList(snapshot_, draws_);
     std::string error;
@@ -1012,7 +1025,7 @@ private:
     (void)render_tags;
     const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
     state_->Render(render_pass_state, RequestedSamples(delegate),
-        RequestedMetersPerUnit(delegate));
+        RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate));
   }
 
   std::shared_ptr<HdToonAdapterState> state_;
@@ -1363,7 +1376,9 @@ HdToonRenderDelegate::GetRenderSettingDescriptors() const {
       // A float, which usdview's settings panel can show; a double it
       // leaves out of the list.
       {"Stage meters per unit", SettingTokens->metersPerUnit,
-          VtValue(1.0F)}};
+          VtValue(1.0F)},
+      {"Evaluation time in seconds", SettingTokens->timeSeconds,
+          VtValue(0.0F)}};
 }
 
 HdToonRenderDelegate::~HdToonRenderDelegate() = default;
@@ -1505,10 +1520,12 @@ void HdToonRenderDelegate::Update() {
 }
 
 Toon::FrameSnapshot HdToonRenderDelegate::CommitScene() {
+  impl_->state->SetTimeSeconds(RequestedTimeSeconds(*this));
   return impl_->state->Commit();
 }
 
 void HdToonRenderDelegate::CommitScene(Toon::FrameSnapshot& snapshot) {
+  impl_->state->SetTimeSeconds(RequestedTimeSeconds(*this));
   impl_->state->Commit(snapshot);
 }
 
