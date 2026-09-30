@@ -48,6 +48,34 @@ struct ToonView {
 using MeshId = std::uint32_t;
 using MaterialId = std::uint32_t;
 using TextureId = std::uint32_t;
+using LightId = std::uint32_t;
+
+enum class ToonLightType { Directional,
+  Point,
+  Spot,
+  Ambient };
+
+// Renderer lighting, in world space. Direction is the direction light travels;
+// colour includes intensity and exposure. Point/spot use inverse square distance
+// in metres, bounded by radius. Ambient is uniform, without an environment map.
+struct ToonLight {
+  ToonLightType type = ToonLightType::Directional;
+  Float3 color{1.0F, 1.0F, 1.0F};
+  Float3 position;
+  Float3 direction{0.0F, 0.0F, -1.0F};
+  float radius = 0.01F;
+  float cone_angle = 45.0F;
+  float cone_softness = 0.0F;
+  bool visible = true;
+
+  friend bool operator==(const ToonLight&, const ToonLight&) = default;
+};
+
+struct LightSnapshot {
+  LightId id = 0;
+  ToonLight light;
+  std::uint64_t revision = 0;
+};
 
 // One joint's pull on a point: an index into the mesh's own joint order and
 // its weight.
@@ -310,6 +338,8 @@ struct FrameSnapshot {
   float meters_per_unit = 1.0F;
   // Host evaluation time in seconds, independent of material revisions.
   double time_seconds = 0.0;
+  // Ordered by id; invisible lights remain, so a hidden rig stays dark.
+  std::vector<LightSnapshot> lights;
   // Ordered by id.
   std::vector<MeshSnapshot> meshes;
   // Ordered by id.
@@ -347,6 +377,10 @@ public:
   void SetMetersPerUnit(float meters);
   // Finite evaluation time; zero until the host supplies it.
   void SetTimeSeconds(double seconds);
+  [[nodiscard]] LightId CreateLight();
+  void RemoveLight(LightId light);
+  // Unchanged or non-finite values change nothing. Directions are normalized.
+  void SetLight(LightId light, ToonLight values);
 
   // A new material is the default `ToonMaterial`: the fallback material.
   [[nodiscard]] MaterialId CreateMaterial();
@@ -389,6 +423,8 @@ private:
   std::uint64_t view_revision_ = 0;
   float meters_per_unit_ = 1.0F;
   double time_seconds_ = 0.0;
+  LightId next_light_ = 1;
+  std::map<LightId, LightSnapshot> lights_;
   std::map<MeshId, MeshRecord> meshes_;
   MaterialId next_material_ = 1;
   std::map<MaterialId, MaterialSnapshot> materials_;

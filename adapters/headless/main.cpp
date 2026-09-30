@@ -154,6 +154,196 @@ std::array<std::uint8_t, 4> CenterPixel(const Toon::ColorProduct& color) {
   return PixelAt(color, color.width / 2U, color.height / 2U);
 }
 
+// Scene lights, attenuation, material debug, and value-only frame updates.
+Check SceneLightsCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.lighting.scene";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (!renderer)
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  Toon::RenderWorld world;
+  world.SetBootstrapTriangle();
+  const auto mesh = world.Commit().meshes[0].id;
+  const auto material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {0.4F, 0.4F, 0.4F};
+  toon.mtoon.shade_color = {0.1F, 0.1F, 0.1F};
+  world.SetMaterial(material, toon);
+  world.SetMeshMaterial(mesh, material);
+  const auto key = world.CreateLight();
+  Toon::ToonLight light;
+  light.color = {0.5F, 0, 0};
+  world.SetLight(key, light);
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  Toon::LightingDebug debug;
+  Toon::ToonView view;
+  const auto render = [&]() {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.lighting = debug;
+    draws.view = view;
+    return renderer->Render(draws, 64, 64, color, depth, detail);
+  };
+  const auto near = [](int actual, int expected) { return std::abs(actual - expected) <= 2; };
+  const auto expect = [&](int r, int g, int b) {
+    const auto pixel = CenterPixel(color);
+    return near(pixel[0], r) && near(pixel[1], g) && near(pixel[2], b);
+  };
+  if (!render())
+    return {id, "fail", detail};
+  const auto first = renderer->statistics();
+  if (!expect(51, 0, 0))
+    return {id, "fail", "directional colour or removal of fallback ambient"};
+  light.direction = {0, 0, 1};
+  world.SetLight(key, light);
+  if (!render() || !expect(13, 0, 0))
+    return {id, "fail", "directional back side must use MToon shade"};
+  light.direction = {0, 0, -1};
+  world.SetLight(key, light);
+  const auto fill = world.CreateLight();
+  Toon::ToonLight green = light;
+  green.color = {0, 0.5F, 0};
+  world.SetLight(fill, green);
+  const auto ambient_id = world.CreateLight();
+  Toon::ToonLight ambient;
+  ambient.type = Toon::ToonLightType::Ambient;
+  ambient.color = {0, 0, 0.25F};
+  world.SetLight(ambient_id, ambient);
+  if (!render() || !expect(51, 51, 26))
+    return {id, "fail", "multiple direct lights and coloured ambient must add"};
+  debug.material = Toon::MaterialDebug::Ambient;
+  if (!render() || !expect(0, 0, 64))
+    return {id, "fail", "ambient debug must show illumination independent of base colour"};
+  debug.material = Toon::MaterialDebug::DirectLight;
+  if (!render() || !expect(128, 128, 0))
+    return {id, "fail", "direct debug must show summed incident illumination"};
+  debug.material = Toon::MaterialDebug::Surface;
+  debug.direct_scale = 0;
+  if (!render() || !expect(0, 0, 26))
+    return {id, "fail", "direct debug strength must affect only direct light"};
+  debug.ambient_scale = 0;
+  if (!render() || !expect(0, 0, 0))
+    return {id, "fail", "ambient debug strength"};
+  debug = {};
+  world.RemoveLight(fill);
+  world.RemoveLight(ambient_id);
+  light.type = Toon::ToonLightType::Point;
+  light.color = {0.5F, 0.5F, 0.5F};
+  light.position = {0, 0, 0.5F};
+  world.SetLight(key, light);
+  if (!render() || !expect(51, 51, 51))
+    return {id, "fail", "point light at one metre"};
+  light.position.z = 1.5F;
+  world.SetLight(key, light);
+  if (!render() || !expect(13, 13, 13))
+    return {id, "fail", "point light inverse square attenuation"};
+  world.SetMetersPerUnit(0.5F);
+  if (!render() || !expect(51, 51, 51))
+    return {id, "fail", "point attenuation must use metres"};
+  world.SetMetersPerUnit(1);
+  // A view translation moves both the surface and the source, preserving lighting.
+  view.view.m[12] = 0.2F;
+  if (!render() || !expect(13, 13, 13))
+    return {id, "fail", "point light must transform with the camera"};
+  view = {};
+  light.type = Toon::ToonLightType::Spot;
+  light.position = {0, 0, 0.5F};
+  light.cone_angle = 30;
+  world.SetLight(key, light);
+  if (!render() || !expect(51, 51, 51))
+    return {id, "fail", "spot on axis"};
+  light.direction = {1, 0, 0};
+  world.SetLight(key, light);
+  if (!render() || !expect(0, 0, 0))
+    return {id, "fail", "spot outside cone must contribute nothing"};
+  light.direction = {0.70710678F, 0, -0.70710678F};
+  light.cone_angle = 60;
+  light.cone_softness = 0.5F;
+  world.SetLight(key, light);
+  if (!render())
+    return {id, "fail", detail};
+  const auto soft = CenterPixel(color);
+  if (soft[0] < 12 || soft[0] > 40)
+    return {id, "fail", "spot cone softness must fade the penumbra"};
+  light.visible = false;
+  world.SetLight(key, light);
+  if (!render() || !expect(0, 0, 0))
+    return {id, "fail", "hidden authored light must leave a dark scene"};
+  // Frame-only debug modes remain visible even under a dark authored rig.
+  debug.material = Toon::MaterialDebug::BaseColor;
+  if (!render() || !expect(102, 102, 102))
+    return {id, "fail", "base colour debug"};
+  debug.material = Toon::MaterialDebug::Normal;
+  if (!render() || !expect(128, 128, 255))
+    return {id, "fail", "normal debug"};
+  debug.material = Toon::MaterialDebug::DirectLight;
+  if (!render() || !expect(0, 0, 0))
+    return {id, "fail", "direct light debug"};
+  debug = {};
+  const auto before_material_edit = renderer->statistics();
+  if (before_material_edit.material_writes != first.material_writes ||
+      before_material_edit.point_uploads != first.point_uploads ||
+      before_material_edit.topology_uploads != first.topology_uploads ||
+      before_material_edit.pipelines_created != first.pipelines_created)
+    return {id, "fail", "light, camera and debug changes must upload no mesh or material and rebuild no pipeline"};
+  // Rim receives actual incident light; emission survives a dark scene.
+  toon.base_color = {0, 0, 0};
+  toon.mtoon.shade_color = {0, 0, 0};
+  toon.emissive = {0, 0.1F, 0};
+  toon.mtoon.rim_color = {0.2F, 0, 0};
+  toon.mtoon.rim_lift = 1;
+  world.SetMaterial(material, toon);
+  if (!render() || !expect(0, 26, 0))
+    return {id, "fail", "emission must survive and lit rim must disappear in darkness"};
+  light.visible = true;
+  light.type = Toon::ToonLightType::Directional;
+  light.direction = {0, 0, -1};
+  world.SetLight(key, light);
+  if (!render() || !expect(26, 26, 0))
+    return {id, "fail", "rim lighting mix must use actual incident colour and intensity"};
+  light.visible = false;
+  world.SetLight(key, light);
+  toon.mtoon.rim_lighting_mix = 0;
+  world.SetMaterial(material, toon);
+  if (!render() || !expect(51, 26, 0))
+    return {id, "fail", "unlit rim must survive darkness"};
+  world.RemoveLight(key);
+  toon = {};
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {0.4F, 0.4F, 0.4F};
+  world.SetMaterial(material, toon);
+  if (!render() || !expect(128, 128, 128))
+    return {id, "fail", "removing the last light must restore the default rig"};
+  light.visible = true;
+  light.color = {0, 0.5F, 0};
+  const auto surface_light = world.CreateLight();
+  world.SetLight(surface_light, light);
+  for (const auto mode : {Toon::ToonAlphaMode::Opaque, Toon::ToonAlphaMode::Mask, Toon::ToonAlphaMode::Blend}) {
+    toon.alpha_mode = mode;
+    world.SetMaterial(material, toon);
+    if (!render() || !expect(0, 51, 0))
+      return {id, "fail", "scene lighting must reach Opaque, Mask and Blend"};
+  }
+  // A source beyond the fixed table cannot read out of bounds. Ambient,
+  // including one ordered after the direct sources, still contributes.
+  world.RemoveLight(surface_light);
+  light.color = {0.01F, 0.01F, 0.01F};
+  for (int index = 0; index < 33; ++index) {
+    const auto source = world.CreateLight();
+    world.SetLight(source, light);
+  }
+  ambient.color = {0.1F, 0.1F, 0.1F};
+  const auto overflow_ambient = world.CreateLight();
+  world.SetLight(overflow_ambient, ambient);
+  if (!render() || !expect(43, 43, 43))
+    return {id, "fail", "direct-light capacity must be bounded without omitting ambient"};
+  if (renderer->statistics().validation_message_count != 0)
+    return {id, "fail", renderer->statistics().validation_detail};
+  return {id, "pass", ""};
+}
+
 // mtoon_opaque (material policy §7): the bootstrap triangle bound to an
 // MToon material whose lit colour is red and shade colour blue. Facing the
 // key light it draws lit; a shading shift of -1, a value-only edit, turns it
@@ -2078,6 +2268,7 @@ int main(int argc, char** argv) {
                        : "1,000 frames did not complete on the scene "
                          "pipelines, one target allocation and mesh upload"});
     checks.push_back(MToonOpaqueCheck(shaders));
+    checks.push_back(SceneLightsCheck(shaders));
     checks.push_back(MToonTexturedCheck(shaders));
     checks.push_back(MToonRestCheck(shaders));
     checks.push_back(MToonNormalCheck(shaders));
@@ -2095,6 +2286,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.render_product.depth", "skip", dependent});
     checks.push_back({"renderer.frame.persistence", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_opaque", "skip", dependent});
+    checks.push_back({"renderer.lighting.scene", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_textured", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_rest", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_normal", "skip", dependent});

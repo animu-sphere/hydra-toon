@@ -336,6 +336,22 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
     }
     controls.outlines = frame.outlines;
     controls.outlines_changed = ImGui::Checkbox("Outlines", &controls.outlines);
+    controls.lighting = frame.lighting;
+    if (ImGui::CollapsingHeader("Lighting and material")) {
+      ImGui::Text("%zu scene lights (up to 32 direct)", frame.lights);
+      ImGui::Checkbox("Use scene lights", &controls.lighting.scene_lights);
+      if (frame.lights == 0 || !controls.lighting.scene_lights) {
+        ImGui::TextDisabled("Camera key + uniform ambient");
+        ImGui::SliderFloat3("Key direction", &controls.lighting.key_direction.x, -1.0F, 1.0F);
+      }
+      ImGui::SliderFloat("Direct strength", &controls.lighting.direct_scale, 0.0F, 4.0F);
+      ImGui::SliderFloat("Ambient strength", &controls.lighting.ambient_scale, 0.0F, 4.0F);
+      int mode = static_cast<int>(controls.lighting.material);
+      ImGui::Combo("Material view", &mode, "Surface\0Base colour\0Normals\0Direct light\0Ambient\0");
+      controls.lighting.material = static_cast<MaterialDebug>(mode);
+      if (ImGui::Button("Reset lighting and material"))
+        controls.lighting = {};
+    }
 
     const Summary& interval =
         state_->cpu.empty() ? Summary{} : state_->cpu.front();

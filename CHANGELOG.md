@@ -10,6 +10,20 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Scene lights: a host-neutral `ToonLight` and revisioned world state,
+  Hydra distant, sphere and dome Sprims, and per-frame Vulkan light data.
+  Directional, inverse-square point, shaped spot and uniform ambient feed
+  MToon surfaces, rim and lit outlines. Colour, intensity, exposure,
+  diffuse, colour temperature, transform and visibility come from USD;
+  time and parameter edits upload no geometry or material. A scene without
+  supported lights retains the camera key and ambient. The fixed buffer
+  holds 32 direct sources; uniform ambient lights sum independently.
+- Viewport lighting and material controls: scene/camera lighting, direct
+  and ambient strength, fallback key direction, and surface, base colour,
+  normals, direct-light and ambient views. CLI equivalents provide
+  repeatable captures. Renderer report 26 records the USD time/update
+  route, GPU checks and animated avatar comparisons.
+
 - MToon's remaining texture inputs: sRGB emissive, linear normal with its
   scale, shading shift's linear R and scale, and UV animation mask's linear
   B. All nine MToon texture roles retain their own wrap and transform;

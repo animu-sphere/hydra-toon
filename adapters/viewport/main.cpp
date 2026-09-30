@@ -53,6 +53,7 @@ struct Arguments {
   // Whether the overlay is laid out and drawn; O shows and hides it.
   bool overlay = true;
   bool outlines = true;
+  Toon::LightingDebug lighting;
   std::optional<double> time;
   std::optional<double> time_step;
   std::optional<std::uint64_t> expect_hulls;
@@ -131,6 +132,26 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument(std::string(option) + " must be finite");
       }
       (option == "--time" ? result.time : result.time_step) = number;
+    } else if (option == "--direct-strength" || option == "--ambient-strength") {
+      const std::string value(next());
+      std::size_t consumed = 0;
+      const float number = std::stof(value, &consumed);
+      if (consumed != value.size() || !std::isfinite(number) || number < 0.0F || number > 4.0F) {
+        throw std::invalid_argument(std::string(option) + " must be in [0, 4]");
+      }
+      (option == "--direct-strength" ? result.lighting.direct_scale : result.lighting.ambient_scale) = number;
+    } else if (option == "--lighting") {
+      const auto value = next();
+      if (value != "scene" && value != "camera")
+        throw std::invalid_argument("--lighting must be scene or camera");
+      result.lighting.scene_lights = value == "scene";
+    } else if (option == "--material-view") {
+      const auto value = next();
+      const std::vector<std::string_view> modes{"surface", "base", "normal", "direct", "ambient"};
+      const auto found = std::find(modes.begin(), modes.end(), value);
+      if (found == modes.end())
+        throw std::invalid_argument("unknown material view");
+      result.lighting.material = static_cast<Toon::MaterialDebug>(found - modes.begin());
     } else if (option == "--outlines") {
       const auto value = next();
       if (value != "on" && value != "off") {
@@ -159,6 +180,10 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --overlay on|off         the measurements over the\n"
                    "                           scene (default on)\n"
                    "  --outlines on|off        draw hulls (default on)\n"
+                   "  --lighting scene|camera  scene lights or camera key\n"
+                   "  --direct-strength N      direct multiplier [0, 4]\n"
+                   "  --ambient-strength N     ambient multiplier [0, 4]\n"
+                   "  --material-view MODE     surface|base|normal|direct|ambient\n"
                    "  --time T                 initial USD time code\n"
                    "  --time-step T            USD time codes per presented\n"
                    "                           frame (deterministic evaluation)\n"
@@ -479,6 +504,7 @@ int RunViewport(int argc, char** argv) {
     }
     bool overlay_shown = overlay != nullptr;
     bool outlines = arguments.outlines;
+    Toon::LightingDebug lighting = arguments.lighting;
     Toon::OverlayDrawList overlay_draws;
     Toon::viewport::FrameTelemetry telemetry;
     std::uint64_t gpu_frame = 0;
@@ -642,6 +668,7 @@ int RunViewport(int argc, char** argv) {
                                static_cast<float>(height));
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
+      draws.lighting = lighting;
       if (arguments.switch_samples && !uploads_at_switch &&
           session->statistics().frames_presented ==
               arguments.frame_limit / 2) {
@@ -665,6 +692,8 @@ int RunViewport(int argc, char** argv) {
         shown.height = height;
         shown.vsync = arguments.vsync;
         shown.outlines = outlines;
+        shown.lighting = lighting;
+        shown.lights = draws.lights.size();
         shown.statistics = &session->statistics();
         shown.telemetry = &telemetry;
         shown.counts = CountScene(draws);
@@ -675,6 +704,8 @@ int RunViewport(int argc, char** argv) {
             overlay_draws);
         last_overlay = overlay_start;
         open_file_requested = controls.open_file;
+        lighting = controls.lighting;
+        draws.lighting = lighting;
         if (controls.samples != 0) {
           session->SetSamples(controls.samples);
         }

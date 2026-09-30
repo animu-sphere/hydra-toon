@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // What mtoon_opaque, mtoon_transparent and mtoon_outline share (material
 // policy §7): the draw constants, the material parameter slot and texture
-// table, the stand-in lighting, the surface's vertex stage and MToon's
+// table, scene lighting, the surface's vertex stage and MToon's
 // surface shading, rim included. Included, not compiled on its own.
 
 #include "skinning.slang"
@@ -92,16 +92,10 @@ struct MToonParameters {
 // Indexed by a value from the material slot, so uniform across a draw.
 [[vk::binding(1, 0)]] Texture2D<float4> textures[kTextureCapacity];
 [[vk::binding(2, 0)]] SamplerState samplers[kSamplerCount];
-// x is host evaluation time in seconds. Independent of material slots.
+// Header: time, direct-light count, material debug mode, metres per unit;
+// uniform ambient RGB. Then four float4 rows per light, in view space:
+// colour/type, position/radius (metres), direction/outer cosine, inner cosine.
 [[vk::binding(3, 0)]] StructuredBuffer<float4> frame;
-
-// A stand-in for the scene's lights until hdToon reads them: one white key
-// light fixed to the camera, above and to the right of it, in view space
-// (toward the light), and a uniform ambient. With uniform ambient, GI
-// equalization has nothing to equalize, but the term is kept in MToon's form.
-static const float3 kViewLightDirection = float3(0.25, 0.5, 1.0);
-static const float3 kLightColor = float3(1.0, 1.0, 1.0);
-static const float3 kAmbientColor = float3(0.25, 0.25, 0.25);
 
 struct VertexInput {
   float3 position : POSITION;
@@ -243,7 +237,7 @@ float2 MatcapST(float3 normal, float3 view) {
   return float2(dot(x, normal), dot(y, normal)) * 0.495 + 0.5;
 }
 
-// MToon 1.0's surface under the stand-in lights. Every sample comes first,
+// MToon 1.0's surface under the scene lights. Every sample comes first,
 // in uniform control flow, so the implicit derivatives that pick a mip
 // level are defined before a caller discards. A back face is lit from its
 // own side: the back of a double-sided surface, or the hull an outline
@@ -279,20 +273,41 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
       material.animation_textures.y, material.shift_uv, animated_st).r;
   const float shift = TextureEntry(material.animation_textures.x) == 0 ? 0.0
       : shift_texel * material.surface.y;
-  const float3 light = normalize(kViewLightDirection);
-
-  // The shading term, shifted, then made toony.
   const float toony = material.shading.y;
-  const float shading = LinearStep(-1.0 + toony, 1.0 - toony,
-      dot(normal, light) + material.shading.x + shift);
   const float3 lit = material.base_color.rgb * base_texel.rgb;
   const float3 shade = material.shade_color.rgb * shade_texel;
-  float3 color = lerp(shade, lit, shading) * kLightColor;
+  float3 color = float3(0.0);
+  float3 lighting = float3(0.0);
+  for (uint index = 0; index < uint(frame[0].y); ++index) {
+    const uint row = 2 + index * 4;
+    const float4 source = frame[row];
+    const float4 point = frame[row + 1];
+    const float4 axis = frame[row + 2];
+    float3 light = -normalize(axis.xyz);
+    float attenuation = 1.0;
+    if (source.w != 0.0) {
+      const float3 delta = point.xyz - view_position;
+      const float distance_squared = dot(delta, delta);
+      light = distance_squared > 1e-12 ? delta * rsqrt(distance_squared) : -normalize(axis.xyz);
+      attenuation = 1.0 / max(distance_squared * frame[0].w * frame[0].w, point.w * point.w);
+      if (source.w == 2.0) {
+        const float cosine = dot(-light, normalize(axis.xyz));
+        const float inner = frame[row + 3].x;
+        attenuation *= inner > axis.w + 1e-6
+            ? smoothstep(axis.w, inner, cosine) : (cosine >= axis.w ? 1.0 : 0.0);
+      }
+    }
+    const float3 incident = source.rgb * attenuation;
+    const float shading = LinearStep(-1.0 + toony, 1.0 - toony,
+        dot(normal, light) + material.shading.x + shift);
+    color += lerp(shade, lit, shading) * incident;
+    lighting += incident;
+  }
 
   // Raw GI would be the ambient seen along the normal; uniformed GI its
   // average over up and down.
-  const float3 raw_gi = kAmbientColor;
-  const float3 uniformed_gi = kAmbientColor;
+  const float3 raw_gi = frame[1].rgb;
+  const float3 uniformed_gi = frame[1].rgb;
   const float3 gi = lerp(raw_gi, uniformed_gi, material.shading.z);
   color += gi * lit;
   color += material.emissive.rgb * emissive_texel;
@@ -309,7 +324,13 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
       max(material.rim.x, 1e-5));
   rim += parametric * material.rim_color.rgb;
   rim *= rim_texel;
-  color += rim * lerp(float3(1.0), kLightColor + gi, material.rim_color.a);
+  color += rim * lerp(float3(1.0), lighting + gi, material.rim_color.a);
+
+  const uint debug = uint(frame[0].z);
+  if (debug == 1) color = lit;
+  if (debug == 2) color = normal * 0.5 + 0.5;
+  if (debug == 3) color = lighting;
+  if (debug == 4) color = gi;
 
   MToonSurface surface;
   surface.color = color;

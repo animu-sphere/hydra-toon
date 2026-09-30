@@ -1060,12 +1060,12 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
     return false;
   }
   // The set is valid before any material exists.
-  if (!CreateHostBuffer(physical_device_, device_, 16,
+  if (!CreateHostBuffer(physical_device_, device_, kFrameBytes,
           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_buffer_, detail)) {
     return false;
   }
-  std::memset(frame_buffer_.mapped, 0, 16);
-  VkDescriptorBufferInfo frame_info{frame_buffer_.buffer, 0, 16};
+  std::memset(frame_buffer_.mapped, 0, kFrameBytes);
+  VkDescriptorBufferInfo frame_info{frame_buffer_.buffer, 0, kFrameBytes};
   VkWriteDescriptorSet frame_write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
   frame_write.dstSet = set_;
   frame_write.dstBinding = 3;
@@ -1078,8 +1078,68 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
 
 bool MaterialCache::Update(const DrawList& draws,
     const TextureCache& textures, std::string& detail) {
-  static_cast<float*>(frame_buffer_.mapped)[0] =
-      static_cast<float>(draws.time_seconds);
+  auto* frame = static_cast<float*>(frame_buffer_.mapped);
+  std::memset(frame, 0, kFrameBytes);
+  frame[0] = static_cast<float>(draws.time_seconds);
+  frame[2] = static_cast<float>(draws.lighting.material);
+  frame[3] = draws.meters_per_unit;
+  const auto transform = [&](Float3 value, float w) {
+    const auto& m = draws.view.view.m;
+    return Float3{m[0] * value.x + m[4] * value.y + m[8] * value.z + m[12] * w,
+        m[1] * value.x + m[5] * value.y + m[9] * value.z + m[13] * w,
+        m[2] * value.x + m[6] * value.y + m[10] * value.z + m[14] * w};
+  };
+  std::uint32_t count = 0;
+  const auto append = [&](const ToonLight& light, bool view_space) {
+    if (!light.visible) {
+      return;
+    }
+    if (light.type == ToonLightType::Ambient) {
+      frame[4] += light.color.x * draws.lighting.ambient_scale;
+      frame[5] += light.color.y * draws.lighting.ambient_scale;
+      frame[6] += light.color.z * draws.lighting.ambient_scale;
+      return;
+    }
+    if (count == kLightCapacity) {
+      return;
+    }
+    float* slot = frame + 8 + count++ * 16;
+    slot[0] = light.color.x * draws.lighting.direct_scale;
+    slot[1] = light.color.y * draws.lighting.direct_scale;
+    slot[2] = light.color.z * draws.lighting.direct_scale;
+    slot[3] = static_cast<float>(light.type);
+    const Float3 position = view_space ? light.position : transform(light.position, 1.0F);
+    slot[4] = position.x;
+    slot[5] = position.y;
+    slot[6] = position.z;
+    slot[7] = light.radius;
+    const Float3 direction = view_space ? light.direction : transform(light.direction, 0.0F);
+    slot[8] = direction.x;
+    slot[9] = direction.y;
+    slot[10] = direction.z;
+    constexpr float radians = 0.017453292519943295F;
+    slot[11] = std::cos(light.cone_angle * radians);
+    slot[12] = std::cos(light.cone_angle * (1.0F - light.cone_softness) * radians);
+  };
+  if (!draws.lighting.scene_lights || draws.lights.empty()) {
+    ToonLight key;
+    key.direction = {-draws.lighting.key_direction.x,
+        -draws.lighting.key_direction.y, -draws.lighting.key_direction.z};
+    // A zero debug direction keeps the default key instead of producing NaNs.
+    if (key.direction == Float3{}) {
+      key.direction = {-0.25F, -0.5F, -1.0F};
+    }
+    append(key, true);
+    ToonLight ambient;
+    ambient.type = ToonLightType::Ambient;
+    ambient.color = {0.25F, 0.25F, 0.25F};
+    append(ambient, true);
+  } else {
+    for (const auto& light : draws.lights) {
+      append(light.light, false);
+    }
+  }
+  frame[1] = static_cast<float>(count);
   if (!FlushIfNeeded(device_, frame_buffer_, detail)) {
     return false;
   }

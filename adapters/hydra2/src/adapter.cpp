@@ -12,6 +12,7 @@
 #include <pxr/imaging/hd/extComputation.h>
 #include <pxr/imaging/hd/extComputationUtils.h>
 #include <pxr/imaging/hd/instancer.h>
+#include <pxr/imaging/hd/light.h>
 #include <pxr/imaging/hd/mesh.h>
 #include <pxr/imaging/hd/meshUtil.h>
 #include <pxr/imaging/hd/renderIndex.h>
@@ -21,6 +22,7 @@
 #include <pxr/imaging/hd/sceneIndex.h>
 #include <pxr/imaging/hd/sceneIndexObserver.h>
 #include <pxr/imaging/hd/tokens.h>
+#include <pxr/usd/usdLux/blackbody.h>
 
 #include <toon/extraction.hpp>
 #include <toon/render_world.hpp>
@@ -34,6 +36,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -293,6 +296,21 @@ public:
   void SetTimeSeconds(double seconds) {
     std::scoped_lock lock(mutex_);
     world_.SetTimeSeconds(seconds);
+  }
+
+  Toon::LightId CreateLight() {
+    std::scoped_lock lock(mutex_);
+    return world_.CreateLight();
+  }
+
+  void RemoveLight(Toon::LightId light) {
+    std::scoped_lock lock(mutex_);
+    world_.RemoveLight(light);
+  }
+
+  void SetLight(Toon::LightId light, const Toon::ToonLight& values) {
+    std::scoped_lock lock(mutex_);
+    world_.SetLight(light, values);
   }
 
   Toon::FrameSnapshot Commit() {
@@ -1002,6 +1020,83 @@ private:
   std::uint64_t normals_revision_ = 0;
 };
 
+// UsdLux distant, sphere (point or shaped spot), and uniform dome ambient.
+// No area integration, shadows, IES, light linking or environment textures.
+class HdToonLight final : public HdLight {
+public:
+  HdToonLight(const SdfPath& path, const TfToken& type,
+      std::shared_ptr<HdToonAdapterState> state)
+      : HdLight(path), type_(type), state_(std::move(state)),
+        light_(path.IsEmpty() ? 0 : state_->CreateLight()) {
+  }
+
+  ~HdToonLight() override {
+    state_->RemoveLight(light_);
+  }
+
+  HdDirtyBits GetInitialDirtyBitsMask() const override {
+    return AllDirty;
+  }
+
+  void Sync(HdSceneDelegate* delegate, HdRenderParam*, HdDirtyBits* bits) override {
+    if (light_ == 0 || (*bits & (DirtyTransform | DirtyParams | DirtyResource)) == 0) {
+      *bits = Clean;
+      return;
+    }
+    const auto scalar = [&](const TfToken& name, float fallback) {
+      const VtValue value = VtValue::Cast<float>(delegate->GetLightParamValue(GetId(), name));
+      return value.IsHolding<float>() ? value.UncheckedGet<float>() : fallback;
+    };
+    Toon::ToonLight light;
+    light.visible = delegate->GetVisible(GetId());
+    GfVec3f color(1.0F);
+    const VtValue color_value = delegate->GetLightParamValue(GetId(), HdLightTokens->color);
+    if (color_value.IsHolding<GfVec3f>()) {
+      color = color_value.UncheckedGet<GfVec3f>();
+    }
+    const VtValue temperature = delegate->GetLightParamValue(GetId(), HdLightTokens->enableColorTemperature);
+    if (temperature.IsHolding<bool>() && temperature.UncheckedGet<bool>()) {
+      const GfVec3f tint = UsdLuxBlackbodyTemperatureAsRgb(
+          scalar(HdLightTokens->colorTemperature, 6500.0F));
+      for (int component = 0; component < 3; ++component)
+        color[component] *= tint[component];
+    }
+    const float intensity = scalar(HdLightTokens->intensity, 1.0F) *
+                            std::exp2(scalar(HdLightTokens->exposure, 0.0F)) *
+                            scalar(HdLightTokens->diffuse, 1.0F);
+    light.color = {color[0] * intensity, color[1] * intensity, color[2] * intensity};
+    const GfMatrix4d transform = delegate->GetTransform(GetId());
+    const GfVec3d position = transform.Transform(GfVec3d(0.0));
+    const GfVec3d direction = transform.TransformDir(GfVec3d(0.0, 0.0, -1.0));
+    light.position = {float(position[0]), float(position[1]), float(position[2])};
+    light.direction = {float(direction[0]), float(direction[1]), float(direction[2])};
+    if (type_ == HdPrimTypeTokens->domeLight) {
+      light.type = Toon::ToonLightType::Ambient;
+    } else if (type_ == HdPrimTypeTokens->sphereLight) {
+      light.type = Toon::ToonLightType::Point;
+      const float cone = scalar(HdLightTokens->shapingConeAngle, 180.0F);
+      if (cone <= 90.0F) {
+        light.type = Toon::ToonLightType::Spot;
+        light.cone_angle = cone;
+        light.cone_softness = scalar(HdLightTokens->shapingConeSoftness, 0.0F);
+      }
+      // Radius is a numerical attenuation floor in metres, not a source area.
+    }
+    state_->SetLight(light_, light);
+    *bits = Clean;
+  }
+
+private:
+  TfToken type_;
+  std::shared_ptr<HdToonAdapterState> state_;
+  Toon::LightId light_;
+};
+
+bool IsSceneLight(const TfToken& type) {
+  return type == HdPrimTypeTokens->distantLight ||
+         type == HdPrimTypeTokens->sphereLight || type == HdPrimTypeTokens->domeLight;
+}
+
 // HdCamera's own Sync reads the camera; the render pass reads its view and
 // projection through HdRenderPassState, which also applies the viewer's
 // framing and window policy.
@@ -1390,7 +1485,9 @@ const TfTokenVector& HdToonRenderDelegate::GetSupportedRprimTypes() const {
 
 const TfTokenVector& HdToonRenderDelegate::GetSupportedSprimTypes() const {
   static const TfTokenVector types{HdPrimTypeTokens->camera,
-      HdPrimTypeTokens->extComputation, HdPrimTypeTokens->material};
+      HdPrimTypeTokens->extComputation, HdPrimTypeTokens->material,
+      HdPrimTypeTokens->distantLight, HdPrimTypeTokens->sphereLight,
+      HdPrimTypeTokens->domeLight};
   return types;
 }
 
@@ -1434,6 +1531,9 @@ void HdToonRenderDelegate::DestroyRprim(HdRprim* rprim) {
 
 HdSprim* HdToonRenderDelegate::CreateSprim(const TfToken& type_id,
     const SdfPath& sprim_id) {
+  if (IsSceneLight(type_id)) {
+    return new HdToonLight(sprim_id, type_id, impl_->state);
+  }
   if (type_id == HdPrimTypeTokens->camera) {
     return new HdToonCamera(sprim_id);
   }
@@ -1450,6 +1550,9 @@ HdSprim* HdToonRenderDelegate::CreateSprim(const TfToken& type_id,
 
 HdSprim* HdToonRenderDelegate::CreateFallbackSprim(
     const TfToken& type_id) {
+  if (IsSceneLight(type_id)) {
+    return new HdToonLight(SdfPath::EmptyPath(), type_id, impl_->state);
+  }
   if (type_id == HdPrimTypeTokens->camera) {
     return new HdToonCamera(SdfPath("/__toonFallbackCamera"));
   }
