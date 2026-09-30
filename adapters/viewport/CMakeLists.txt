@@ -52,11 +52,13 @@ if(TOON_ENABLE_HYDRA2)
   toon_openusd_root(TOON_PXR_ROOT)
   target_sources(toon-viewport PRIVATE hydra_scene.cpp)
   target_link_libraries(toon-viewport PRIVATE
-    toon-hydra2-runtime usdImaging usdGeom usd)
+    toon-hydra2-runtime usdImaging usdGeom usd nfd)
   target_compile_definitions(toon-viewport PRIVATE
     TOON_VIEWPORT_HAS_HYDRA=1
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+else()
+  target_compile_definitions(toon-viewport PRIVATE TOON_VIEWPORT_HAS_HYDRA=0)
 endif()
 
 toon_copy_shaders(toon-viewport)
@@ -67,6 +69,10 @@ install(TARGETS toon-viewport
 # Dear ImGui is MIT-licensed and compiled into the viewport.
 install(FILES "${imgui_SOURCE_DIR}/LICENSE.txt"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/licenses/imgui")
+if(TOON_ENABLE_HYDRA2)
+  install(FILES "${nfd_SOURCE_DIR}/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/licenses/nativefiledialog-extended")
+endif()
 
 if(TOON_BUILD_TESTS)
   add_test(NAME toon-viewport-present
@@ -102,6 +108,49 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    # All three switches use the interactive file-open path. Compare their
+    # captures to opening the final stage at startup, including overlapping
+    # mesh ids/revisions, changed geometry, up axis and metres per unit.
+    file(COPY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/tests/replacement.usda"
+      "${CMAKE_CURRENT_BINARY_DIR}/モデル.usda" ONLY_IF_DIFFERENT)
+    set(_replacement "${CMAKE_CURRENT_BINARY_DIR}/モデル.usda")
+    add_test(NAME toon-viewport-file-reference
+      COMMAND toon-viewport --hidden --frames 8 --vsync off --overlay off
+        --usd "${_replacement}" --expect-draws 1
+        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/file-reference.ppm")
+    add_test(NAME toon-viewport-file-bootstrap
+      COMMAND toon-viewport --hidden --frames 8 --vsync off --overlay off
+        --switch-file "${_replacement}" --expect-draws 1
+        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/file-bootstrap.ppm")
+    add_test(NAME toon-viewport-file-replace
+      COMMAND toon-viewport --hidden --frames 8 --vsync off --overlay off
+        --usd "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/usdview-smoke.usda"
+        --switch-file "${_replacement}" --expect-draws 1
+        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/file-replace.ppm")
+    add_test(NAME toon-viewport-file-failed
+      COMMAND toon-viewport --hidden --frames 8 --vsync off --overlay off
+        --usd "${_replacement}"
+        --switch-file "${CMAKE_CURRENT_BINARY_DIR}/missing.usda"
+        --expect-draws 1
+        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/file-failed.ppm")
+    set_tests_properties(toon-viewport-file-failed
+      PROPERTIES FAIL_REGULAR_EXPRESSION "Opened file:")
+    set_tests_properties(toon-viewport-file-reference toon-viewport-file-bootstrap
+      toon-viewport-file-replace toon-viewport-file-failed PROPERTIES
+      LABELS "gpu;viewport;presentation;hydra"
+      SKIP_RETURN_CODE 77 TIMEOUT 60
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    foreach(_case bootstrap replace failed)
+      add_test(NAME toon-viewport-file-${_case}-image
+        COMMAND "${CMAKE_COMMAND}"
+          "-DFIRST=${CMAKE_CURRENT_BINARY_DIR}/file-reference.ppm"
+          "-DSECOND=${CMAKE_CURRENT_BINARY_DIR}/file-${_case}.ppm"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_captures.cmake")
+      set_tests_properties(toon-viewport-file-${_case}-image PROPERTIES
+        DEPENDS "toon-viewport-file-reference;toon-viewport-file-${_case}"
+        SKIP_REGULAR_EXPRESSION "SKIP:" LABELS "gpu;viewport;presentation;hydra")
+    endforeach()
     # The usdview smoke stage through Hydra: its one mesh must draw.
     add_test(NAME toon-viewport-present-usd
       COMMAND toon-viewport --hidden --frames 8 --vsync off

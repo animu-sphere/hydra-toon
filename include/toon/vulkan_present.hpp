@@ -140,6 +140,12 @@ public:
   // material and texture on the GPU.
   virtual void SetSamples(std::uint32_t requested) = 0;
 
+  // The next frame belongs to a different scene, whose resource ids and
+  // revisions may overlap the previous scene's. Release its cached scene
+  // resources after the frame in flight completes; keep presentation and
+  // overlay resources and cumulative statistics.
+  virtual void ResetScene() = 0;
+
   // Asks the next frame RenderFrame presents to be copied back to the CPU as
   // well: a screenshot, never an ordinary frame (design policy §31).
   virtual void RequestCapture() = 0;

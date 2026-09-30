@@ -308,6 +308,17 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
   if (ImGui::Begin("Telemetry", nullptr,
           ImGuiWindowFlags_AlwaysAutoResize |
               ImGuiWindowFlags_NoFocusOnAppearing)) {
+    if (frame.can_open_file) {
+      controls.open_file = ImGui::Button("Open File...");
+      ImGui::SameLine();
+      ImGui::TextDisabled("Ctrl+O");
+    }
+    if (!frame.open_error.empty()) {
+      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0F * scale);
+      ImGui::TextUnformatted(frame.open_error.data(),
+          frame.open_error.data() + frame.open_error.size());
+      ImGui::PopTextWrapPos();
+    }
     ImGui::TextUnformatted(frame.scene.data(),
         frame.scene.data() + frame.scene.size());
     ImGui::TextDisabled("%s", statistics.device_name.c_str());

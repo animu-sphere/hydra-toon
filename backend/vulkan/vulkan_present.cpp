@@ -184,6 +184,10 @@ public:
     capture_requested_ = true;
   }
 
+  void ResetScene() override {
+    reset_scene_ = true;
+  }
+
   [[nodiscard]] bool TakeCapture(ColorProduct& color,
       std::string& error) override;
 
@@ -232,6 +236,7 @@ private:
   MaterialCache materials_;
   TextureCache textures_;
   MeshCache meshes_;
+  bool reset_scene_ = false;
   std::vector<std::uint32_t> overlay_vertex_words_;
   std::vector<std::uint32_t> overlay_fragment_words_;
   OverlayRenderer overlay_;
@@ -711,6 +716,14 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     return false;
   }
   ReadTimestamps();
+  if (reset_scene_) {
+    const DrawList empty;
+    if (!meshes_.Update(empty, error) || !textures_.Update(empty, error) ||
+        !materials_.Update(empty, textures_, error)) {
+      return false;
+    }
+    reset_scene_ = false;
+  }
   std::uint32_t image_index = 0;
   const VkResult acquire =
       vkAcquireNextImageKHR(device_, swapchain_, kFrameTimeoutNs,

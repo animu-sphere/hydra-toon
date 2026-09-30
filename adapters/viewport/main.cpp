@@ -33,11 +33,12 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
 constexpr int kExitSkip = 77;
-// A right drag of this many pixels dollies by one wheel notch.
+// A right-button drag this far to the right dollies in by one wheel notch.
 constexpr double kPixelsPerDollyStep = 20.0;
 
 using Clock = std::chrono::steady_clock;
@@ -60,6 +61,8 @@ struct Arguments {
   // The sample count asked for halfway through `frame_limit` frames, as the
   // number keys ask for one: the presentation test of a live change.
   std::optional<std::uint32_t> switch_samples;
+  // An in-session file open halfway through a bounded run, for regression.
+  std::string switch_file;
 };
 
 std::uint64_t ReadUnsigned(std::string_view value, std::string_view name) {
@@ -105,6 +108,8 @@ Arguments ParseArguments(int argc, char** argv) {
     } else if (option == "--switch-samples") {
       result.switch_samples =
           static_cast<std::uint32_t>(ReadUnsigned(next(), option));
+    } else if (option == "--switch-file") {
+      result.switch_file = next();
     } else if (option == "--hidden") {
       result.visible = false;
     } else if (option == "--usd") {
@@ -136,6 +141,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "                           4; 1 turns anti-aliasing off)\n"
                    "  --switch-samples N       ask for N samples halfway\n"
                    "                           through --frames N frames\n"
+                   "  --switch-file <file>     open a scene halfway through\n"
+                   "                           --frames N frames (Hydra)\n"
                    "  --hidden                 do not show the window\n"
                    "  --usd <stage>            draw a USD stage through Hydra\n"
                    "                           (a build with the Hydra adapter)\n"
@@ -143,12 +150,14 @@ Arguments ParseArguments(int argc, char** argv) {
                    "                           N meshes\n"
                    "  --screenshot <file.ppm>  write the last of --frames N\n"
                    "                           frames as it was presented\n"
-                   "Left drag orbits, middle or Shift+left drag pans, right\n"
-                   "drag or the wheel dollies; F frames the scene and R\n"
+                   "Left drag orbits, middle or Shift+left drag pans; right\n"
+                   "drag to the right zooms in, to the left zooms out; the\n"
+                   "wheel dollies. F frames the scene and R\n"
                    "returns to the last framing; P writes the next frame to\n"
                    "toon-viewport-<n>.ppm, without the overlay; 1, 2, 4\n"
                    "and 8 set the MSAA samples per pixel; O shows or hides\n"
-                   "the overlay. Esc or closing the window exits.\n";
+                   "the overlay; Ctrl+O opens a scene file in a Hydra build.\n"
+                   "Esc or closing the window exits.\n";
       std::exit(0);
     } else {
       throw std::invalid_argument("unknown option: " + std::string(option));
@@ -172,11 +181,14 @@ Arguments ParseArguments(int argc, char** argv) {
     }
   }
 #if !TOON_VIEWPORT_HAS_HYDRA
-  if (!result.usd.empty()) {
+  if (!result.usd.empty() || !result.switch_file.empty()) {
     throw std::invalid_argument("--usd needs a build with the Hydra adapter "
                                 "(the viewport-usd intent)");
   }
 #endif
+  if (!result.switch_file.empty() && result.frame_limit < 2) {
+    throw std::invalid_argument("--switch-file needs --frames N, N >= 2");
+  }
   return result;
 }
 
@@ -189,6 +201,14 @@ std::string WindowTitle(std::string_view scene, std::string_view device,
         << " frames";
   return title.str();
 }
+
+#if TOON_VIEWPORT_HAS_HYDRA
+std::string FileName(const std::string& path) {
+  const std::u8string utf8(path.begin(), path.end());
+  const auto filename = std::filesystem::path(utf8).filename().u8string();
+  return std::string(filename.begin(), filename.end());
+}
+#endif
 
 // Everything the session has sent to the GPU for the scene, one count per
 // upload or write of any kind.
@@ -330,7 +350,7 @@ void HandlePointer(const Toon::viewport::Event& event, PointerState& pointer,
       camera.Pan(dx, dy, static_cast<float>(height));
       break;
     case Drag::Dolly:
-      camera.Dolly(static_cast<float>(-dy / kPixelsPerDollyStep));
+      camera.Dolly(static_cast<float>(dx / kPixelsPerDollyStep));
       break;
     case Drag::None:
       break;
@@ -347,7 +367,7 @@ void HandlePointer(const Toon::viewport::Event& event, PointerState& pointer,
 
 } // namespace
 
-int main(int argc, char** argv) {
+int RunViewport(int argc, char** argv) {
   try {
     const auto arguments = ParseArguments(argc, argv);
 
@@ -365,7 +385,7 @@ int main(int argc, char** argv) {
       hydra->Update(snapshot);
       up_axis = hydra->up_axis();
       meters_per_unit = hydra->meters_per_unit();
-      scene_name = std::filesystem::path(arguments.usd).filename().string();
+      scene_name = FileName(arguments.usd);
     }
     const bool bootstrap = hydra == nullptr;
 #else
@@ -435,6 +455,37 @@ int main(int argc, char** argv) {
 
     bool running = true;
     PointerState pointer;
+    bool open_file_requested = false;
+    std::string open_error;
+#if TOON_VIEWPORT_HAS_HYDRA
+    bool file_switched = false;
+    // Prepare the whole replacement before changing the active scene. A
+    // failed open leaves its camera, snapshot and GPU resources untouched.
+    const auto open_file = [&](const std::string& path) {
+      open_error.clear();
+      try {
+        auto next_scene = Toon::viewport::HydraScene::Open(path);
+        Toon::FrameSnapshot next_snapshot;
+        next_scene->Update(next_snapshot);
+        Toon::viewport::OrbitCamera next_camera(next_scene->up_axis());
+        next_camera.Frame(Toon::viewport::SceneBounds(next_snapshot));
+        std::string next_name = FileName(path);
+        hydra = std::move(next_scene);
+        snapshot = std::move(next_snapshot);
+        camera = next_camera;
+        meters_per_unit = hydra->meters_per_unit();
+        scene_name = std::move(next_name);
+        pointer = {};
+        session->ResetScene();
+        telemetry = {};
+        last_present.reset();
+        std::cout << "Opened file: " << path << '\n';
+      } catch (const std::exception& failure) {
+        open_error = failure.what();
+        std::cerr << "toon-viewport: open failed: " << open_error << '\n';
+      }
+    };
+#endif
     // Where the capture under way is written, and how many were written.
     std::string capture_path;
     std::uint64_t captures = 0;
@@ -467,6 +518,10 @@ int main(int argc, char** argv) {
             camera.Frame(Toon::viewport::SceneBounds(snapshot));
           } else if (event.key == Toon::viewport::Key::R) {
             camera.Reset();
+          } else if (event.key == Toon::viewport::Key::O && event.control) {
+#if TOON_VIEWPORT_HAS_HYDRA
+            open_file_requested = true;
+#endif
           } else if (event.key == Toon::viewport::Key::O &&
                      overlay != nullptr) {
             overlay_shown = !overlay_shown;
@@ -499,6 +554,23 @@ int main(int argc, char** argv) {
       if (!running) {
         break;
       }
+#if TOON_VIEWPORT_HAS_HYDRA
+      if (open_file_requested) {
+        open_file_requested = false;
+        const std::string path = window->OpenFile(open_error);
+        pointer = {};
+        if (!path.empty()) {
+          open_file(path);
+        }
+        last_present.reset();
+        last_overlay = Clock::now();
+      }
+      if (!arguments.switch_file.empty() && !file_switched &&
+          session->statistics().frames_presented >= arguments.frame_limit / 2) {
+        file_switched = true;
+        open_file(arguments.switch_file);
+      }
+#endif
       const std::uint32_t width = window->width();
       const std::uint32_t height = window->height();
       if (width == 0 || height == 0) {
@@ -537,6 +609,8 @@ int main(int argc, char** argv) {
       if (overlay_shown) {
         Toon::viewport::OverlayFrame shown;
         shown.scene = scene_name;
+        shown.can_open_file = TOON_VIEWPORT_HAS_HYDRA;
+        shown.open_error = open_error;
         shown.width = width;
         shown.height = height;
         shown.vsync = arguments.vsync;
@@ -549,6 +623,7 @@ int main(int argc, char** argv) {
             Milliseconds(overlay_start - last_overlay) / 1000.0,
             overlay_draws);
         last_overlay = overlay_start;
+        open_file_requested = controls.open_file;
         if (controls.samples != 0) {
           session->SetSamples(controls.samples);
         }
@@ -691,3 +766,27 @@ int main(int argc, char** argv) {
     return 1;
   }
 }
+
+#if defined(_WIN32)
+// Windows' narrow argv uses the active code page. Keep command-line paths
+// in UTF-8, like the native file dialog and OpenUSD, including Japanese names.
+int wmain(int argc, wchar_t** argv) {
+  std::vector<std::string> arguments;
+  arguments.reserve(static_cast<std::size_t>(argc));
+  for (int index = 0; index < argc; ++index) {
+    const auto utf8 = std::filesystem::path(argv[index]).u8string();
+    arguments.emplace_back(utf8.begin(), utf8.end());
+  }
+  std::vector<char*> pointers;
+  pointers.reserve(arguments.size() + 1);
+  for (std::string& argument : arguments) {
+    pointers.push_back(argument.data());
+  }
+  pointers.push_back(nullptr);
+  return RunViewport(argc, pointers.data());
+}
+#else
+int main(int argc, char** argv) {
+  return RunViewport(argc, argv);
+}
+#endif

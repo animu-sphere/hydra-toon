@@ -2,7 +2,18 @@
 #include "window.hpp"
 
 #define GLFW_INCLUDE_VULKAN
+#if TOON_VIEWPORT_HAS_HYDRA
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#endif
+#endif
 #include <GLFW/glfw3.h>
+#if TOON_VIEWPORT_HAS_HYDRA
+#include <nfd.h>
+#include <nfd_glfw3.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -45,6 +56,11 @@ public:
   }
 
   ~GlfwWindow() override {
+#if TOON_VIEWPORT_HAS_HYDRA
+    if (nfd_initialized_) {
+      NFD_Quit();
+    }
+#endif
     if (window_ != nullptr) {
       glfwDestroyWindow(window_);
     }
@@ -89,6 +105,44 @@ public:
     return window_;
   }
 
+  std::string OpenFile(std::string& error) override {
+    error.clear();
+#if TOON_VIEWPORT_HAS_HYDRA
+    if (!nfd_initialized_) {
+      if (NFD_Init() != NFD_OKAY) {
+        const char* detail = NFD_GetError();
+        error = detail == nullptr ? "Native file dialog is unavailable." : detail;
+        return {};
+      }
+      nfd_initialized_ = true;
+      NFD_SetDisplayPropertiesFromGLFW();
+    }
+    const nfdu8filteritem_t filters[] = {
+        {"Scene files", "usd,usda,usdc,usdz,vrm,pmx"},
+        {"OpenUSD stage", "usd,usda,usdc,usdz"},
+        {"VRM model", "vrm"},
+        {"MMD model", "pmx"}};
+    nfdopendialogu8args_t arguments{};
+    arguments.filterList = filters;
+    arguments.filterCount = 4;
+    NFD_GetNativeWindowFromGLFWWindow(window_, &arguments.parentWindow);
+    nfdu8char_t* selected = nullptr;
+    const nfdresult_t result = NFD_OpenDialogU8_With(&selected, &arguments);
+    if (result == NFD_OKAY) {
+      std::string path(selected);
+      NFD_FreePathU8(selected);
+      return path;
+    }
+    if (result == NFD_ERROR) {
+      const char* detail = NFD_GetError();
+      error = detail == nullptr ? "Could not open the native file dialog." : detail;
+    }
+#else
+    error = "Open File needs a build with the Hydra adapter (viewport-usd).";
+#endif
+    return {};
+  }
+
 private:
   void Initialize(std::string_view title, std::uint32_t width,
       std::uint32_t height, bool visible) {
@@ -128,6 +182,7 @@ private:
             event.key = ToKey(key);
             event.shift = (mods & GLFW_MOD_SHIFT) != 0;
             event.alt = (mods & GLFW_MOD_ALT) != 0;
+            event.control = (mods & GLFW_MOD_CONTROL) != 0;
             Self(window).events_.push_back(event);
           }
         });
@@ -204,6 +259,9 @@ private:
   }
 
   bool initialized_ = false;
+#if TOON_VIEWPORT_HAS_HYDRA
+  bool nfd_initialized_ = false;
+#endif
   GLFWwindow* window_ = nullptr;
   std::uint32_t width_ = 0;
   std::uint32_t height_ = 0;

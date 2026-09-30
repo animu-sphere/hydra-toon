@@ -160,8 +160,9 @@ does the same. The viewport builds its own tree, `build/<target>--renderer-viewp
 and `ost validate --intent renderer-viewport` validates that tree and its
 launch record.
 
-Left drag orbits, a middle or Shift+left drag pans, a right drag or the
-wheel dollies; F frames the scene and R returns to the last framing.
+Left drag orbits, a middle or Shift+left drag pans. Holding the right button
+and dragging right zooms in; dragging left zooms out. The wheel dollies;
+F frames the scene and R returns to the last framing.
 `--screenshot <file.ppm>` writes the last of `--frames N` frames, and P
 writes the next frame to `toon-viewport-<n>.ppm`. The keys 1, 2, 4 and 8
 set the MSAA samples per pixel while the viewport runs; the title shows the
@@ -176,6 +177,21 @@ times the same work several times longer
 ([renderer report 22](../reports/renderer/22-2026-09-30-viewport-telemetry.md)).
 
 ### A USD stage in the viewport
+
+In a build with Hydra, `Open File...` on the overlay or Ctrl+O opens the
+native file chooser, including when starting on the bootstrap scene. The
+filters include USD (`usd`, `usda`, `usdc`, `usdz`), VRM and PMX; the selected
+file is opened through OpenUSD, so source formats require their registered
+file-format plugins in the launch environment. The chooser also permits
+other files supported by those plugins. A successful open frames the new
+scene using its up axis and unit; cancellation keeps the scene, and a
+failed open shows an error and keeps it too. Ctrl+O works with the overlay
+hidden. `O` still toggles the overlay.
+
+`--switch-file <file> --frames N`, with N at least 2, exercises the same
+scene replacement halfway through a bounded run. The file-open CTests
+compare its final capture with a fresh start on that scene, including a
+Japanese filename, changed geometry and a failed open.
 
 With `ost` 0.23.14 or newer, `ost renderer viewport --intent hydra` builds
 the Hydra adapter and the viewport into a tree of its own,
@@ -196,6 +212,24 @@ ost validate --profile lookdev --intent hydra--renderer-viewport
 Without `--with`, every VRM material draws as PreviewSurface. The digest
 must be in the local registry: pull it as
 [the VRM host session](#the-vrm-host-session) does.
+
+Opening a raw `.vrm` also needs `usdVrmFileFormat` and
+`usdVrmPackageResolver` for embedded textures; `vrmImaging` alone handles
+material imaging, not file ingestion. With those local bundles already built
+against the same OpenUSD runtime, start on the bootstrap scene and use
+`Open File...`:
+
+```sh
+ost renderer viewport --intent hydra --profile lookdev \
+    --with ../usd-vrm-plugins/plugins/usdVrmFileFormat \
+    --with ../usd-vrm-plugins/plugins/usdVrmPackageResolver \
+    --with sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667
+```
+
+This local-bundle composition opened the requested raw VRM in
+[renderer report 23](../reports/renderer/23-2026-09-30-viewport-file-open.md).
+Packaged bundles must match the session's target; a `usd` package is not a
+`lookdev` package.
 
 `ost test` does not take the workflow tree, so the viewport's Hydra CTest,
 `toon-viewport-present-usd`, runs in the `viewport-usd` intent, which builds
