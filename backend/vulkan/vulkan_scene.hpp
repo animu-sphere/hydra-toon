@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Scene drawing shared by the offscreen and presentation paths: the device
 // features they need, the scene pipelines, GPU copies of mesh geometry and
-// textures, and the material parameter buffer. Private to backend/vulkan.
+// textures, and the material and frame/light buffers. Private to backend/vulkan.
 #pragma once
 
 #include <cstdint>
@@ -75,6 +75,11 @@ constexpr std::uint32_t kTextureCapacity = 128;
 // One sampler per glTF wrap pair: index wrap_s * 3 + wrap_t, in ToonWrap
 // order.
 constexpr std::uint32_t kSamplerCount = 9;
+
+// Two float4 header rows and four rows per direct light. Ambient lights
+// accumulate in the header and do not consume direct-light slots.
+constexpr std::uint32_t kLightCapacity = 32;
+constexpr std::uint32_t kFrameBytes = (2 + 4 * kLightCapacity) * 16;
 
 // One material's slot in the parameter buffer. Must match MToonParameters
 // in shaders/mtoon_common.slang.
@@ -422,7 +427,8 @@ private:
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkDescriptorSet set_ = VK_NULL_HANDLE;
   HostBuffer buffer_;
-  // One float4 of per-frame values; changing time rewrites no material.
+  // Fixed frame/light buffer, kFrameBytes bytes: time, debug, uniform ambient
+  // and up to kLightCapacity direct sources. Updated after the prior frame.
   HostBuffer frame_buffer_;
   std::uint32_t capacity_ = 0;
   std::uint32_t next_slot_ = 0;

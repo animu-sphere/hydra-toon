@@ -474,6 +474,37 @@ int main() {
     return 1;
   }
   const Toon::ToonMaterial defaults;
+  const auto before_light = world.Commit();
+  const auto light_id = world.CreateLight();
+  Toon::ToonLight light;
+  light.type = Toon::ToonLightType::Spot;
+  light.direction = {0, 0, -2};
+  world.SetLight(light_id, light);
+  const auto lit_scene = world.Commit();
+  if (!Check(lit_scene.lights.size() == 1 &&
+                 lit_scene.lights[0].light.direction == Toon::Float3{0, 0, -1} &&
+                 Toon::ExtractDrawList(lit_scene).lights[0].id == light_id &&
+                 lit_scene.meshes[0].points_revision == before_light.meshes[0].points_revision &&
+                 lit_scene.materials[0].parameters_revision == before_light.materials[0].parameters_revision,
+          "lights must reach extraction without touching geometry or materials"))
+    return 1;
+  world.SetLight(light_id, light);
+  light.color.x = std::numeric_limits<float>::quiet_NaN();
+  world.SetLight(light_id, light);
+  if (!Check(world.Commit().revision == lit_scene.revision,
+          "unchanged or invalid light values must do nothing"))
+    return 1;
+  light = lit_scene.lights[0].light;
+  light.visible = false;
+  world.SetLight(light_id, light);
+  const auto hidden_light = world.Commit();
+  if (!Check(!hidden_light.lights[0].light.visible &&
+                 hidden_light.lights[0].revision != lit_scene.lights[0].revision,
+          "light visibility must advance its revision"))
+    return 1;
+  world.RemoveLight(light_id);
+  if (!Check(world.Commit().lights.empty(), "removed lights must leave snapshots"))
+    return 1;
   for (int role = 0; role < 4; ++role) {
     auto changed = defaults;
     const std::array<Toon::ToonTextureRef*, 4> refs{&changed.emissive_texture,

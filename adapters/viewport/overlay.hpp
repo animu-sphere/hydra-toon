@@ -59,6 +59,8 @@ struct OverlayFrame {
   std::uint32_t height = 0;
   bool vsync = true;
   bool outlines = true;
+  LightingDebug lighting;
+  std::size_t lights = 0;
   const PresentStatistics* statistics = nullptr;
   const FrameTelemetry* telemetry = nullptr;
   SceneCounts counts;
@@ -74,6 +76,7 @@ struct OverlayControls {
   std::uint32_t samples = 0;
   bool outlines_changed = false;
   bool outlines = true;
+  LightingDebug lighting;
 };
 
 class Overlay {

@@ -374,6 +374,53 @@ void RenderWorld::SetBootstrapTriangle() {
   SetView(ToonView{});
 }
 
+LightId RenderWorld::CreateLight() {
+  const LightId id = next_light_++;
+  lights_.emplace(id, LightSnapshot{id, {}, Stamp()});
+  dirty_ = true;
+  return id;
+}
+
+void RenderWorld::RemoveLight(LightId light) {
+  if (lights_.erase(light) != 0) {
+    dirty_ = true;
+  }
+}
+
+void RenderWorld::SetLight(LightId light, ToonLight values) {
+  const auto found = lights_.find(light);
+  if (found == lights_.end()) {
+    return;
+  }
+  for (const float value : {values.color.x, values.color.y, values.color.z,
+           values.position.x, values.position.y, values.position.z,
+           values.direction.x, values.direction.y, values.direction.z,
+           values.radius, values.cone_angle, values.cone_softness}) {
+    if (!std::isfinite(value)) {
+      return;
+    }
+  }
+  const double length = std::sqrt(double(values.direction.x) * values.direction.x +
+                                  double(values.direction.y) * values.direction.y +
+                                  double(values.direction.z) * values.direction.z);
+  if (length == 0.0) {
+    return;
+  }
+  values.direction = {static_cast<float>(values.direction.x / length),
+      static_cast<float>(values.direction.y / length),
+      static_cast<float>(values.direction.z / length)};
+  values.color = {std::max(0.0F, values.color.x), std::max(0.0F, values.color.y),
+      std::max(0.0F, values.color.z)};
+  values.radius = std::max(0.01F, values.radius);
+  values.cone_angle = std::clamp(values.cone_angle, 0.0F, 90.0F);
+  values.cone_softness = std::clamp(values.cone_softness, 0.0F, 1.0F);
+  if (found->second.light != values) {
+    found->second.light = values;
+    found->second.revision = Stamp();
+    dirty_ = true;
+  }
+}
+
 void RenderWorld::Commit(FrameSnapshot& snapshot) {
   if (dirty_) {
     ++revision_;
@@ -384,6 +431,10 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
   snapshot.view_revision = view_revision_;
   snapshot.meters_per_unit = meters_per_unit_;
   snapshot.time_seconds = time_seconds_;
+  snapshot.lights.clear();
+  for (const auto& entry : lights_) {
+    snapshot.lights.push_back(entry.second);
+  }
   snapshot.meshes.clear();
   for (auto& entry : meshes_) {
     MeshRecord& record = entry.second;

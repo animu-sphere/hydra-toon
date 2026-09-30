@@ -191,6 +191,25 @@ the actual hull calls, including those in the transparent part;
 `work` with outlines on and off: the GPU overlaps passes, so the first
 pass that fetches geometry also carries that cost.
 
+The overlay's `Lighting and material` section selects scene lighting or
+the camera key, adjusts direct and ambient strength separately, and moves
+the fallback key direction in view space. `Material view` shows the MToon
+surface, base colour, mapped normals, incident direct light or uniform
+ambient. These controls change frame values without editing material
+slots. The equivalent capture options are `--lighting scene|camera`,
+`--direct-strength N`, `--ambient-strength N` (both in [0, 4]), and
+`--material-view surface|base|normal|direct|ambient`.
+
+Scene lighting reads USD distant lights, sphere lights as points or spots
+with ShapingAPI cones, and dome lights as uniform ambient. A scene with no
+supported lights uses the camera key plus ambient; hiding all authored
+lights leaves it dark. Up to 32 visible direct lights are drawn in core-id
+order, with all ambient lights summed. This is basic lighting: sphere area
+and normalization, dome textures, shadows and light linking are not read.
+In `usdview`, point attenuation uses `toon:metersPerUnit`; the viewport
+reads the stage's unit automatically. [Renderer report 26](../reports/renderer/26-2026-09-30-scene-lights.md)
+records the tested controls and scene route.
+
 ### A USD stage in the viewport
 
 In a build with Hydra, `Open File...` on the overlay or Ctrl+O opens the

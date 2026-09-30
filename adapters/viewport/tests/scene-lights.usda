@@ -1,0 +1,58 @@
+#usda 1.0
+# SPDX-License-Identifier: Apache-2.0
+(
+    defaultPrim = "Test"
+    startTimeCode = 1
+    endTimeCode = 2
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+def Xform "Test"
+{
+    def Material "Material" (
+        prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI"]
+    )
+    {
+        color3f inputs:vrm:material:baseColorFactor = (0.6, 0.6, 0.6)
+        color3f inputs:vrm:mtoon:shadeColorFactor = (0.08, 0.1, 0.15)
+        token inputs:vrm:mtoon:outlineWidthMode = "worldCoordinates"
+        float inputs:vrm:mtoon:outlineWidthFactor = 0.03
+        color3f inputs:vrm:mtoon:outlineColorFactor = (0.1, 0.1, 0.1)
+    }
+    def Mesh "Diamond" (prepend apiSchemas = ["MaterialBindingAPI"])
+    {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [3,3,3,3,3,3,3,3]
+        int[] faceVertexIndices = [0,2,4,1,4,2,0,4,3,1,3,4,0,5,2,1,2,5,0,3,5,1,5,3]
+        point3f[] points = [(0.5,0,0),(-0.5,0,0),(0,0.5,0),(0,-0.5,0),(0,0,0.5),(0,0,-0.5)]
+        normal3f[] normals = [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)] (interpolation = "vertex")
+        rel material:binding = </Test/Material>
+    }
+    def DistantLight "Key"
+    {
+        color3f inputs:color = (1, 0.2, 0.05)
+        float inputs:intensity.timeSamples = {1: 0.8, 2: 0.4}
+        double xformOp:rotateY.timeSamples = {1: 0, 2: 135}
+        uniform token[] xformOpOrder = ["xformOp:rotateY"]
+    }
+    def SphereLight "Point"
+    {
+        color3f inputs:color = (0.1, 0.3, 1)
+        float inputs:intensity = 0.5
+        double3 xformOp:translate = (-1, 1, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def SphereLight "Spot" (prepend apiSchemas = ["ShapingAPI"])
+    {
+        color3f inputs:color = (0.1, 1, 0.1)
+        float inputs:intensity = 0.5
+        float inputs:shaping:cone:angle = 45
+        float inputs:shaping:cone:softness = 0.5
+        double3 xformOp:translate = (0, 0, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def DomeLight "Ambient"
+    {
+        float inputs:intensity = 0.1
+    }
+}

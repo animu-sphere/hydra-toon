@@ -15,6 +15,7 @@ target_link_libraries(toon-hydra2-runtime
   PUBLIC hd Toon::RenderWorld
   PRIVATE
     hio
+    usdLux
     Toon::RenderExtraction
     Toon::Vulkan
     ${CMAKE_DL_LIBS})
@@ -102,6 +103,14 @@ if(TOON_BUILD_TESTS)
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
   toon_openusd_root(TOON_PXR_ROOT)
+  add_executable(toon-hydra2-light-test tests/light_test.cpp)
+  toon_configure_warnings(toon-hydra2-light-test)
+  target_link_libraries(toon-hydra2-light-test PRIVATE toon-hydra2-runtime usdImaging usd)
+  target_compile_features(toon-hydra2-light-test PRIVATE cxx_std_20)
+  target_compile_definitions(toon-hydra2-light-test PRIVATE NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+  add_test(NAME toon-renderer-hydra-lights COMMAND toon-hydra2-light-test
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/lights.usda")
   set(_toon_pxr_runtime_modifications
     "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin"
     "PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
@@ -125,6 +134,7 @@ if(TOON_BUILD_TESTS)
     toon-renderer-hydra-render-buffer
     toon-renderer-hydra-material
     toon-renderer-hydra-skinning
+    toon-renderer-hydra-lights
     PROPERTIES ENVIRONMENT_MODIFICATION
       "${_toon_pxr_runtime_modifications}")
 

@@ -17,7 +17,7 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.2.0 | MToon quality and the viewport foundation: outline stability, the rest of MToon, scene lights with the viewport's debug controls, anti-aliasing quality | [v0.2.0.md](v0.2.0.md) |
+| v0.2.0 | MToon quality and the viewport foundation: outline stability, anti-aliasing quality and VRM reproduction reports | [v0.2.0.md](v0.2.0.md) |
 | v0.3.0 | Avatar animation fast path: GPU morphs, the expression, look-at and camera fast paths, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
 | v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
 | v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
@@ -30,17 +30,16 @@ repositories' work is planned in their own roadmaps.
 Work is taken in this order, across milestones:
 
 1. Outline stability and cost
-2. The rest of MToon
-3. Scene lights, with the viewport's light and material debug controls
-4. Anti-aliasing and presentation quality
-5. GPU morphs
-6. The expression fast path
-7. Late motion latching
-8. Latency telemetry
-9. MMD
-10. `UsdPreviewSurface`
-11. WebGPU
-12. Linux and multi-vendor Vulkan
+2. Anti-aliasing and presentation quality
+3. VRM reproduction reports
+4. GPU morphs
+5. The expression fast path
+6. Late motion latching
+7. Latency telemetry
+8. MMD
+9. `UsdPreviewSurface`
+10. WebGPU
+11. Linux and multi-vendor Vulkan
 
 The current milestone is finished before a new feature family is added, and
 platform coverage is not widened before the renderer core, the viewport and
