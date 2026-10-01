@@ -57,6 +57,9 @@ struct Arguments {
   std::optional<double> time;
   std::optional<double> time_step;
   std::optional<std::uint64_t> expect_hulls;
+  float camera_pan_x = 0.0F;
+  float camera_pan_y = 0.0F;
+  float camera_dolly = 0.0F;
   Toon::RenderOptions options;
   // A USD stage to draw through Hydra instead of the bootstrap scene.
   std::string usd;
@@ -88,6 +91,15 @@ std::uint64_t ReadUnsigned(std::string_view value, std::string_view name) {
   if (consumed != value.size()) {
     throw std::invalid_argument(std::string(name) +
                                 " must be a non-negative integer");
+  }
+  return result;
+}
+
+float ReadFiniteFloat(std::string_view value, std::string_view name) {
+  std::size_t consumed = 0;
+  const float result = std::stof(std::string(value), &consumed);
+  if (consumed != value.size() || !std::isfinite(result)) {
+    throw std::invalid_argument(std::string(name) + " must be finite");
   }
   return result;
 }
@@ -124,6 +136,11 @@ Arguments ParseArguments(int argc, char** argv) {
       result.expect_draws = ReadUnsigned(next(), option);
     } else if (option == "--expect-hulls") {
       result.expect_hulls = ReadUnsigned(next(), option);
+    } else if (option == "--camera-pan") {
+      result.camera_pan_x = ReadFiniteFloat(next(), option);
+      result.camera_pan_y = ReadFiniteFloat(next(), option);
+    } else if (option == "--camera-dolly") {
+      result.camera_dolly = ReadFiniteFloat(next(), option);
     } else if (option == "--time" || option == "--time-step") {
       const std::string value(next());
       std::size_t consumed = 0;
@@ -188,6 +205,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --time-step T            USD time codes per presented\n"
                    "                           frame (deterministic evaluation)\n"
                    "  --expect-hulls N         check actual last-frame hulls\n"
+                   "  --camera-pan X Y         initial drag in window pixels\n"
+                   "  --camera-dolly N         initial wheel notches (in > 0)\n"
                    "  --samples N              MSAA samples per pixel (default\n"
                    "                           4; 1 turns anti-aliasing off)\n"
                    "  --switch-samples N       ask for N samples halfway\n"
@@ -456,6 +475,11 @@ int RunViewport(int argc, char** argv) {
     }
     Toon::viewport::OrbitCamera camera(up_axis);
     camera.Frame(Toon::viewport::SceneBounds(snapshot));
+    // Reproducible evaluation views: pan from the full framing, then dolly.
+    // F/R and a successful file open retain their ordinary framing behavior.
+    camera.Pan(arguments.camera_pan_x, arguments.camera_pan_y,
+        static_cast<float>(arguments.height));
+    camera.Dolly(arguments.camera_dolly);
 
     std::unique_ptr<Toon::viewport::Window> window;
     Toon::PresentSurfaceProvider provider;
