@@ -100,6 +100,9 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    plain data.
    Deterministic animation evaluation sets USD time in `hydra_scene.cpp`;
    the viewport's frame loop chooses the time code per presented frame.
+   Initial pan/dolly capture controls stay in the viewport host; the AA
+   evaluation driver in `scripts/evaluate_antialiasing.py` generates local
+   fixtures and consumes viewport captures without a renderer dependency.
    The outline comparison switch is `DrawList::outlines`, consumed during
    backend command recording without changing scene materials. Texture
    zero-width metadata stays in the backend's revision-keyed texture cache.

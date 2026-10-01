@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Reproducible viewport AA evaluation: generated thin-feature fixtures,
+  linear-light supersampled comparisons, avatar close-ups and repeated
+  motion timings at 1x/2x/4x/8x. Renderer report 27 retains the 4x default
+  and records the remaining texture/shading and temporal limitations.
+  `--camera-pan X Y` and `--camera-dolly N` reproduce initial evaluation
+  views, with capture tests proving a sample change preserves the camera.
+
 - Scene lights: a host-neutral `ToonLight` and revisioned world state,
   Hydra distant, sphere and dome Sprims, and per-frame Vulkan light data.
   Directional, inverse-square point, shaped spot and uniform ambient feed

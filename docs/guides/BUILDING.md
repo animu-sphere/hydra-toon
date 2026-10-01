@@ -176,6 +176,17 @@ writes the next frame to `toon-viewport-<n>.ppm`. The keys 1, 2, 4 and 8
 set the MSAA samples per pixel while the viewport runs; the title shows the
 count, and `--samples N` sets the first.
 
+For repeatable close-ups, `--camera-pan X Y` applies an initial drag in
+window pixels and `--camera-dolly N` applies wheel notches, positive toward
+the target. Pan is applied after startup framing, then dolly; `F`, `R` and
+opening another file retain ordinary framing. Sample-count changes keep
+this view. The no-Hydra presentation check used:
+
+```sh
+ost renderer viewport -- --hidden --frames 8 --vsync off \
+    --camera-pan 13 -7 --camera-dolly 2
+```
+
 An overlay shows the frame interval, the CPU and GPU time of each part of
 the frame, the draw calls and the uploads, as mean, p95 and max over the
 last 1,024 frames; `O` hides it and `--overlay off` leaves it out. A capture
@@ -268,6 +279,31 @@ time options with `--samples 1`, `4` or `8` and `--outlines on` or `off`.
 [Renderer report 24](../reports/renderer/24-2026-09-30-outline-stability-cost.md)
 records that comparison. Increasing MSAA reduces sampled silhouette
 variation; it does not provide temporal filtering.
+
+The AA evaluation driver requires Python with Pillow and a built Hydra
+viewport, with the VRM imaging plugin paths and DLL directories registered
+as for the runs above:
+
+```sh
+python scripts/evaluate_antialiasing.py \
+    --viewport <viewport-usd build>/adapters/viewport/toon-viewport \
+    --avatar <local Alicia motion stage> --output build/aa-quality
+```
+
+Omitting `--avatar` runs only the generated thin-feature fixture. All runs
+write local captures, comparison sheets, logs and `summary.json` under the
+output directory. The driver requires actual 1x/2x/4x/8x support and MToon
+imaging; it fails on a sample-count downgrade. The default avatar sequence
+is 1,200 frames from time code 0 by steps of 0.25; `--frames` must exceed
+1,024 for the repeated benchmarks to exclude warm-up. The default close-up
+pan `(0, 155)`, dolly `12`, times `0`, `29.75`, `299.75` and expected 20
+draws fit the tested Alicia motion stage; use `--close-pan X Y`,
+`--close-dolly N` and `--avatar-draws N` for another avatar, and ensure its
+authored time range covers the chosen sequence. The generated fixture
+contains original geometry and textures. Model and avatar captures stay
+local. [Renderer report 27](../reports/renderer/27-2026-10-01-antialiasing-quality.md)
+records the 4x baseline decision and the limits of its spatial and temporal
+measurements.
 
 Opening a raw `.vrm` also needs `usdVrmFileFormat` and
 `usdVrmPackageResolver` for embedded textures; `vrmImaging` alone handles

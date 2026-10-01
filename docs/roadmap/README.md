@@ -17,7 +17,7 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.2.0 | MToon quality and the viewport foundation: outline stability, anti-aliasing quality and VRM reproduction reports | [v0.2.0.md](v0.2.0.md) |
+| v0.2.0 | MToon quality and the viewport foundation: outline stability and VRM reproduction reports | [v0.2.0.md](v0.2.0.md) |
 | v0.3.0 | Avatar animation fast path: GPU morphs, the expression, look-at and camera fast paths, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
 | v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
 | v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |

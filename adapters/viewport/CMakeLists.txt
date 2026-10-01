@@ -87,6 +87,26 @@ if(TOON_BUILD_TESTS)
   add_test(NAME toon-viewport-samples
     COMMAND toon-viewport --hidden --frames 8 --vsync off --samples 4
       --switch-samples 1)
+  # A sample change must keep an explicitly selected close-up view.
+  add_test(NAME toon-viewport-camera-samples
+    COMMAND toon-viewport --hidden --frames 8 --vsync off --overlay off
+      --camera-pan 13 -7 --camera-dolly 2 --samples 4 --switch-samples 1
+      --screenshot "${CMAKE_CURRENT_BINARY_DIR}/camera-samples.ppm")
+  add_test(NAME toon-viewport-camera-reference
+    COMMAND toon-viewport --hidden --frames 8 --vsync off --overlay off
+      --camera-pan 13 -7 --camera-dolly 2 --samples 1
+      --screenshot "${CMAKE_CURRENT_BINARY_DIR}/camera-reference.ppm")
+  add_test(NAME toon-viewport-camera-samples-image
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIRST=${CMAKE_CURRENT_BINARY_DIR}/camera-reference.ppm"
+      "-DSECOND=${CMAKE_CURRENT_BINARY_DIR}/camera-samples.ppm"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_captures.cmake")
+  set_tests_properties(toon-viewport-camera-samples-image PROPERTIES
+    DEPENDS "toon-viewport-camera-reference;toon-viewport-camera-samples"
+    SKIP_REGULAR_EXPRESSION "SKIP:"
+    LABELS "gpu;viewport;presentation")
+  set_tests_properties(toon-viewport-camera-samples toon-viewport-camera-reference
+    PROPERTIES LABELS "gpu;viewport;presentation" SKIP_RETURN_CODE 77 TIMEOUT 60)
   # The same capture without the overlay: the two files must be the same
   # image, since the overlay is drawn after the copy.
   add_test(NAME toon-viewport-capture-no-overlay
