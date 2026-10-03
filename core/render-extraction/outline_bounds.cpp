@@ -206,7 +206,11 @@ bool OutlineBounds::OutsideView(const MeshSnapshot& mesh, const ToonView& view,
   }
   // The width image's filtered G is in [0,1], including white fallbacks.
   // Animated UVs and partially zero maps cannot exceed the full-width ball.
-  for (std::size_t row = 0; row < 2; ++row) {
+  // ToonView uses OpenGL clip coordinates (-w <= z <= w). The backend
+  // maps z to (z + w) / 2 for Vulkan, preserving these two depth planes.
+  // Clipping precedes rasterization's slope depth bias; with depth clamp
+  // disabled a biased hull cannot restore a wholly clipped primitive.
+  for (std::size_t row = 0; row < 3; ++row) {
     for (const double sign : {-1.0, 1.0}) {
       double maximum = p[15] + sign * p[12 + row];
       double normal_squared = 0;

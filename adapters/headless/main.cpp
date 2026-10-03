@@ -1549,6 +1549,114 @@ Check OutlineFrustumCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", "240 animated side-plane poses in Opaque/Mask/Blend, world/screen widths and perspective/orthographic views: identical colour/depth to unculled draws, 48 hull omissions, visible boundary silhouettes; one geometry/skin upload"};
 }
 
+Check OutlineDepthClipCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.outline.depth_clip";
+  std::string detail;
+  unsigned omitted = 0;
+  unsigned visible_boundaries = 0;
+  for (const unsigned samples : {1U, 4U}) {
+    Toon::FrameStatus status = Toon::FrameStatus::Fail;
+    Toon::RenderOptions options;
+    options.samples = samples;
+    auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+    if (!renderer)
+      return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+    Toon::RenderWorld world;
+    const auto mesh = AddOctahedron(world);
+    Toon::Matrix4 transform;
+    transform.m[0] = transform.m[5] = transform.m[10] = 0.2F;
+    world.SetMeshTransform(mesh, transform);
+    Toon::ToonSkin skin;
+    skin.influences_per_point = 1;
+    skin.constant = true;
+    skin.influences = {{0, 1}};
+    world.SetMeshSkin(mesh, skin);
+    const auto material = world.CreateMaterial();
+    world.SetMeshMaterial(mesh, material);
+    Toon::ToonMaterial toon;
+    toon.model = Toon::ToonShadingModel::MToon;
+    toon.base_color = toon.mtoon.shade_color = {1, 0, 0};
+    toon.outline = true;
+    toon.outline_width = 0.04F;
+    toon.outline_color = {0, 1, 0};
+    toon.mtoon.outline_lighting_mix = 0;
+    Toon::ColorProduct culled, reference, surface;
+    Toon::DepthProduct depth, reference_depth;
+    for (unsigned variant = 0; variant < 4; ++variant) {
+      toon.alpha_mode = variant == 0   ? Toon::ToonAlphaMode::Opaque
+                        : variant == 1 ? Toon::ToonAlphaMode::Mask
+                                       : Toon::ToonAlphaMode::Blend;
+      toon.alpha = variant >= 2 ? 0.6F : 1;
+      toon.mtoon.transparent_with_z_write = variant == 3;
+      for (const auto mode : {Toon::ToonOutlineWidthMode::World, Toon::ToonOutlineWidthMode::Screen}) {
+        toon.mtoon.outline_width_mode = mode;
+        world.SetMaterial(material, toon);
+        for (const bool perspective : {false, true}) {
+          Toon::ToonView view;
+          view.projection.m[10] = -1;
+          if (perspective) {
+            // OpenGL perspective, near 0.5 and far 4. The scene backend
+            // converts its depth to Vulkan's 0..w before clipping.
+            view.projection.m[10] = -4.5F / 3.5F;
+            view.projection.m[14] = -4.0F / 3.5F;
+            view.projection.m[11] = -1;
+            view.projection.m[15] = 0;
+          }
+          world.SetView(view);
+          for (const bool near_plane : {true, false}) {
+            const float plane = perspective ? (near_plane ? -0.5F : -4.0F)
+                                            : (near_plane ? 1.0F : -1.0F);
+            const float sign = near_plane ? 1.0F : -1.0F;
+            // Move across the plane and back: no previous-frame decision
+            // may suppress the returning silhouette. The 0.05 offset has
+            // the surface partly clipped and the hull intersecting it.
+            for (const float offset : {-0.25F, 0.05F, 0.25F, 2.0F, 0.05F, -0.25F}) {
+              Toon::ToonSkinPose pose;
+              pose.joints.resize(1);
+              pose.joints[0].m[14] = (plane + sign * offset) / 0.2F;
+              world.SetMeshSkinPose(mesh, pose);
+              auto draws = Toon::ExtractDrawList(world.Commit());
+              if (!renderer->Render(draws, 64, 64, culled, depth, detail))
+                return {id, "fail", detail};
+              const auto hulls = renderer->statistics().outline_draws;
+              if (renderer->statistics().samples != samples)
+                return {id, "skip", "device does not offer the requested MSAA count"};
+              draws.outline_frustum_culling = false;
+              if (!renderer->Render(draws, 64, 64, reference, reference_depth, detail))
+                return {id, "fail", detail};
+              if (renderer->statistics().outline_draws != 1 ||
+                  reference.payload != culled.payload || reference_depth.payload != depth.payload)
+                return {id, "fail", "depth-plane omission changed colour/depth against ordinary submission"};
+              if (offset == 2.0F) {
+                if (hulls != 0)
+                  return {id, "fail", "a fully depth-clipped animated hull was submitted"};
+                ++omitted;
+              } else if (offset == 0.05F) {
+                if (hulls != 1)
+                  return {id, "fail", "a hull crossing a depth plane was omitted"};
+                draws.outlines = false;
+                if (!renderer->Render(draws, 64, 64, surface, reference_depth, detail))
+                  return {id, "fail", detail};
+                visible_boundaries += surface.payload != culled.payload ? 1U : 0U;
+              }
+            }
+          }
+        }
+      }
+    }
+    const auto& stats = renderer->statistics();
+    if (stats.point_uploads != 1 || stats.topology_uploads != 1 ||
+        stats.skin_uploads != 1 || stats.material_writes != 8 ||
+        // Eight orthographic far-plane returns share the next perspective
+        // near-plane starting pose; those repeats must not write again.
+        stats.pose_writes != 184 || stats.validation_message_count != 0)
+      return {id, "fail", "depth clipping changed resident uploads or Vulkan validation: points=" + std::to_string(stats.point_uploads) + " topology=" + std::to_string(stats.topology_uploads) + " skin=" + std::to_string(stats.skin_uploads) + " materials=" + std::to_string(stats.material_writes) + " poses=" + std::to_string(stats.pose_writes) + " messages=" + std::to_string(stats.validation_message_count)};
+  }
+  if (omitted != 64 || !visible_boundaries)
+    return {id, "fail", "depth checks lack omissions or visible boundary silhouettes"};
+  return {id, "pass", "384 animated near/far-plane poses at 1x/4x, Opaque/Mask/Blend with and without depth writes, world/screen widths and perspective/orthographic views: identical colour/depth, 64 hull omissions and returning boundary silhouettes; pose-only updates, clean Vulkan validation"};
+}
+
 // MToon's rim (material policy §4's MToon block), on AddOctahedron's diamond
 // with black lit and shade colours, so a pixel is the rim alone. A green
 // parametric rim of fresnel power 1, unlit, is 1 - N.V: near 0 at the
@@ -2371,6 +2479,7 @@ int main(int argc, char** argv) {
     checks.push_back(OutlineWidthCheck(shaders));
     checks.push_back(OutlineMotionCheck(shaders));
     checks.push_back(OutlineFrustumCheck(shaders));
+    checks.push_back(OutlineDepthClipCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
