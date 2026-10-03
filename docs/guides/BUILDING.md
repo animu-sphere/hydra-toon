@@ -202,6 +202,22 @@ the actual hull calls, including those in the transparent part;
 `work` with outlines on and off: the GPU overlaps passes, so the first
 pass that fetches geometry also carries that cost.
 
+Hull submission also omits meshes whose full expanded outline is outside
+one of the four side clip planes, using the current skinned pose. It keeps
+boundary silhouettes, including a surface outside the image whose hull
+reaches into it. World widths use the stage unit; screen widths include
+the projection and vertex depth. The bounds are conservative for width
+textures, so partially zero maps and animated UVs retain their full-width
+envelope. Depth-plane and occlusion omission are not performed.
+
+`--outline-culling off` retains ordinary hull submission for a reference
+capture; the default is `on`. Keep the time, camera and samples identical
+when comparing it with `on`. `Hull draws:` counts submitted hulls after
+omission, whereas the scene summary counts materials requesting a hull.
+The comparison rewrites no material and changes no uploads.
+[Renderer report 28](../reports/renderer/28-2026-10-04-outline-frustum.md)
+records controlled colour/depth checks and representative VRM captures.
+
 The overlay's `Lighting and material` section selects scene lighting or
 the camera key, adjusts direct and ambient strength separately, and moves
 the fallback key direction in view space. `Material view` shows the MToon

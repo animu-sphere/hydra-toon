@@ -1,4 +1,4 @@
-add_library(toon-render-extraction STATIC extraction.cpp)
+add_library(toon-render-extraction STATIC extraction.cpp outline_bounds.cpp)
 toon_configure_warnings(toon-render-extraction)
 add_library(Toon::RenderExtraction ALIAS toon-render-extraction)
 set_target_properties(toon-render-extraction PROPERTIES EXPORT_NAME RenderExtraction)

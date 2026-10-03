@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Conservative side-frustum omission for MToon outline hulls, including
+  animated Opaque, Mask and Blend meshes. Cached rest-point/joint envelopes
+  account for the current pose, world/screen width and stage unit without
+  CPU vertex skinning or extra uploads. The viewport's
+  `--outline-culling on|off` compares against ordinary hull submission.
+  Renderer report 28 records identical colour/depth over 240 controlled
+  poses and identical representative-avatar captures with fewer hull draws.
+
 - Reproducible viewport AA evaluation: generated thin-feature fixtures,
   linear-light supersampled comparisons, avatar close-ups and repeated
   motion timings at 1x/2x/4x/8x. Renderer report 27 retains the 4x default
