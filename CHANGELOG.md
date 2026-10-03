@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Conservative near/far-plane omission for MToon outline hulls. The
+  animated full-width envelope now covers all six clip planes, preserving
+  hulls that cross a depth boundary and the existing slope depth bias.
+  Renderer report 29 records identical colour/depth over 384 controlled
+  poses at 1x/4x MSAA, and viewport captures with depth-clipped hulls omitted
+  and a returning skinned silhouette preserved. No extra uploads or waits.
+
 - Conservative side-frustum omission for MToon outline hulls, including
   animated Opaque, Mask and Blend meshes. Cached rest-point/joint envelopes
   account for the current pose, world/screen width and stage unit without

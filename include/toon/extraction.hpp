@@ -36,7 +36,7 @@ struct DrawList {
   LightingDebug lighting;
   // Evaluation switch: omit hulls without changing material slots or uploads.
   bool outlines = true;
-  // Evaluation reference: disable only conservative side-frustum omission.
+  // Evaluation reference: disable conservative six-plane frustum omission.
   bool outline_frustum_culling = true;
   std::vector<MeshSnapshot> draws;
   // Every material of the snapshot, ordered by id, so a consumer keeps one
@@ -56,9 +56,10 @@ void ExtractDrawList(const FrameSnapshot& snapshot, DrawList& draws);
 class OutlineBounds {
 public:
   void Update(const MeshSnapshot& mesh);
-  // True only when the expanded hull is wholly outside a side clip plane.
-  // Unusable/non-finite data conservatively retains the draw. Depth planes
-  // are excluded because the hull pipeline applies a slope depth bias.
+  // True only when the expanded hull is wholly outside a clip plane.
+  // Unusable/non-finite data conservatively retains the draw. Consumers
+  // must use ToonView's -w..w depth range and clip before rasterization
+  // (no depth clamp); raster depth bias does not change this decision.
   [[nodiscard]] bool OutsideView(const MeshSnapshot& mesh, const ToonView& view,
       float width, ToonOutlineWidthMode mode, float meters_per_unit) const;
 

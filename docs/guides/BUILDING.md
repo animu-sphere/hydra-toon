@@ -203,12 +203,13 @@ the actual hull calls, including those in the transparent part;
 pass that fetches geometry also carries that cost.
 
 Hull submission also omits meshes whose full expanded outline is outside
-one of the four side clip planes, using the current skinned pose. It keeps
+one of the six clip planes, using the current skinned pose. It keeps
 boundary silhouettes, including a surface outside the image whose hull
 reaches into it. World widths use the stage unit; screen widths include
 the projection and vertex depth. The bounds are conservative for width
 textures, so partially zero maps and animated UVs retain their full-width
-envelope. Depth-plane and occlusion omission are not performed.
+envelope. Hulls crossing the near/far planes are retained; fully clipped
+hulls are omitted before submission. Occlusion omission is not performed.
 
 `--outline-culling off` retains ordinary hull submission for a reference
 capture; the default is `on`. Keep the time, camera and samples identical
@@ -217,6 +218,19 @@ omission, whereas the scene summary counts materials requesting a hull.
 The comparison rewrites no material and changes no uploads.
 [Renderer report 28](../reports/renderer/28-2026-10-04-outline-frustum.md)
 records controlled colour/depth checks and representative VRM captures.
+[Renderer report 29](../reports/renderer/29-2026-10-04-outline-depth-clip.md)
+adds near/far-plane checks and a skinned viewport return sequence.
+
+With `vrmImaging` registered in the runtime/plugin environment, compare
+the committed depth-plane fixture at 1x/4x MSAA:
+
+```sh
+python scripts/evaluate_outline_depth.py --viewport <viewport-usd build>/adapters/viewport/toon-viewport
+```
+
+The driver checks MToon/GPU-skinning selection, hull counts, uploads,
+boundary outline coverage and culling-on/off image equality. Captures,
+logs and a command/hash summary go to `build/outline-depth/`, or `--output`.
 
 The overlay's `Lighting and material` section selects scene lighting or
 the camera key, adjusts direct and ambient strength separately, and moves

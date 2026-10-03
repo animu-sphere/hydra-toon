@@ -109,10 +109,15 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    `OutlineBounds` in `core/render-extraction/outline_bounds.cpp` builds
    rest-point and per-joint envelopes on points, topology or skin revisions.
    The backend's mesh cache retains them; command recording evaluates the
-   current pose, camera, unit and full outline width against the four side
+   current pose, camera, unit and full outline width against all six
    clip planes for opaque, Mask and Blend hulls. It transforms joint boxes,
-   not the vertex array. `DrawList::outline_frustum_culling` supplies an
-   unculled evaluation reference; surfaces retain their ordinary draw route.
+   not the vertex array. Depth planes use `ToonView`'s -w..w range, preserved
+   by the Vulkan clip conversion; depth clamp stays disabled and raster
+   depth bias applies after clipping. `DrawList::outline_frustum_culling`
+   supplies an unculled evaluation reference; surfaces retain their ordinary
+   draw route. `scripts/evaluate_outline_depth.py` consumes captures from
+   the viewport's committed skinned depth-plane fixture; VRM imaging stays
+   an external plugin rather than a renderer dependency.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 

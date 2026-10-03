@@ -30,13 +30,13 @@ int main() {
   };
   if (!Check(!outside(), "visible mesh must keep its hull"))
     return 1;
-  for (const auto axis : {12U, 13U}) {
+  for (const auto axis : {12U, 13U, 14U}) {
     for (const float sign : {-1.0F, 1.0F}) {
       mesh.transform = {};
       mesh.transform.m[axis] = sign * 2;
-      if (!Check(outside(), "every side plane must omit a distant hull"))
+      if (!Check(outside(), "every clip plane must omit a distant hull"))
         return 1;
-      mesh.transform.m[axis] = sign * 1.15F;
+      mesh.transform.m[axis] = sign * (axis == 14U ? 1.05F : 1.15F);
       if (!Check(outside() && !outside(0.1F) &&
                      !outside(0.01F, Toon::ToonOutlineWidthMode::World, 0.1F) &&
                      !outside(0.05F, Toon::ToonOutlineWidthMode::Screen),
@@ -46,7 +46,7 @@ int main() {
   }
   mesh.transform = {};
   mesh.transform.m[14] = -10;
-  if (!Check(!outside(), "depth-only omission is deliberately excluded"))
+  if (!Check(outside(), "a hull beyond the depth volume must be omitted"))
     return 1;
   mesh.transform.m[12] = 2;
   mesh.transform.m[0] = 0;
@@ -56,6 +56,48 @@ int main() {
   mesh.transform.m[12] = std::numeric_limits<float>::infinity();
   if (!Check(!outside(), "nonfinite transforms must retain hulls"))
     return 1;
+
+  // Explicit finite/infinite perspective depth ranges. A hull reaching
+  // back across a plane must survive even when every rest point is outside.
+  mesh.transform = {};
+  view.projection.m[10] = -4.5F / 3.5F;
+  view.projection.m[14] = -4.0F / 3.5F;
+  view.projection.m[11] = -1;
+  view.projection.m[15] = 0;
+  for (const bool reversed : {false, true}) {
+    if (reversed) {
+      view.projection.m[10] *= -1;
+      view.projection.m[14] *= -1;
+    }
+    for (const float z : {-0.2F, -4.2F, 2.0F}) {
+      mesh.transform.m[14] = z;
+      if (!Check(outside(0.1F), "fully clipped perspective hulls must be omitted"))
+        return 1;
+    }
+    for (const float z : {-0.45F, -4.05F}) {
+      mesh.transform.m[14] = z;
+      if (!Check(!outside(0.1F), "depth-plane extrusion must keep a boundary hull"))
+        return 1;
+    }
+    mesh.transform.m[14] = -4.3F;
+    if (!Check(!outside(0.05F, Toon::ToonOutlineWidthMode::Screen) &&
+                   !outside(0.01F, Toon::ToonOutlineWidthMode::World, 0.01F),
+            "screen depth scaling and stage units must expand depth bounds"))
+      return 1;
+    mesh.transform.m[14] = -5;
+    if (!Check(outside(0.05F, Toon::ToonOutlineWidthMode::Screen),
+            "distant screen-width hulls must still be omitted"))
+      return 1;
+  }
+  view.projection.m[10] = -1;
+  view.projection.m[14] = -1; // near 0.5, infinite far
+  mesh.transform.m[14] = -100;
+  if (!Check(!outside(), "infinite-far projections must retain distant hulls"))
+    return 1;
+  mesh.transform.m[14] = -0.2F;
+  if (!Check(outside(), "infinite-far projections still clip the near plane"))
+    return 1;
+  view = {};
 
   Toon::ToonSkin skin;
   skin.influences_per_point = 2;
@@ -88,7 +130,7 @@ int main() {
     return 1;
 
   // Independent point-by-point oracle: full-width extrusion samples inside
-  // the side planes must survive arbitrary affine/positive blend poses.
+  // all six planes must survive arbitrary affine/positive blend poses.
   std::mt19937 random(42);
   std::uniform_real_distribution<float> position(-4, 4);
   std::uniform_real_distribution<float> scale(0.2F, 2);
@@ -102,6 +144,7 @@ int main() {
       joint.m[5] = scale(random);
       joint.m[12] = position(random);
       joint.m[13] = position(random);
+      joint.m[14] = position(random);
     }
     pose.skeleton_to_mesh = {};
     pose.skeleton_to_mesh.m[14] = -scale(random);
@@ -114,6 +157,9 @@ int main() {
     if (trial % 2) {
       view.projection.m[0] = 1.3F;
       view.projection.m[5] = 1.7F;
+      // OpenGL perspective, near 0.1 and far 10.
+      view.projection.m[10] = -10.1F / 9.9F;
+      view.projection.m[14] = -2.0F / 9.9F;
       view.projection.m[11] = -1;
       view.projection.m[15] = 0;
     }
@@ -144,14 +190,21 @@ int main() {
       }
       const double w = trial % 2 ? -center[2] : 1;
       const double width = mode == Toon::ToonOutlineWidthMode::World ? 0.16 : 2 * 0.08 * w / view.projection.m[5];
-      for (int direction = 0; direction < 32; ++direction) {
-        const double angle = direction * 6.283185307 / 32;
-        const double x = (center[0] + width * std::cos(angle)) * view.projection.m[0];
-        const double y = (center[1] + width * std::sin(angle)) * view.projection.m[5];
-        if (std::abs(x) <= w && std::abs(y) <= w) {
-          ++visible;
-          if (!Check(!omitted, "joint bounds culled a visible extrusion sample"))
-            return 1;
+      for (int latitude = -4; latitude <= 4; ++latitude) {
+        const double z_direction = latitude / 4.0;
+        const double ring = std::sqrt(1 - z_direction * z_direction);
+        for (int direction = 0; direction < 32; ++direction) {
+          const double angle = direction * 6.283185307 / 32;
+          const double x = (center[0] + width * ring * std::cos(angle)) * view.projection.m[0];
+          const double y = (center[1] + width * ring * std::sin(angle)) * view.projection.m[5];
+          const double z_view = center[2] + width * z_direction;
+          const double z = z_view * view.projection.m[10] + view.projection.m[14];
+          const double clip_w = trial % 2 ? -z_view : 1;
+          if (std::abs(x) <= clip_w && std::abs(y) <= clip_w && std::abs(z) <= clip_w) {
+            ++visible;
+            if (!Check(!omitted, "joint bounds culled a visible extrusion sample"))
+              return 1;
+          }
         }
       }
     }
