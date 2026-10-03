@@ -53,6 +53,7 @@ struct Arguments {
   // Whether the overlay is laid out and drawn; O shows and hides it.
   bool overlay = true;
   bool outlines = true;
+  bool outline_culling = true;
   Toon::LightingDebug lighting;
   std::optional<double> time;
   std::optional<double> time_step;
@@ -169,6 +170,11 @@ Arguments ParseArguments(int argc, char** argv) {
       if (found == modes.end())
         throw std::invalid_argument("unknown material view");
       result.lighting.material = static_cast<Toon::MaterialDebug>(found - modes.begin());
+    } else if (option == "--outline-culling") {
+      const auto value = next();
+      if (value != "on" && value != "off")
+        throw std::invalid_argument("--outline-culling must be on or off");
+      result.outline_culling = value == "on";
     } else if (option == "--outlines") {
       const auto value = next();
       if (value != "on" && value != "off") {
@@ -197,6 +203,7 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --overlay on|off         the measurements over the\n"
                    "                           scene (default on)\n"
                    "  --outlines on|off        draw hulls (default on)\n"
+                   "  --outline-culling on|off omit offscreen hulls (default on)\n"
                    "  --lighting scene|camera  scene lights or camera key\n"
                    "  --direct-strength N      direct multiplier [0, 4]\n"
                    "  --ambient-strength N     ambient multiplier [0, 4]\n"
@@ -692,6 +699,7 @@ int RunViewport(int argc, char** argv) {
                                static_cast<float>(height));
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
+      draws.outline_frustum_culling = arguments.outline_culling;
       draws.lighting = lighting;
       if (arguments.switch_samples && !uploads_at_switch &&
           session->statistics().frames_presented ==

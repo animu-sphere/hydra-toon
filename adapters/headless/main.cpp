@@ -1455,6 +1455,100 @@ Check OutlineMotionCheck(const Toon::SceneShaders& shaders) {
                                                                                                                                                                                                                                                                                                                                                                                                                                     "65 pose writes and one geometry/skin/material upload"};
 }
 
+Check OutlineFrustumCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.outline.frustum";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (!renderer)
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  Toon::RenderWorld world;
+  const auto mesh = AddOctahedron(world);
+  Toon::ToonSkin skin;
+  skin.influences_per_point = 1;
+  skin.constant = true;
+  skin.influences = {{0, 1}};
+  world.SetMeshSkin(mesh, skin);
+  const auto material = world.CreateMaterial();
+  Toon::ToonMaterial toon;
+  toon.model = Toon::ToonShadingModel::MToon;
+  toon.base_color = {1, 0, 0};
+  toon.mtoon.shade_color = {1, 0, 0};
+  toon.outline = true;
+  toon.outline_width = 0.1F;
+  toon.outline_color = {0, 1, 0};
+  toon.mtoon.outline_lighting_mix = 0;
+  world.SetMeshMaterial(mesh, material);
+  Toon::ColorProduct culled, reference, surface;
+  Toon::DepthProduct depth, reference_depth;
+  unsigned omitted = 0;
+  unsigned boundary = 0;
+  for (const auto alpha : {Toon::ToonAlphaMode::Opaque, Toon::ToonAlphaMode::Mask, Toon::ToonAlphaMode::Blend}) {
+    toon.alpha_mode = alpha;
+    toon.alpha = alpha == Toon::ToonAlphaMode::Blend ? 0.6F : 1;
+    for (const auto mode : {Toon::ToonOutlineWidthMode::World, Toon::ToonOutlineWidthMode::Screen}) {
+      toon.mtoon.outline_width_mode = mode;
+      world.SetMaterial(material, toon);
+      for (const bool perspective : {false, true}) {
+        Toon::ToonView view;
+        view.projection.m[10] = -1;
+        if (perspective) {
+          view.view.m[14] = -2;
+          view.projection.m[11] = -1;
+          view.projection.m[15] = 0;
+          view.projection.m[14] = -0.2F;
+        }
+        world.SetView(view);
+        const std::array<float, 5> distances = perspective
+                                                   ? std::array<float, 5>{0, 2, 2.55F, 2.75F, 4}
+                                                   : std::array<float, 5>{0, 1, 1.55F, 1.65F, 3};
+        // Pose crosses every side, including frames where the surface is
+        // outside but the expanded hull reaches into the image.
+        for (const unsigned axis : {12U, 13U}) {
+          for (const float sign : {-1.0F, 1.0F}) {
+            for (const float distance : distances) {
+              Toon::ToonSkinPose pose;
+              pose.joints.resize(1);
+              pose.joints[0].m[axis] = sign * distance;
+              world.SetMeshSkinPose(mesh, pose);
+              auto draws = Toon::ExtractDrawList(world.Commit());
+              if (!renderer->Render(draws, 64, 64, culled, depth, detail))
+                return {id, "fail", detail};
+              const auto hulls = renderer->statistics().outline_draws;
+              draws.outline_frustum_culling = false;
+              if (!renderer->Render(draws, 64, 64, reference, reference_depth, detail))
+                return {id, "fail", detail};
+              if (renderer->statistics().outline_draws != 1 ||
+                  reference.payload != culled.payload || reference_depth.payload != depth.payload)
+                return {id, "fail", "culling changed colour/depth versus the unculled hull"};
+              if (distance == distances.back()) {
+                if (hulls != 0)
+                  return {id, "fail", "an offscreen animated hull was submitted"};
+                ++omitted;
+              }
+              if (distance == distances[2]) {
+                if (hulls != 1)
+                  return {id, "fail", "a boundary hull was omitted"};
+                draws.outlines = false;
+                if (!renderer->Render(draws, 64, 64, surface, reference_depth, detail))
+                  return {id, "fail", detail};
+                if (surface.payload != culled.payload)
+                  ++boundary;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  const auto& stats = renderer->statistics();
+  if (!boundary || omitted != 48 || stats.point_uploads != 1 ||
+      stats.topology_uploads != 1 || stats.skin_uploads != 1 ||
+      stats.material_writes != 6 || stats.validation_message_count != 0)
+    return {id, "fail", "missing boundary coverage, changed uploads or validation errors"};
+  return {id, "pass", "240 animated side-plane poses in Opaque/Mask/Blend, world/screen widths and perspective/orthographic views: identical colour/depth to unculled draws, 48 hull omissions, visible boundary silhouettes; one geometry/skin upload"};
+}
+
 // MToon's rim (material policy §4's MToon block), on AddOctahedron's diamond
 // with black lit and shade colours, so a pixel is the rim alone. A green
 // parametric rim of fresnel power 1, unlit, is 1 - N.V: near 0 at the
@@ -2276,6 +2370,7 @@ int main(int argc, char** argv) {
     checks.push_back(OutlineSamplingCheck(shaders));
     checks.push_back(OutlineWidthCheck(shaders));
     checks.push_back(OutlineMotionCheck(shaders));
+    checks.push_back(OutlineFrustumCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
@@ -2294,6 +2389,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.outline.sampling", "skip", dependent});
     checks.push_back({"renderer.outline.width", "skip", dependent});
     checks.push_back({"renderer.outline.motion", "skip", dependent});
+    checks.push_back({"renderer.outline.frustum", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});

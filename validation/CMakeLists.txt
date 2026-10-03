@@ -16,6 +16,11 @@ toon_configure_warnings(toon-render-world-test)
 target_link_libraries(toon-render-world-test PRIVATE Toon::RenderExtraction)
 add_test(NAME toon-render-world COMMAND toon-render-world-test)
 
+add_executable(toon-outline-bounds-test outline_bounds_test.cpp)
+toon_configure_warnings(toon-outline-bounds-test)
+target_link_libraries(toon-outline-bounds-test PRIVATE Toon::RenderExtraction)
+add_test(NAME toon-outline-bounds COMMAND toon-outline-bounds-test)
+
 add_test(NAME toon-renderer-evidence
   COMMAND "$<TARGET_FILE:toon-headless>"
     --report "${CMAKE_BINARY_DIR}/renderer-ctest-report.json")

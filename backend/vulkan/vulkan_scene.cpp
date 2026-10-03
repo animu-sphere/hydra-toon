@@ -1175,6 +1175,8 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.model = material.material.model;
       entry.double_sided = material.material.double_sided;
       entry.outline = HasOutline(material.material);
+      entry.outline_width = material.material.outline_width;
+      entry.outline_width_mode = material.material.mtoon.outline_width_mode;
       entry.transparent = IsTransparent(material.material);
       entry.queue = RenderQueue(material.material);
       entry.depth_write = WritesDepth(material.material);
@@ -1264,6 +1266,7 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
   ++generation_;
   for (const MeshSnapshot& mesh : draws.draws) {
     Entry& entry = entries_[mesh.id];
+    entry.outline_bounds.Update(mesh);
     if (entry.topology_revision != mesh.topology_revision) {
       if (!Upload(entry.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
               mesh.indices->data(),
@@ -1590,7 +1593,11 @@ void MeshCache::Record(VkCommandBuffer command,
         continue;
       }
       if (outline && (!draws.outlines || !material->outline ||
-                         (found->second.has_uvs && material->zero_width_texture))) {
+                         (found->second.has_uvs && material->zero_width_texture) ||
+                         (draws.outline_frustum_culling &&
+                             found->second.outline_bounds.OutsideView(mesh, draws.view,
+                                 material->outline_width, material->outline_width_mode,
+                                 draws.meters_per_unit)))) {
         continue;
       }
       draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
@@ -1627,7 +1634,11 @@ void MeshCache::Record(VkCommandBuffer command,
         VK_CULL_MODE_BACK_BIT);
     ++counts.transparent;
     if (draws.outlines && material.outline &&
-        (!entry.has_uvs || !material.zero_width_texture)) {
+        (!entry.has_uvs || !material.zero_width_texture) &&
+        (!draws.outline_frustum_culling ||
+            !entry.outline_bounds.OutsideView(mesh, draws.view,
+                material.outline_width, material.outline_width_mode,
+                draws.meters_per_unit))) {
       draw_mtoon(pipelines.mtoon_outline, mesh, entry, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;

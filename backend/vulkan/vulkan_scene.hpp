@@ -393,6 +393,8 @@ public:
     // Whether a draw with this material also draws mtoon_outline's hull:
     // an MToon material that asks for an outline of some width.
     bool outline = false;
+    float outline_width = 0;
+    ToonOutlineWidthMode outline_width_mode = ToonOutlineWidthMode::None;
     bool zero_width_texture = false;
     // Whether its draws go through mtoon_transparent, in `queue` order
     // after every opaque draw, and whether they write depth.
@@ -504,6 +506,7 @@ public:
 private:
   struct Entry {
     HostBuffer vertices;
+    OutlineBounds outline_bounds;
     HostBuffer normals;
     HostBuffer uvs;
     HostBuffer indices;

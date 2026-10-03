@@ -81,7 +81,7 @@ struct DepthProduct {
 // What an offscreen renderer has done over its lifetime. The creation and
 // upload counters are the evidence that a steady frame rebuilds nothing.
 struct OffscreenStatistics {
-  // Hull draw calls in the last frame, after omission of zero width textures.
+  // Hull draw calls in the last frame, after width and side-frustum omission.
   std::uint32_t outline_draws = 0;
   std::uint64_t frames_rendered = 0;
   // The last completed frame's timeline value.

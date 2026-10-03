@@ -106,6 +106,13 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    The outline comparison switch is `DrawList::outlines`, consumed during
    backend command recording without changing scene materials. Texture
    zero-width metadata stays in the backend's revision-keyed texture cache.
+   `OutlineBounds` in `core/render-extraction/outline_bounds.cpp` builds
+   rest-point and per-joint envelopes on points, topology or skin revisions.
+   The backend's mesh cache retains them; command recording evaluates the
+   current pose, camera, unit and full outline width against the four side
+   clip planes for opaque, Mask and Blend hulls. It transforms joint boxes,
+   not the vertex array. `DrawList::outline_frustum_culling` supplies an
+   unculled evaluation reference; surfaces retain their ordinary draw route.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 
