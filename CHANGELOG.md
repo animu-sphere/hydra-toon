@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Transient evaluated morph-weight and material-parameter overrides in the
+  render world and Hydra delegate, accepting host updates without USD edits
+  or Hydra sync. Scene values remain separate; clearing restores their latest
+  values, and binding or material structure changes invalidate stale overrides.
+- Expression state checks and 180 persistent Vulkan colour/depth comparisons
+  across MToon Opaque, Mask and Blend, with and without hulls, requiring only
+  weight-buffer and material-slot writes after initial upload.
 - Hydra ingestion of sparse, dense and normal-only UsdSkel blend-shape
   normal offsets, including inbetweens, into resident GPU targets. Missing
   offsets retain authored or derived rest normals. Lit MToon surface and

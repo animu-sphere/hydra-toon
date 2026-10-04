@@ -404,6 +404,24 @@ int RunRetained() {
   // A value-only change dirties its `vrm` locator alone, as a time move
   // across a sample does (renderer report 02). Emulation leaves the Sprim
   // clean; the delegate's observer carries the value.
+  const auto base_snapshot = delegate.CommitScene();
+  Toon::MaterialId expression_id = 0;
+  for (const auto& material : base_snapshot.materials) {
+    if (material.material == expected) expression_id = material.id;
+  }
+  auto expression_values = expected;
+  expression_values.mtoon.shading_shift = -0.4F;
+  if (!Check(expression_id != 0 && delegate.SetMaterialParametersOverride(expression_id, expression_values),
+          "direct material expression rejected")) return 1;
+  const auto expression_snapshot = delegate.CommitScene();
+  const auto expression_matches = [&](const Toon::FrameSnapshot& snapshot, const Toon::ToonMaterial& values) {
+    for (const auto& material : snapshot.materials) {
+      if (material.id == expression_id) return material.material == values;
+    }
+    return false;
+  };
+  if (!Check(expression_matches(expression_snapshot, expression_values),
+          "material expression must reach a commit without Hydra sync")) return 1;
   *shading_shift = 0.3F;
   scene->DirtyPrims({{toon_id,
       HdDataSourceLocatorSet{HdDataSourceLocator(TfToken("vrm"),
@@ -420,6 +438,11 @@ int RunRetained() {
           "a value-only change must reach the material's values")) {
     return 1;
   }
+  if (!Check(expression_matches(delegate.CommitScene(), expression_values),
+          "Hydra material value sync must preserve a host expression")) return 1;
+  delegate.ClearMaterialParametersOverride(expression_id);
+  if (!Check(expression_matches(delegate.CommitScene(), expected),
+          "clearing a host material expression must restore latest Hydra values")) return 1;
 
   // Re-adding a prim of the same type dirties all of it, as an authored
   // edit dirties the whole `material` locator.

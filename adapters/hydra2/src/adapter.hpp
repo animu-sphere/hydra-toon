@@ -185,6 +185,14 @@ public:
   Toon::FrameSnapshot CommitScene();
   void CommitScene(Toon::FrameSnapshot& snapshot);
 
+  // Host expression path, without USD authoring or Hydra sync. Ids come
+  // from CommitScene and are valid only for this delegate's scene lifetime.
+  // Overrides survive ordinary value syncs; clear restores scene values.
+  bool SetMeshMorphWeightsOverride(Toon::MeshId mesh, std::vector<float> weights);
+  void ClearMeshMorphWeightsOverride(Toon::MeshId mesh);
+  bool SetMaterialParametersOverride(Toon::MaterialId material, const Toon::ToonMaterial& values);
+  void ClearMaterialParametersOverride(Toon::MaterialId material);
+
 private:
   class Impl;
   std::unique_ptr<Impl> impl_;

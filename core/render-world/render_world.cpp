@@ -237,6 +237,7 @@ void RenderWorld::SetMeshMorph(MeshId mesh, ToonMorph morph) {
   snapshot.morph_ranges = std::make_shared<const std::vector<ToonMorphRange>>(
       std::move(morph.ranges));
   snapshot.morph_revision = Stamp();
+  record->morph_weights_override.reset();
   dirty_ = true;
 }
 
@@ -246,10 +247,58 @@ void RenderWorld::SetMeshMorphWeights(MeshId mesh, std::vector<float> weights) {
           [](float weight) { return std::isfinite(weight); })) return;
   auto& snapshot = record->snapshot;
   if (*snapshot.morph_weights == weights) return;
+  if (snapshot.morph_weights->size() != weights.size()) {
+    record->morph_weights_override.reset();
+  }
   snapshot.morph_weights = std::make_shared<const std::vector<float>>(
       std::move(weights));
   snapshot.morph_weights_revision = Stamp();
   dirty_ = true;
+}
+
+bool RenderWorld::SetMeshMorphWeightsOverride(MeshId mesh, std::vector<float> weights) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || record->snapshot.morph_offsets->empty() ||
+      weights.empty() || weights.size() != record->snapshot.morph_weights->size() ||
+      !std::all_of(weights.begin(), weights.end(),
+          [](float weight) { return std::isfinite(weight); })) return false;
+  if (record->morph_weights_override && *record->morph_weights_override == weights) return true;
+  const bool unchanged = !record->morph_weights_override && *record->snapshot.morph_weights == weights;
+  record->morph_weights_override = std::make_shared<const std::vector<float>>(std::move(weights));
+  record->morph_weights_override_revision = unchanged ? record->snapshot.morph_weights_revision : Stamp();
+  dirty_ |= !unchanged;
+  return true;
+}
+
+void RenderWorld::ClearMeshMorphWeightsOverride(MeshId mesh) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || !record->morph_weights_override) return;
+  const bool unchanged = *record->morph_weights_override == *record->snapshot.morph_weights;
+  record->snapshot.morph_weights_revision = unchanged ? record->morph_weights_override_revision : Stamp();
+  record->morph_weights_override.reset();
+  dirty_ |= !unchanged;
+}
+
+bool RenderWorld::SetMaterialParametersOverride(MaterialId material, const ToonMaterial& values) {
+  const auto found = materials_.find(material);
+  if (found == materials_.end() || IsStructuralChange(found->second.material, values)) return false;
+  const auto previous = material_overrides_.find(material);
+  if (previous != material_overrides_.end() && previous->second.material == values) return true;
+  const bool unchanged = previous == material_overrides_.end() && found->second.material == values;
+  auto& override = material_overrides_[material];
+  override = {material, values, unchanged ? found->second.parameters_revision : Stamp(), found->second.structure_revision};
+  dirty_ |= !unchanged;
+  return true;
+}
+
+void RenderWorld::ClearMaterialParametersOverride(MaterialId material) {
+  const auto found = material_overrides_.find(material);
+  if (found == material_overrides_.end()) return;
+  auto& scene = materials_.at(material);
+  const bool unchanged = scene.material == found->second.material;
+  scene.parameters_revision = unchanged ? found->second.parameters_revision : Stamp();
+  material_overrides_.erase(found);
+  dirty_ |= !unchanged;
 }
 
 bool IsMorphed(const MeshSnapshot& mesh) {
@@ -355,6 +404,7 @@ void RenderWorld::SetTimeSeconds(double seconds) {
 }
 
 void RenderWorld::RemoveMaterial(MaterialId material) {
+  material_overrides_.erase(material);
   if (materials_.erase(material) != 0) {
     dirty_ = true;
   }
@@ -371,6 +421,7 @@ void RenderWorld::SetMaterial(MaterialId material, const ToonMaterial& values) {
   record.parameters_revision = Stamp();
   if (structural) {
     record.structure_revision = record.parameters_revision;
+    material_overrides_.erase(material);
   }
   dirty_ = true;
 }
@@ -507,10 +558,16 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
       record.normals_stale = false;
     }
     snapshot.meshes.push_back(record.snapshot);
+    if (record.morph_weights_override) {
+      snapshot.meshes.back().morph_weights = record.morph_weights_override;
+      snapshot.meshes.back().morph_weights_revision = record.morph_weights_override_revision;
+    }
   }
   snapshot.materials.clear();
   for (const auto& entry : materials_) {
-    snapshot.materials.push_back(entry.second);
+    const auto override = material_overrides_.find(entry.first);
+    snapshot.materials.push_back(override == material_overrides_.end()
+            ? entry.second : override->second);
   }
   snapshot.textures.clear();
   for (const auto& entry : textures_) {

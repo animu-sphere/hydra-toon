@@ -27,6 +27,17 @@ if(TOON_WITH_VULKAN)
   set_tests_properties(toon-morph-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
 endif()
 
+add_executable(toon-expression-test expression_test.cpp)
+toon_configure_warnings(toon-expression-test)
+target_link_libraries(toon-expression-test PRIVATE Toon::Vulkan)
+add_test(NAME toon-expression-state COMMAND toon-expression-test)
+if(TOON_WITH_VULKAN)
+  add_dependencies(toon-expression-test toon-renderer-shaders)
+  add_test(NAME toon-expression-gpu COMMAND toon-expression-test
+    "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-expression-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+endif()
+
 add_executable(toon-outline-bounds-test outline_bounds_test.cpp)
 toon_configure_warnings(toon-outline-bounds-test)
 target_link_libraries(toon-outline-bounds-test PRIVATE Toon::RenderExtraction)
