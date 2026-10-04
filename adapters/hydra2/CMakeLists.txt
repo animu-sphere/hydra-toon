@@ -88,7 +88,7 @@ if(TOON_BUILD_TESTS)
   add_executable(toon-hydra2-skinning-test tests/skinning_test.cpp)
   toon_configure_warnings(toon-hydra2-skinning-test)
   target_link_libraries(toon-hydra2-skinning-test
-    PRIVATE toon-hydra2-runtime usdImaging usd)
+    PRIVATE toon-hydra2-runtime usdImaging usd Toon::Vulkan)
   target_compile_features(toon-hydra2-skinning-test PRIVATE cxx_std_20)
   target_compile_definitions(toon-hydra2-skinning-test PRIVATE
     NOMINMAX
@@ -130,12 +130,19 @@ if(TOON_BUILD_TESTS)
   add_test(NAME toon-renderer-hydra-skinning
     COMMAND toon-hydra2-skinning-test
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda")
+  add_test(NAME toon-renderer-hydra-morph-normals
+    COMMAND toon-hydra2-skinning-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda"
+      "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-renderer-hydra-morph-normals PROPERTIES
+    LABELS "gpu" SKIP_RETURN_CODE 77)
   set_tests_properties(
     toon-renderer-plugin-discovery
     toon-renderer-delegate-creation
     toon-renderer-hydra-render-buffer
     toon-renderer-hydra-material
     toon-renderer-hydra-skinning
+    toon-renderer-hydra-morph-normals
     toon-renderer-hydra-lights
     PROPERTIES ENVIRONMENT_MODIFICATION
       "${_toon_pxr_runtime_modifications}")

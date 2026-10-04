@@ -37,11 +37,11 @@ def SkelRoot "Root" (
             }
             quatf[] rotations = [(1, 0, 0, 0), (1, 0, 0, 0)]
             half3[] scales = [(1, 1, 1), (1, 1, 1)]
-            uniform token[] blendShapes = ["lift"]
+            uniform token[] blendShapes = ["lift", "tilt", "plain"]
             float[] blendShapeWeights.timeSamples = {
-                1: [0],
-                2: [0],
-                3: [1],
+                1: [0, 0, 0],
+                2: [0, 0, 0],
+                3: [1, 1, 1],
             }
         }
     }
@@ -69,17 +69,34 @@ def SkelRoot "Root" (
             interpolation = "vertex"
         )
         matrix4d primvars:skel:geomBindTransform = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
-        uniform token[] skel:blendShapes = ["lift"]
-        rel skel:blendShapeTargets = </Root/Linear/lift>
+        uniform token[] skel:blendShapes = ["lift", "tilt", "plain"]
+        rel skel:blendShapeTargets = [</Root/Linear/lift>, </Root/Linear/tilt>, </Root/Linear/plain>]
         rel skel:skeleton = </Root/Skel>
 
         def BlendShape "lift"
         {
             uniform vector3f[] offsets = [(0, 0, 1)]
+            uniform vector3f[] normalOffsets = [(-0.6, 0, 0.6)]
             uniform int[] pointIndices = [0]
             uniform vector3f[] inbetweens:half = [(0, 0, 0.75)] (
                 weight = 0.5
             )
+            uniform vector3f[] inbetweens:half:normalOffsets = [(-0.2, 0, 0.2)]
+        }
+
+        # Dense normal-only offsets, including a point beyond the sparse
+        # position range. The packed weight slot follows lift's inbetween.
+        def BlendShape "tilt"
+        {
+            uniform vector3f[] offsets = []
+            uniform vector3f[] normalOffsets = [(0, 0.25, 0), (0, 0.25, 0), (0, 0.25, 0), (0, 0.25, 0)]
+        }
+
+        # No normal offsets: preserve the authored rest normal.
+        def BlendShape "plain"
+        {
+            uniform vector3f[] offsets = [(0, 0, 0.25)]
+            uniform int[] pointIndices = [2]
         }
     }
 

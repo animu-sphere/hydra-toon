@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [35](35-2026-10-05-morph-normals.md) | Hydra sparse, dense and normal-only offsets with inbetweens; 72 lit-surface/hull CPU-oracle comparisons; authored/derived rest-normal fallback and target-only edits |
 | [34](34-2026-10-04-gpu-morphs.md) | Sparse GPU morphs before skinning: 288 CPU-oracle colour/depth comparisons across four material routes, UsdSkel inbetween routing, and a nine-frame viewport sequence with one geometry/target upload and nine weight writes |
 | [33](33-2026-10-04-published-v020.md) | v0.2.0 release assets and anonymous GHCR access verified; committed Formation re-pinned; published headless GPU checks and four avatar captures matching preparation pixel for pixel |
 | [32](32-2026-10-04-vrm-reproduction.md) | Matched VRM 0.x/1.0 viewport, usdview and three-vrm captures; helper-light regression fix; every-frame repeat evidence over two motions; accepted 4x practical baseline |

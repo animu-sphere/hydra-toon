@@ -10,6 +10,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Hydra ingestion of sparse, dense and normal-only UsdSkel blend-shape
+  normal offsets, including inbetweens, into resident GPU targets. Missing
+  offsets retain authored or derived rest normals. Lit MToon surface and
+  hull images match independent CPU references across Opaque, Mask and Blend.
 - Sparse GPU morphs before skinning in every Vulkan scene pipeline, with
   independent target and weight revisions and resident rest geometry.
 - Morph upload/write statistics in both renderer paths, Hydra evidence and
@@ -21,12 +25,17 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - Linear UsdSkel blend-shape weights, including inbetweens, update the GPU
   weight buffer without baking or uploading points. Morphed hulls bypass
   rest-envelope culling conservatively; morphed meshes cannot act as rigid
-  occluders. Hydra normal-offset ingestion and dual quaternion GPU evaluation
-  remain outside this change.
+  occluders. Dual quaternion GPU evaluation remains outside this change.
 - The committed VRM host Formation pins the published `toon` 0.2.0 package.
   Renderer report 33 verifies release assets, anonymous GHCR access,
   Formation smoke and headless GPU checks, and four avatar captures matching
   the preparation build pixel for pixel.
+
+### Fixed
+
+- A UsdSkel aggregator edit that changes only morph targets no longer
+  re-sends unchanged rest points. Normal-offset edits preserve geometry,
+  skin, pose and weight revisions.
 
 ## [0.2.0] - 2026-10-04
 
