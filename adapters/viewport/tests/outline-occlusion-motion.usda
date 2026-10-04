@@ -1,0 +1,80 @@
+#usda 1.0
+# SPDX-License-Identifier: Apache-2.0
+(
+    doc = "An outlined skinned diamond and a rigid opaque blocker move independently, reveal the silhouette and return. Requires VRM imaging."
+    startTimeCode = 1
+    endTimeCode = 9
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+def SkelRoot "Root"
+{
+    def Material "Material" (
+        prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI"]
+    )
+    {
+        color4f inputs:vrm:material:baseColorFactor = (1,0,0,1)
+        color3f inputs:vrm:mtoon:shadeColorFactor = (1,0,0)
+        token inputs:vrm:mtoon:outlineWidthMode = "worldCoordinates"
+        float inputs:vrm:mtoon:outlineWidthFactor = 0.025
+        color3f inputs:vrm:mtoon:outlineColorFactor = (0,1,0)
+        float inputs:vrm:mtoon:outlineLightingMixFactor = 0
+    }
+    def Material "Cover" (
+        prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI"]
+    )
+    {
+        color4f inputs:vrm:material:baseColorFactor = (0,0,1,1)
+        color3f inputs:vrm:mtoon:shadeColorFactor = (0,0,1)
+        bool inputs:vrm:material:doubleSided = true
+    }
+    def Mesh "Blocker" (prepend apiSchemas = ["MaterialBindingAPI"])
+    {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0,1,2]
+        point3f[] points = [(-1.2,-1.2,0.5),(1.2,-1.2,0.5),(0,1.2,0.5)]
+        normal3f[] primvars:normals = [(0,0,1),(0,0,1),(0,0,1)] (interpolation = "vertex")
+        double3 xformOp:translate.timeSamples = {
+            1: (0,0,0), 2: (0,0,0), 3: (0,0,0), 4: (3,0,0),
+            5: (0,0,0), 6: (0,0,-2), 7: (0,0,0), 8: (0,0,0), 9: (0,0,0)
+        }
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </Root/Cover>
+    }
+    def Skeleton "Skel" (prepend apiSchemas = ["SkelBindingAPI"])
+    {
+        uniform token[] joints = ["root"]
+        uniform matrix4d[] bindTransforms = [((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))]
+        uniform matrix4d[] restTransforms = [((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))]
+        rel skel:animationSource = </Root/Anim>
+    }
+    def SkelAnimation "Anim"
+    {
+        uniform token[] joints = ["root"]
+        float3[] translations.timeSamples = {
+            1: [(0,0,0)], 2: [(0.3,0,0)], 3: [(0.7,0,0)], 4: [(1,0,0)],
+            5: [(0,0,0)], 6: [(0,0,0)], 7: [(0.7,0,0)], 8: [(0.3,0,0)], 9: [(0,0,0)]
+        }
+        quatf[] rotations = [(1,0,0,0)]
+        half3[] scales = [(1,1,1)]
+    }
+    def Mesh "Diamond" (prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"])
+    {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [3,3,3,3,3,3,3,3]
+        int[] faceVertexIndices = [0,2,4,1,4,2,0,4,3,1,3,4,0,5,2,1,2,5,0,3,5,1,5,3]
+        point3f[] points = [(0.15,0,-0.5),(-0.15,0,-0.5),(0,0.15,-0.5),(0,-0.15,-0.5),(0,0,-0.35),(0,0,-0.65)]
+        normal3f[] primvars:normals = [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)] (interpolation = "vertex")
+        int[] primvars:skel:jointIndices = [0] (
+            elementSize = 1
+            interpolation = "constant"
+        )
+        float[] primvars:skel:jointWeights = [1] (
+            elementSize = 1
+            interpolation = "constant"
+        )
+        rel skel:skeleton = </Root/Skel>
+        rel material:binding = </Root/Material>
+    }
+}

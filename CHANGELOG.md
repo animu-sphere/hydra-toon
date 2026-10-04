@@ -10,6 +10,16 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Current-frame opaque-triangle occlusion for MToon hulls, including
+  animated Opaque, Mask and Blend targets. A rigid unlit or double-sided
+  Opaque blocker must cover the entire expanded hull and be wholly nearer
+  in depth; uncertain coverage keeps the draw. Work and storage are bounded,
+  with no CPU skinning, temporal history, GPU query, readback or extra
+  upload. `--outline-culling off` disables both frustum and occlusion
+  omission. Renderer report 30 records 1,792 identical GPU colour/depth
+  comparisons, viewport reveal/return captures and representative VRM
+  regressions. Skinned occluders and combined triangle coverage are excluded.
+
 - Conservative near/far-plane omission for MToon outline hulls. The
   animated full-width envelope now covers all six clip planes, preserving
   hulls that cross a depth boundary and the existing slope depth bias.

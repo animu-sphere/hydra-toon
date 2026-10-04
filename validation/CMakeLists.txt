@@ -21,6 +21,11 @@ toon_configure_warnings(toon-outline-bounds-test)
 target_link_libraries(toon-outline-bounds-test PRIVATE Toon::RenderExtraction)
 add_test(NAME toon-outline-bounds COMMAND toon-outline-bounds-test)
 
+add_executable(toon-outline-occlusion-test outline_occlusion_test.cpp)
+toon_configure_warnings(toon-outline-occlusion-test)
+target_link_libraries(toon-outline-occlusion-test PRIVATE Toon::RenderExtraction)
+add_test(NAME toon-outline-occlusion COMMAND toon-outline-occlusion-test)
+
 add_test(NAME toon-renderer-evidence
   COMMAND "$<TARGET_FILE:toon-headless>"
     --report "${CMAKE_BINARY_DIR}/renderer-ctest-report.json")

@@ -58,6 +58,27 @@ Box Transform(const Box& box, const Matrix4& matrix) {
   }
   return result;
 }
+
+// Preserve composition roundoff even when large opposing translations or
+// matrix terms cancel. Also covers the backend composing clip-from-world
+// before the mesh transform rather than composing model-view first.
+template <class Box>
+Box TransformProduct(const Box& box, const Matrix4& left, const Matrix4& right) {
+  auto result = Transform(box, Multiply(left, right));
+  for (std::size_t row = 0; row < 3; ++row) {
+    double magnitude = 0;
+    for (std::size_t axis = 0; axis < 4; ++axis) {
+      const double bound = axis == 3 ? 1 : std::max(std::abs(box.low[axis]), std::abs(box.high[axis]));
+      for (std::size_t k = 0; k < 4; ++k)
+        magnitude += std::abs(double(left.m[4 * k + row])) *
+                     std::abs(double(right.m[4 * axis + k])) * bound;
+    }
+    const double margin = 256 * std::numeric_limits<float>::epsilon() * magnitude;
+    result.low[row] -= margin;
+    result.high[row] += margin;
+  }
+  return result;
+}
 } // namespace
 
 void OutlineBounds::Update(const MeshSnapshot& mesh) {
@@ -113,15 +134,16 @@ void OutlineBounds::Update(const MeshSnapshot& mesh) {
   valid_skin_ = true;
 }
 
-bool OutlineBounds::OutsideView(const MeshSnapshot& mesh, const ToonView& view,
-    float width, ToonOutlineWidthMode mode, float meters_per_unit) const {
+bool OutlineBounds::ViewBounds(const MeshSnapshot& mesh, const ToonView& view,
+    float width, ToonOutlineWidthMode mode, float meters_per_unit,
+    Box& bounds, double& radius) const {
   if (!rest_.valid || !std::isfinite(width) || width <= 0 ||
       !std::isfinite(meters_per_unit) || meters_per_unit <= 0 ||
       !Affine(mesh.transform) || !Affine(view.view) ||
       !std::all_of(view.projection.m.begin(), view.projection.m.end(),
           [](float value) { return std::isfinite(value); }))
     return false;
-  Box bounds = rest_;
+  bounds = rest_;
   if (IsSkinned(mesh)) {
     if (!valid_skin_ || !Affine(mesh.skeleton_to_mesh))
       return false;
@@ -131,7 +153,7 @@ bool OutlineBounds::OutsideView(const MeshSnapshot& mesh, const ToonView& view,
         continue;
       if (!Affine((*mesh.joints)[joint]))
         return false;
-      const auto moved = Transform(joints_[joint], Multiply((*mesh.joints)[joint], mesh.geom_bind));
+      const auto moved = TransformProduct(joints_[joint], (*mesh.joints)[joint], mesh.geom_bind);
       Include(bounds, moved.low);
       Include(bounds, moved.high);
     }
@@ -184,9 +206,9 @@ bool OutlineBounds::OutsideView(const MeshSnapshot& mesh, const ToonView& view,
   const double condition = matrix_norm * inverse_norm;
   if (!std::isfinite(condition) || condition > 1000)
     return false;
-  bounds = Transform(bounds, model_view);
+  bounds = TransformProduct(bounds, view.view, mesh.transform);
   const auto& p = view.projection.m;
-  double radius = double(width) / meters_per_unit;
+  radius = double(width) / meters_per_unit;
   if (mode == ToonOutlineWidthMode::Screen) {
     double max_w = 0;
     for (unsigned corner = 0; corner < 8; ++corner) {
@@ -204,6 +226,16 @@ bool OutlineBounds::OutsideView(const MeshSnapshot& mesh, const ToonView& view,
     if (!std::isfinite(bounds.low[axis]) || !std::isfinite(bounds.high[axis]))
       return false;
   }
+  return std::isfinite(radius);
+}
+
+bool OutlineBounds::OutsideView(const MeshSnapshot& mesh, const ToonView& view,
+    float width, ToonOutlineWidthMode mode, float meters_per_unit) const {
+  Box bounds;
+  double radius = 0;
+  if (!ViewBounds(mesh, view, width, mode, meters_per_unit, bounds, radius))
+    return false;
+  const auto& p = view.projection.m;
   // The width image's filtered G is in [0,1], including white fallbacks.
   // Animated UVs and partially zero maps cannot exceed the full-width ball.
   // ToonView uses OpenGL clip coordinates (-w <= z <= w). The backend

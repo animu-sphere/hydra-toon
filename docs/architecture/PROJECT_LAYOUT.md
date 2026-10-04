@@ -114,10 +114,20 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    not the vertex array. Depth planes use `ToonView`'s -w..w range, preserved
    by the Vulkan clip conversion; depth clamp stays disabled and raster
    depth bias applies after clipping. `DrawList::outline_frustum_culling`
-   supplies an unculled evaluation reference; surfaces retain their ordinary
+   supplies a frustum-only evaluation reference; surfaces retain their ordinary
    draw route. `scripts/evaluate_outline_depth.py` consumes captures from
    the viewport's committed skinned depth-plane fixture; VRM imaging stays
    an external plugin rather than a renderer dependency.
+   `OutlineOcclusion` in `core/render-extraction/outline_occlusion.cpp`
+   projects a bounded set of small rigid opaque triangles from the current
+   draw list. The entire expanded hull must project strictly inside one
+   triangle and behind its farthest depth, with arithmetic and raster
+   margins. Mask, Blend, skinned and single-sided MToon blockers cannot
+   certify coverage. The shared backend mesh recorder supplies the target
+   extent and applies `DrawList::outline_occlusion_culling` to both opaque
+   and transparent hulls. The viewport's `--outline-culling off` disables
+   both decisions. `scripts/evaluate_outline_occlusion.py` evaluates the
+   committed skinned reveal/return fixture through the actual viewport.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 

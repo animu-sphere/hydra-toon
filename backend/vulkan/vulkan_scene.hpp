@@ -487,7 +487,7 @@ public:
   // when given, counts what was drawn and marks where each part ends.
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws,
-      SceneRecord* record = nullptr);
+      VkExtent2D extent, SceneRecord* record = nullptr);
   void Destroy();
 
   [[nodiscard]] std::uint64_t topology_uploads() const {
@@ -554,6 +554,7 @@ private:
   // This frame's transparent draws, as indices into `draws.draws`, kept so
   // a steady frame sorts without allocating.
   std::vector<std::size_t> transparent_scratch_;
+  OutlineOcclusion outline_occlusion_;
   std::unordered_map<MeshId, Entry> entries_;
   std::uint64_t generation_ = 0;
   std::uint64_t topology_uploads_ = 0;

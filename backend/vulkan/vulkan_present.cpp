@@ -822,7 +822,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   SceneRecord record;
   record.timestamps = timestamps_;
   record.first_query = kUnlitEnd;
-  meshes_.Record(command_, pipelines_, materials_, draws, &record);
+  meshes_.Record(command_, pipelines_, materials_, draws, extent_, &record);
   WriteTimestamp(kTransparentEnd);
   vkCmdEndRendering(command_);
   WriteTimestamp(kResolveEnd);
