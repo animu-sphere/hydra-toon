@@ -74,6 +74,16 @@ while weights have an independent revision. `SetMeshMorphWeights` does not
 change geometry, skin or target revisions. The Hydra adapter normalizes
 usdSkelImaging's aggregator arrays once per input revision and forwards its
 evaluated weights separately; it does not define expression semantics.
+OpenUSD 26.08 packs position offsets only. The adapter reads normal offsets
+from the terminal scene index's `skelBinding` and `skelBlendShape` containers,
+matching the binding order and sorted inbetween subshape slots. Sparse,
+dense and normal-only offsets share the resident target buffer. Missing
+normal offsets retain authored or derived rest normals; no per-frame normal
+recalculation or geometry upload occurs. An aggregator edit re-sends rest
+points only if their values changed. Normal-offset edits refresh targets
+independently of rest geometry and weights. The Hydra skinning CTest checks
+these edits; `toon-renderer-hydra-morph-normals` compares lit surfaces and
+hulls against independently CPU-deformed rest geometry.
 
 The Vulkan mesh cache owns per-mesh target, range and weight storage buffers
 alongside influences and joints in descriptor set 1 (five vertex bindings).

@@ -191,6 +191,14 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
     (blendShapeOffsets)
     (blendShapeOffsetRanges)
     (blendShapeWeights)
+    (skelBinding)
+    (blendShapes)
+    (blendShapeTargets)
+    (skelBlendShape)
+    (pointIndices)
+    (normalOffsets)
+    (inbetweenShapes)
+    (weight)
     (skinningXforms)
     (skinningDualQuats)
     (skelLocalToWorld)
@@ -814,12 +822,13 @@ private:
   // mesh reads them again next time.
   bool ReadRest(HdSceneDelegate* delegate, const SdfPath& aggregator) {
     rest_revision_ = 0;
+    VtVec3fArray points;
     GfMatrix4f geom_bind;
     VtVec2fArray influences;
     int influences_per_point = 0;
     bool constant = false;
     if (!ReadInput(delegate, aggregator, SkinTokens->restPoints,
-            rest_points_) ||
+            points) ||
         !ReadInput(delegate, aggregator, SkinTokens->geomBindXform,
             geom_bind) ||
         !ReadInput(delegate, aggregator, SkinTokens->influences,
@@ -853,15 +862,24 @@ private:
       }
     }
     state_->SetMeshSkin(mesh_, std::move(skin));
-    state_->SetMeshPoints(mesh_, ReadPoints(VtValue(rest_points_)));
-    state_->SetMeshMorph(mesh_, ReadMorph());
+    if (!skinned_ || points != rest_points_) {
+      state_->SetMeshPoints(mesh_, ReadPoints(VtValue(points)));
+    }
+    rest_points_ = std::move(points);
+    state_->SetMeshMorph(mesh_, ReadMorph(delegate));
     skinned_ = true;
     return true;
   }
 
   // Normalize usdSkelImaging's per-point ranges into renderer-private sparse
   // targets once per aggregator edit, retaining its inbetween weight indices.
-  Toon::ToonMorph ReadMorph() const {
+  Toon::ToonMorph ReadMorph(HdSceneDelegate* delegate) const {
+    // OpenUSD 26.08's aggregator packs positions only. Read normal offsets
+    // from the original Hydra schema, retaining the aggregator's subshape
+    // numbering (binding order, then sorted nonzero inbetween weights).
+    // Missing normal offsets deliberately retain the rest normals; deriving
+    // normals from morphed positions would require a different GPU path.
+    const auto normal_offsets = ReadMorphNormals(delegate);
     Toon::ToonMorph morph;
     morph.ranges.resize(rest_points_.size());
     const std::size_t count = std::min(blend_ranges_.size(), rest_points_.size());
@@ -878,12 +896,117 @@ private:
             static_cast<double>(shape[3]) > std::numeric_limits<std::uint32_t>::max()) {
           continue;
         }
-        morph.offsets.push_back({{shape[0], shape[1], shape[2]},
-            static_cast<std::uint32_t>(shape[3]), {}, 0});
+        const auto target = static_cast<std::uint32_t>(shape[3]);
+        const auto found = normal_offsets.find({point, target});
+        morph.offsets.push_back({{shape[0], shape[1], shape[2]}, target,
+            found == normal_offsets.end() ? Toon::Float3{} : found->second, 0});
+        ++output.count;
+      }
+      // A normal-only offset need not have a matching position entry.
+      for (auto it = normal_offsets.lower_bound({point, 0});
+           it != normal_offsets.end() && it->first.first == point; ++it) {
+        const bool present = std::any_of(morph.offsets.begin() + output.first,
+            morph.offsets.end(), [&](const Toon::ToonMorphOffset& offset) {
+              return offset.target == it->first.second;
+            });
+        if (!present) {
+          morph.offsets.push_back({{}, it->first.second, it->second, 0});
+          ++output.count;
+        }
+      }
+    }
+    // Normal-only shapes can reach points beyond the position ranges.
+    for (std::size_t point = count; point < rest_points_.size(); ++point) {
+      auto& output = morph.ranges[point];
+      output.first = static_cast<std::uint32_t>(morph.offsets.size());
+      for (auto it = normal_offsets.lower_bound({point, 0});
+           it != normal_offsets.end() && it->first.first == point; ++it) {
+        morph.offsets.push_back({{}, it->first.second, it->second, 0});
         ++output.count;
       }
     }
     return morph;
+  }
+
+  using MorphNormalMap =
+      std::map<std::pair<std::size_t, std::uint32_t>, Toon::Float3>;
+
+  static HdContainerDataSourceHandle Container(
+      const HdContainerDataSourceHandle& parent, const TfToken& name) {
+    return parent ? HdContainerDataSource::Cast(parent->Get(name)) : nullptr;
+  }
+
+  template <typename T>
+  static T SchemaValue(const HdContainerDataSourceHandle& parent,
+      const TfToken& name) {
+    const auto source = parent
+        ? HdTypedSampledDataSource<T>::Cast(parent->Get(name)) : nullptr;
+    return source ? source->GetTypedValue(0) : T{};
+  }
+
+  MorphNormalMap ReadMorphNormals(HdSceneDelegate* delegate) const {
+    MorphNormalMap result;
+    const auto terminal = delegate->GetRenderIndex().GetTerminalSceneIndex();
+    if (!terminal) {
+      return result;
+    }
+    const auto binding = Container(terminal->GetPrim(GetId()).dataSource,
+        SkinTokens->skelBinding);
+    const auto names = SchemaValue<VtTokenArray>(binding, SkinTokens->blendShapes);
+    const auto paths = SchemaValue<VtArray<SdfPath>>(binding, SkinTokens->blendShapeTargets);
+    std::set<TfToken> seen;
+    std::uint32_t target = 0;
+    for (std::size_t shape = 0; shape < std::min(names.size(), paths.size()); ++shape) {
+      const auto source = Container(terminal->GetPrim(paths[shape]).dataSource,
+          SkinTokens->skelBlendShape);
+      if (!source || !seen.insert(names[shape]).second) {
+        continue;
+      }
+      const auto points = SchemaValue<VtIntArray>(source, SkinTokens->pointIndices);
+      std::vector<std::pair<float, HdContainerDataSourceHandle>> subshapes{{1.0F, source}};
+      if (const auto inbetweens = Container(source, SkinTokens->inbetweenShapes)) {
+        for (const auto& name : inbetweens->GetNames()) {
+          const auto subshape = Container(inbetweens, name);
+          const auto weight_source = subshape
+              ? HdFloatDataSource::Cast(subshape->Get(SkinTokens->weight)) : nullptr;
+          if (!weight_source) {
+            continue;
+          }
+          const float weight = weight_source->GetTypedValue(0);
+          if (std::isfinite(weight) && std::abs(weight) > 1e-6F &&
+              std::abs(weight - 1) > 1e-6F) {
+            subshapes.emplace_back(weight, subshape);
+          }
+        }
+      }
+      std::sort(subshapes.begin(), subshapes.end(),
+          [](const auto& a, const auto& b) { return a.first < b.first; });
+      float previous = -std::numeric_limits<float>::infinity();
+      for (const auto& [weight, subshape] : subshapes) {
+        if (std::abs(previous - weight) <= 1e-6F) {
+          continue;
+        }
+        previous = weight;
+        const auto normals = SchemaValue<VtVec3fArray>(subshape, SkinTokens->normalOffsets);
+        // A malformed sparse array supplies no normals for this subshape.
+        if (points.empty() || points.size() == normals.size()) {
+          for (std::size_t index = 0; index < normals.size(); ++index) {
+            if (!points.empty() && points[index] < 0) {
+              continue;
+            }
+            const std::size_t point = points.empty() ? index
+                : static_cast<std::size_t>(points[index]);
+            const auto& normal = normals[index];
+            if (point < rest_points_.size() && std::isfinite(normal[0]) &&
+                std::isfinite(normal[1]) && std::isfinite(normal[2])) {
+              result[{point, target}] = {normal[0], normal[1], normal[2]};
+            }
+          }
+        }
+        ++target;
+      }
+    }
+    return result;
   }
 
   void Unskin() {
@@ -903,9 +1026,9 @@ private:
   // with the points. usdSkelImaging makes that computation only under
   // USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS and for a mesh whose
   // subdivision scheme is none; otherwise it hides a skinned mesh's normals.
-  // Face-varying normals need split vertices, as a face-varying `st` does,
-  // and blend shapes' normal offsets are not applied; without authored
-  // normals the core derives smooth ones.
+  // Face-varying normals need split vertices, as a face-varying `st` does;
+  // without authored normals the core derives smooth rest normals. Morph
+  // offsets are applied to either kind in the GPU before skinning.
   void SyncNormals(HdSceneDelegate* delegate) {
     for (const HdExtComputationPrimvarDescriptor& descriptor :
         delegate->GetExtComputationPrimvarDescriptors(GetId(),
