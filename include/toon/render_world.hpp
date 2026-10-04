@@ -403,6 +403,18 @@ public:
   // Weight changes never dirty rest geometry, normals, skin or targets.
   void SetMeshMorph(MeshId mesh, ToonMorph morph);
   void SetMeshMorphWeights(MeshId mesh, std::vector<float> weights);
+  // Transient, already evaluated expression values. These replace the scene
+  // values in commits until cleared; ordinary setters continue updating the
+  // underlying scene. No format-specific expression semantics live here.
+  // False for unknown ids, non-finite weights, absent targets or a weight
+  // count different from the scene's resident array. Identical overrides
+  // succeed without a revision change. Target/count edits invalidate them.
+  bool SetMeshMorphWeightsOverride(MeshId mesh, std::vector<float> weights);
+  void ClearMeshMorphWeightsOverride(MeshId mesh);
+  // Rejects structural material edits. Structural scene edits invalidate the
+  // override; clearing restores the latest scene values, not the initial ones.
+  bool SetMaterialParametersOverride(MaterialId material, const ToonMaterial& values);
+  void ClearMaterialParametersOverride(MaterialId material);
   void SetView(const ToonView& view);
   // The scene's linear unit in metres, 1 until set. A value that is not
   // positive and finite changes nothing.
@@ -436,6 +448,8 @@ public:
 private:
   struct MeshRecord {
     MeshSnapshot snapshot;
+    WeightArray morph_weights_override;
+    std::uint64_t morph_weights_override_revision = 0;
     // The authored normals, empty when there are none.
     PointArray authored_normals =
         std::make_shared<const std::vector<Float3>>();
@@ -460,6 +474,7 @@ private:
   std::map<MeshId, MeshRecord> meshes_;
   MaterialId next_material_ = 1;
   std::map<MaterialId, MaterialSnapshot> materials_;
+  std::map<MaterialId, MaterialSnapshot> material_overrides_;
   TextureId next_texture_ = 1;
   std::map<TextureId, TextureSnapshot> textures_;
 };

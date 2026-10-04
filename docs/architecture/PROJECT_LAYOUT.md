@@ -97,6 +97,26 @@ the affected hulls. `validation/morph_test.cpp` compares all scene pipelines
 against CPU-deformed rest geometry; `adapters/viewport/check_morph.cmake`
 checks a Hydra-fed captured morph sequence and its upload counters.
 
+Evaluated expression overrides also live in `RenderWorld`, in the existing
+render-world target and public header. `SetMeshMorphWeightsOverride` keeps a
+transient weight array apart from the scene weights;
+`SetMaterialParametersOverride` keeps a transient material value apart from
+the scene material. Commit publishes the overrides with independent fast
+revisions and the same static arrays. Clear restores the latest scene
+values. Target edits, weight-count edits, structural material edits and
+removal invalidate the affected override. Material overrides reject
+`IsStructuralChange`; weight overrides require finite values and the
+resident scene weight count. Identical effective values write no GPU buffer.
+The Hydra delegate forwards these operations under its scene mutex using
+ids from `CommitScene`; no USD authoring, scene-index read or Hydra sync is
+involved in a host override. Scene evaluation can continue underneath it.
+The host supplies evaluated subshape weights and normalized material values;
+source expression semantics and inbetween evaluation remain outside core.
+These operations still precede commit/extraction; they do not implement late
+latching after draw extraction. `validation/expression_test.cpp` verifies
+state isolation and persistent Vulkan draws; the Hydra material and skinning
+checks verify the direct host route and restoration after scene sync.
+
 ## 4. Dependency directions
 
 ```text

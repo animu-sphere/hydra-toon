@@ -319,6 +319,26 @@ public:
     world_.SetTimeSeconds(seconds);
   }
 
+  bool SetMeshMorphWeightsOverride(Toon::MeshId mesh, std::vector<float> weights) {
+    std::scoped_lock lock(mutex_);
+    return world_.SetMeshMorphWeightsOverride(mesh, std::move(weights));
+  }
+
+  void ClearMeshMorphWeightsOverride(Toon::MeshId mesh) {
+    std::scoped_lock lock(mutex_);
+    world_.ClearMeshMorphWeightsOverride(mesh);
+  }
+
+  bool SetMaterialParametersOverride(Toon::MaterialId material, const Toon::ToonMaterial& values) {
+    std::scoped_lock lock(mutex_);
+    return world_.SetMaterialParametersOverride(material, values);
+  }
+
+  void ClearMaterialParametersOverride(Toon::MaterialId material) {
+    std::scoped_lock lock(mutex_);
+    world_.ClearMaterialParametersOverride(material);
+  }
+
   Toon::LightId CreateLight() {
     std::scoped_lock lock(mutex_);
     return world_.CreateLight();
@@ -1785,6 +1805,22 @@ Toon::FrameSnapshot HdToonRenderDelegate::CommitScene() {
 void HdToonRenderDelegate::CommitScene(Toon::FrameSnapshot& snapshot) {
   impl_->state->SetTimeSeconds(RequestedTimeSeconds(*this));
   impl_->state->Commit(snapshot);
+}
+
+bool HdToonRenderDelegate::SetMeshMorphWeightsOverride(Toon::MeshId mesh, std::vector<float> weights) {
+  return impl_->state->SetMeshMorphWeightsOverride(mesh, std::move(weights));
+}
+
+void HdToonRenderDelegate::ClearMeshMorphWeightsOverride(Toon::MeshId mesh) {
+  impl_->state->ClearMeshMorphWeightsOverride(mesh);
+}
+
+bool HdToonRenderDelegate::SetMaterialParametersOverride(Toon::MaterialId material, const Toon::ToonMaterial& values) {
+  return impl_->state->SetMaterialParametersOverride(material, values);
+}
+
+void HdToonRenderDelegate::ClearMaterialParametersOverride(Toon::MaterialId material) {
+  impl_->state->ClearMaterialParametersOverride(material);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

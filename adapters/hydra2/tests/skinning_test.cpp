@@ -400,7 +400,29 @@ int main(int argc, char** argv) {
     return 1;
   }
   if (argc == 3 && !GpuNormals({bind, moved, half, lifted}, argv[2])) return 1;
-  const auto before_edit = *lifted_meshes.linear;
+  // The host can submit evaluated expression weights with no SetTime,
+  // USD authoring, scene-index update or SyncAll between these commits.
+  const auto expression_id = lifted_meshes.linear->id;
+  const auto expression_weights = *Find(half).linear->morph_weights;
+  if (!Check(delegate.SetMeshMorphWeightsOverride(expression_id, expression_weights),
+          "direct host morph override rejected")) return 1;
+  const auto expression = delegate.CommitScene();
+  const auto expression_mesh = Find(expression).linear;
+  if (!Check(expression_mesh && *expression_mesh->morph_weights == expression_weights &&
+          expression_mesh->points == lifted_meshes.linear->points &&
+          expression_mesh->normals == lifted_meshes.linear->normals &&
+          expression_mesh->morph_revision == lifted_meshes.linear->morph_revision &&
+          expression_mesh->pose_revision == lifted_meshes.linear->pose_revision,
+          "direct expression override touched slow state or failed to reach the host")) return 1;
+  const auto expression_synced = sync(3.0);
+  if (!Check(*Find(expression_synced).linear->morph_weights == expression_weights,
+          "Hydra sync displaced a host expression override")) return 1;
+  delegate.ClearMeshMorphWeightsOverride(expression_id);
+  const auto expression_cleared = delegate.CommitScene();
+  if (!Check(*Find(expression_cleared).linear->morph_weights == *lifted_meshes.linear->morph_weights,
+          "clearing a direct expression did not restore Hydra weights")) return 1;
+  if (argc == 3 && !GpuNormals({bind, moved, expression, expression_cleared}, argv[2])) return 1;
+  const auto before_edit = *Find(expression_cleared).linear;
   const auto normal_attr = stage->GetPrimAtPath(SdfPath("/Root/Linear/lift"))
       .GetAttribute(TfToken("normalOffsets"));
   normal_attr.Set(VtVec3fArray{GfVec3f(-0.4F, 0, 0.4F)});
