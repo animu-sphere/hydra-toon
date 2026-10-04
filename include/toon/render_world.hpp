@@ -96,6 +96,28 @@ using PixelArray = std::shared_ptr<const std::vector<std::uint8_t>>;
 using InfluenceArray = std::shared_ptr<const std::vector<ToonJointInfluence>>;
 using MatrixArray = std::shared_ptr<const std::vector<Matrix4>>;
 
+// Sparse morph contributions in rest space, evaluated before skinning.
+// A point's range indexes offsets; each offset indexes the small weight array.
+struct ToonMorphOffset {
+  Float3 position;
+  std::uint32_t target = 0;
+  Float3 normal;
+  std::uint32_t padding = 0;
+  friend bool operator==(const ToonMorphOffset&, const ToonMorphOffset&) = default;
+};
+struct ToonMorphRange {
+  std::uint32_t first = 0;
+  std::uint32_t count = 0;
+  friend bool operator==(const ToonMorphRange&, const ToonMorphRange&) = default;
+};
+struct ToonMorph {
+  std::vector<ToonMorphOffset> offsets;
+  std::vector<ToonMorphRange> ranges;
+};
+using MorphOffsetArray = std::shared_ptr<const std::vector<ToonMorphOffset>>;
+using MorphRangeArray = std::shared_ptr<const std::vector<ToonMorphRange>>;
+using WeightArray = std::shared_ptr<const std::vector<float>>;
+
 // How a mesh's points follow a skeleton, as UsdSkel's linear blend skinning
 // states it. Structural: it changes when the binding does, not with a pose.
 struct ToonSkin {
@@ -161,6 +183,11 @@ struct MeshSnapshot {
   MatrixArray joints;
   Matrix4 skeleton_to_mesh;
   std::uint64_t pose_revision = 0;
+  MorphOffsetArray morph_offsets;
+  MorphRangeArray morph_ranges;
+  std::uint64_t morph_revision = 0;
+  WeightArray morph_weights;
+  std::uint64_t morph_weights_revision = 0;
   Matrix4 transform;
   Float3 color{0.5F, 0.5F, 0.5F};
   // 0 when the mesh binds no material; it then draws its colour, unlit.
@@ -172,6 +199,7 @@ struct MeshSnapshot {
 // topology reaches and a joint for every index they name. Otherwise it draws
 // its points as they are.
 [[nodiscard]] bool IsSkinned(const MeshSnapshot& mesh);
+[[nodiscard]] bool IsMorphed(const MeshSnapshot& mesh);
 
 // The material model a material's source selected (material policy §3).
 enum class ToonShadingModel { PreviewSurface, MToon, MMD };
@@ -371,6 +399,10 @@ public:
   // or pose a mesh already has changes nothing.
   void SetMeshSkin(MeshId mesh, ToonSkin skin);
   void SetMeshSkinPose(MeshId mesh, ToonSkinPose pose);
+  // Invalid ranges/non-finite values are ignored. Empty targets remove morphs.
+  // Weight changes never dirty rest geometry, normals, skin or targets.
+  void SetMeshMorph(MeshId mesh, ToonMorph morph);
+  void SetMeshMorphWeights(MeshId mesh, std::vector<float> weights);
   void SetView(const ToonView& view);
   // The scene's linear unit in metres, 1 until set. A value that is not
   // positive and finite changes nothing.

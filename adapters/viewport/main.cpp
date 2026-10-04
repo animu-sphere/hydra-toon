@@ -859,6 +859,8 @@ int RunViewport(int argc, char** argv) {
               << " textures=" << statistics.texture_uploads
               << " skins=" << statistics.skin_uploads
               << " poses=" << statistics.pose_writes
+              << " morphs=" << statistics.morph_uploads
+              << " morph_weights=" << statistics.morph_weight_writes
               << " overlay_textures=" << statistics.overlay_texture_uploads
               << '\n'
               << "Draw calls: unlit=" << statistics.draws.unlit

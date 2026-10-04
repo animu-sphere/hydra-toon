@@ -95,6 +95,9 @@ struct PresentStatistics {
   std::uint64_t texture_uploads = 0;
   std::uint64_t skin_uploads = 0;
   std::uint64_t pose_writes = 0;
+  // Static sparse morph targets uploaded, and small weight buffers written.
+  std::uint64_t morph_uploads = 0;
+  std::uint64_t morph_weight_writes = 0;
   // Overlay textures uploaded: one per new texture or pixel change.
   std::uint64_t overlay_texture_uploads = 0;
   // The last frame RenderFrame recorded.

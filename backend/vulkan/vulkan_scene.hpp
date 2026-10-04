@@ -59,7 +59,10 @@ constexpr std::uint32_t kDrawBlend = 32U;
 // mtoon_opaque turns its alpha into samples: a Mask fragment returns its
 // coverage of the cutoff rather than being kept or cut away whole.
 constexpr std::uint32_t kDrawAlphaToCoverage = 64U;
+constexpr std::uint32_t kDrawMorphed = 128U;
 constexpr std::uint32_t kInfluenceCountShift = 8U;
+static_assert(sizeof(ToonMorphOffset) == 32);
+static_assert(sizeof(ToonMorphRange) == 8);
 
 // An MToon slot's outline width mode, as mtoon_outline reads it; 0 draws
 // no outline.
@@ -503,6 +506,8 @@ public:
     return pose_writes_;
   }
 
+  [[nodiscard]] std::uint64_t morph_uploads() const { return morph_uploads_; }
+  [[nodiscard]] std::uint64_t morph_weight_writes() const { return morph_weight_writes_; }
 private:
   struct Entry {
     HostBuffer vertices;
@@ -512,6 +517,12 @@ private:
     HostBuffer indices;
     HostBuffer influences;
     HostBuffer joints;
+    HostBuffer morph_offsets;
+    HostBuffer morph_ranges;
+    HostBuffer morph_weights;
+    std::uint64_t morph_revision = 0;
+    std::uint64_t morph_weights_revision = 0;
+    VkDeviceSize morph_weight_bytes = 0;
     std::uint64_t points_revision = 0;
     std::uint64_t normals_revision = 0;
     std::uint64_t uvs_revision = 0;
@@ -523,6 +534,7 @@ private:
     bool has_uvs = false;
     // Whether this frame's draw skins the mesh, and the flags that say how.
     bool skinned = false;
+    bool morphed = false;
     std::uint32_t skin_flags = 0;
     // Allocated when the mesh is first skinned, from `skin_pools_[pool]`.
     VkDescriptorSet skin_set = VK_NULL_HANDLE;
@@ -536,8 +548,7 @@ private:
       std::string& detail);
   bool AllocateSkinSet(VkDescriptorSet& set, std::size_t& pool,
       std::string& detail);
-  void PointSkinSet(VkDescriptorSet set, VkBuffer influences,
-      VkBuffer joints);
+  void PointSkinSet(VkDescriptorSet set, const Entry* entry = nullptr);
   void Release(Entry& entry);
 
   VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
@@ -561,6 +572,8 @@ private:
   std::uint64_t point_uploads_ = 0;
   std::uint64_t skin_uploads_ = 0;
   std::uint64_t pose_writes_ = 0;
+  std::uint64_t morph_uploads_ = 0;
+  std::uint64_t morph_weight_writes_ = 0;
 };
 
 } // namespace Toon::vulkan_internal

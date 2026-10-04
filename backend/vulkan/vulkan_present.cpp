@@ -746,6 +746,8 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   statistics_.texture_uploads = textures_.uploads();
   statistics_.skin_uploads = meshes_.skin_uploads();
   statistics_.pose_writes = meshes_.pose_writes();
+  statistics_.morph_uploads = meshes_.morph_uploads();
+  statistics_.morph_weight_writes = meshes_.morph_weight_writes();
   statistics_.overlay_texture_uploads = overlay_.texture_uploads();
   // A capture copies this frame's image into a buffer the CPU reads; the
   // frame before it has completed, so the buffer is free to replace.

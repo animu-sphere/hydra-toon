@@ -38,13 +38,15 @@ struct UploadCounts {
   std::uint64_t textures = 0;
   std::uint64_t skins = 0;
   std::uint64_t poses = 0;
+  std::uint64_t morphs = 0;
+  std::uint64_t morph_weights = 0;
   std::uint64_t overlay_textures = 0;
 
   [[nodiscard]] static UploadCounts Of(const PresentStatistics& statistics);
   // Every scene upload or write of any kind; the overlay's are not the
   // scene's.
   [[nodiscard]] std::uint64_t scene() const {
-    return topology + points + materials + textures + skins + poses;
+    return topology + points + materials + textures + skins + poses + morphs + morph_weights;
   }
   friend UploadCounts operator-(const UploadCounts& after,
       const UploadCounts& before);

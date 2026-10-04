@@ -456,6 +456,8 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   statistics_.texture_uploads = textures_.uploads();
   statistics_.skin_uploads = meshes_.skin_uploads();
   statistics_.pose_writes = meshes_.pose_writes();
+  statistics_.morph_uploads = meshes_.morph_uploads();
+  statistics_.morph_weight_writes = meshes_.morph_weight_writes();
   statistics_.validation_message_count = validation_.message_count;
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;

@@ -74,6 +74,11 @@ MeshId RenderWorld::CreateMesh() {
   mesh.skin_revision = Stamp();
   mesh.joints = std::make_shared<const std::vector<Matrix4>>();
   mesh.pose_revision = Stamp();
+  mesh.morph_offsets = std::make_shared<const std::vector<ToonMorphOffset>>();
+  mesh.morph_ranges = std::make_shared<const std::vector<ToonMorphRange>>();
+  mesh.morph_weights = std::make_shared<const std::vector<float>>();
+  mesh.morph_revision = Stamp();
+  mesh.morph_weights_revision = Stamp();
   dirty_ = true;
   return id;
 }
@@ -209,6 +214,48 @@ void RenderWorld::SetMeshSkinPose(MeshId mesh, ToonSkinPose pose) {
       std::make_shared<const std::vector<Matrix4>>(std::move(pose.joints));
   snapshot.pose_revision = Stamp();
   dirty_ = true;
+}
+
+void RenderWorld::SetMeshMorph(MeshId mesh, ToonMorph morph) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr) return;
+  const auto finite = [](const Float3& v) {
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  };
+  for (const auto& offset : morph.offsets) {
+    if (!finite(offset.position) || !finite(offset.normal)) return;
+  }
+  for (const auto& range : morph.ranges) {
+    if (std::uint64_t{range.first} + range.count > morph.offsets.size()) return;
+  }
+  if (morph.offsets.empty()) morph.ranges.clear();
+  auto& snapshot = record->snapshot;
+  if (*snapshot.morph_offsets == morph.offsets &&
+      *snapshot.morph_ranges == morph.ranges) return;
+  snapshot.morph_offsets = std::make_shared<const std::vector<ToonMorphOffset>>(
+      std::move(morph.offsets));
+  snapshot.morph_ranges = std::make_shared<const std::vector<ToonMorphRange>>(
+      std::move(morph.ranges));
+  snapshot.morph_revision = Stamp();
+  dirty_ = true;
+}
+
+void RenderWorld::SetMeshMorphWeights(MeshId mesh, std::vector<float> weights) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || !std::all_of(weights.begin(), weights.end(),
+          [](float weight) { return std::isfinite(weight); })) return;
+  auto& snapshot = record->snapshot;
+  if (*snapshot.morph_weights == weights) return;
+  snapshot.morph_weights = std::make_shared<const std::vector<float>>(
+      std::move(weights));
+  snapshot.morph_weights_revision = Stamp();
+  dirty_ = true;
+}
+
+bool IsMorphed(const MeshSnapshot& mesh) {
+  return mesh.morph_offsets && !mesh.morph_offsets->empty() &&
+      mesh.morph_ranges && mesh.morph_ranges->size() >= mesh.index_bound &&
+      mesh.morph_weights && !mesh.morph_weights->empty();
 }
 
 bool IsSkinned(const MeshSnapshot& mesh) {

@@ -16,6 +16,17 @@ toon_configure_warnings(toon-render-world-test)
 target_link_libraries(toon-render-world-test PRIVATE Toon::RenderExtraction)
 add_test(NAME toon-render-world COMMAND toon-render-world-test)
 
+add_executable(toon-morph-test morph_test.cpp)
+toon_configure_warnings(toon-morph-test)
+target_link_libraries(toon-morph-test PRIVATE Toon::Vulkan)
+add_test(NAME toon-morph-state COMMAND toon-morph-test)
+if(TOON_WITH_VULKAN)
+  add_dependencies(toon-morph-test toon-renderer-shaders)
+  add_test(NAME toon-morph-gpu COMMAND toon-morph-test
+    "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-morph-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+endif()
+
 add_executable(toon-outline-bounds-test outline_bounds_test.cpp)
 toon_configure_warnings(toon-outline-bounds-test)
 target_link_libraries(toon-outline-bounds-test PRIVATE Toon::RenderExtraction)

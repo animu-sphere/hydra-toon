@@ -137,7 +137,8 @@ void OutlineBounds::Update(const MeshSnapshot& mesh) {
 bool OutlineBounds::ViewBounds(const MeshSnapshot& mesh, const ToonView& view,
     float width, ToonOutlineWidthMode mode, float meters_per_unit,
     Box& bounds, double& radius) const {
-  if (!rest_.valid || !std::isfinite(width) || width <= 0 ||
+  // Rest/joint envelopes do not enclose arbitrary signed morph weights.
+  if (IsMorphed(mesh) || !rest_.valid || !std::isfinite(width) || width <= 0 ||
       !std::isfinite(meters_per_unit) || meters_per_unit <= 0 ||
       !Affine(mesh.transform) || !Affine(view.view) ||
       !std::all_of(view.projection.m.begin(), view.projection.m.end(),

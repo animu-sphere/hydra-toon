@@ -3,7 +3,7 @@
 // hdToon's skinned meshes, through UsdImaging and usdSkelImaging as a host
 // drives them (design policy §11). skinning.usda's linear quad becomes a
 // skin and a pose; moving to a time where only the pose changes sets the
-// pose alone, and a blend shape weight change sets the points. The linear
+// pose alone, and a blend shape weight change sets only morph weights. The linear
 // quad's authored normals arrive as its normals computation's rest normals,
 // which the pose does not touch. Its dual quaternion quad runs
 // usdSkelImaging's CPU kernel instead. No GPU is used: the check reads the
@@ -50,8 +50,20 @@ std::vector<Toon::Float3> Skinned(const Toon::MeshSnapshot& mesh) {
   std::vector<Toon::Float3> points;
   const std::uint32_t count = mesh.influences_per_point;
   for (std::size_t point = 0; point < mesh.points->size(); ++point) {
+    Toon::Float3 rest = (*mesh.points)[point];
+    if (Toon::IsMorphed(mesh)) {
+      const auto range = (*mesh.morph_ranges)[point];
+      for (std::uint32_t i = 0; i < range.count; ++i) {
+        const auto& offset = (*mesh.morph_offsets)[range.first + i];
+        if (offset.target >= mesh.morph_weights->size()) continue;
+        const float weight = (*mesh.morph_weights)[offset.target];
+        rest.x += offset.position.x * weight;
+        rest.y += offset.position.y * weight;
+        rest.z += offset.position.z * weight;
+      }
+    }
     const Toon::Float3 bound =
-        Transform(mesh.geom_bind, (*mesh.points)[point]);
+        Transform(mesh.geom_bind, rest);
     Toon::Float3 sum;
     for (std::uint32_t index = 0; index < count; ++index) {
       const Toon::ToonJointInfluence& influence =
@@ -191,14 +203,27 @@ int main(int argc, char** argv) {
   }
   const Toon::MeshSnapshot linear_moved = *moved_meshes.linear;
 
+  const auto half = sync(2.5);
+  const auto half_meshes = Find(half);
+  if (!Check(half_meshes.linear != nullptr &&
+          std::abs(Skinned(*half_meshes.linear)[0].z - 0.75F) < 1e-4F &&
+          half_meshes.linear->points_revision == linear_moved.points_revision &&
+          half_meshes.linear->morph_revision == linear_moved.morph_revision,
+          "UsdSkel inbetween weights must deform the GPU targets without editing rest geometry")) {
+    return 1;
+  }
+
   // Only the blend shape weight changes.
   const Toon::FrameSnapshot lifted = sync(3.0);
   const Meshes lifted_meshes = Find(lifted);
   if (!Check(lifted_meshes.linear != nullptr, "the linear quad must remain") ||
-      !Check(lifted_meshes.linear->points_revision !=
+      !Check(lifted_meshes.linear->points_revision ==
                      linear_moved.points_revision &&
-                 (*lifted_meshes.linear->points)[0].z == 1.0F,
-          "a blend shape weight must move the rest points") ||
+                 lifted_meshes.linear->morph_revision == linear_moved.morph_revision &&
+                 lifted_meshes.linear->morph_weights_revision != linear_moved.morph_weights_revision &&
+                 (*lifted_meshes.linear->points)[0].z == 0.0F &&
+                 Skinned(*lifted_meshes.linear)[0].z == 1.0F,
+          "a blend shape weight must move only morph weights, preserving rest points and targets") ||
       !Check(lifted_meshes.linear->authored_normals &&
                  lifted_meshes.linear->normals_revision ==
                      linear_moved.normals_revision,

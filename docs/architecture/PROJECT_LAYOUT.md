@@ -68,6 +68,25 @@ placement rule; it does not say the component exists.
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
 
+The sparse morph representation lives in `include/toon/render_world.hpp`:
+`ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,
+while weights have an independent revision. `SetMeshMorphWeights` does not
+change geometry, skin or target revisions. The Hydra adapter normalizes
+usdSkelImaging's aggregator arrays once per input revision and forwards its
+evaluated weights separately; it does not define expression semantics.
+
+The Vulkan mesh cache owns per-mesh target, range and weight storage buffers
+alongside influences and joints in descriptor set 1 (five vertex bindings).
+All scene shaders evaluate morph offsets before skinning in `skinning.slang`.
+The device capability probe requires seven storage-buffer bindings including
+the material/frame buffers. Offscreen and presentation statistics expose
+`morph_uploads` and `morph_weight_writes`; the viewport shows both in its
+upload panel. Rest/joint outline envelopes cannot certify a morphed hull,
+and morphed triangles cannot certify occlusion, so both conservatively keep
+the affected hulls. `validation/morph_test.cpp` compares all scene pipelines
+against CPU-deformed rest geometry; `adapters/viewport/check_morph.cmake`
+checks a Hydra-fed captured morph sequence and its upload counters.
+
 ## 4. Dependency directions
 
 ```text

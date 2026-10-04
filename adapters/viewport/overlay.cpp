@@ -186,6 +186,7 @@ UploadCounts UploadCounts::Of(const PresentStatistics& statistics) {
   return {statistics.topology_uploads, statistics.point_uploads,
       statistics.material_writes, statistics.texture_uploads,
       statistics.skin_uploads, statistics.pose_writes,
+      statistics.morph_uploads, statistics.morph_weight_writes,
       statistics.overlay_texture_uploads};
 }
 
@@ -193,6 +194,7 @@ UploadCounts operator-(const UploadCounts& after, const UploadCounts& before) {
   return {after.topology - before.topology, after.points - before.points,
       after.materials - before.materials, after.textures - before.textures,
       after.skins - before.skins, after.poses - before.poses,
+      after.morphs - before.morphs, after.morph_weights - before.morph_weights,
       after.overlay_textures - before.overlay_textures};
 }
 
@@ -406,6 +408,8 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
       CountRow("textures", last.textures, total.textures);
       CountRow("skins", last.skins, total.skins);
       CountRow("poses", last.poses, total.poses);
+      CountRow("morph targets", last.morphs, total.morphs);
+      CountRow("morph weights", last.morph_weights, total.morph_weights);
       CountRow("overlay textures", last.overlay_textures,
           total.overlay_textures);
       ImGui::EndTable();
