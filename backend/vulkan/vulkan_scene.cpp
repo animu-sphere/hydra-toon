@@ -168,7 +168,7 @@ bool CreateScenePipeline(VkDevice device,
   VkVertexInputBindingDescription bindings[3]{};
   VkVertexInputAttributeDescription attributes[3]{};
   for (std::uint32_t stream = 0; stream < description.vertex_streams;
-       ++stream) {
+      ++stream) {
     bindings[stream].binding = stream;
     bindings[stream].stride = stream_strides[stream];
     bindings[stream].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
@@ -1453,7 +1453,7 @@ void MeshCache::Release(Entry& entry) {
 
 void MeshCache::Record(VkCommandBuffer command,
     const ScenePipelines& pipelines, const MaterialCache& materials,
-    const DrawList& draws, SceneRecord* record) {
+    const DrawList& draws, VkExtent2D extent, SceneRecord* record) {
   SceneRecord unused;
   SceneRecord& counts = record != nullptr ? *record : unused;
   const auto mark = [&](std::uint32_t part) {
@@ -1469,6 +1469,17 @@ void MeshCache::Record(VkCommandBuffer command,
     return material != nullptr && material->model == ToonShadingModel::MToon
                ? material
                : nullptr;
+  };
+  if (draws.outlines && draws.outline_occlusion_culling)
+    outline_occlusion_.Update(draws, extent.width, extent.height);
+  const auto hidden_outline = [&](const MeshSnapshot& mesh, const Entry& entry,
+                                  const MaterialCache::Entry& material) {
+    return (draws.outline_frustum_culling &&
+               entry.outline_bounds.OutsideView(mesh, draws.view, material.outline_width,
+                   material.outline_width_mode, draws.meters_per_unit)) ||
+           (draws.outline_occlusion_culling &&
+               outline_occlusion_.Occludes(mesh, entry.outline_bounds, draws.view,
+                   material.outline_width, material.outline_width_mode, draws.meters_per_unit));
   };
 
   vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1594,10 +1605,7 @@ void MeshCache::Record(VkCommandBuffer command,
       }
       if (outline && (!draws.outlines || !material->outline ||
                          (found->second.has_uvs && material->zero_width_texture) ||
-                         (draws.outline_frustum_culling &&
-                             found->second.outline_bounds.OutsideView(mesh, draws.view,
-                                 material->outline_width, material->outline_width_mode,
-                                 draws.meters_per_unit)))) {
+                         hidden_outline(mesh, found->second, *material))) {
         continue;
       }
       draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
@@ -1635,10 +1643,7 @@ void MeshCache::Record(VkCommandBuffer command,
     ++counts.transparent;
     if (draws.outlines && material.outline &&
         (!entry.has_uvs || !material.zero_width_texture) &&
-        (!draws.outline_frustum_culling ||
-            !entry.outline_bounds.OutsideView(mesh, draws.view,
-                material.outline_width, material.outline_width_mode,
-                draws.meters_per_unit))) {
+        !hidden_outline(mesh, entry, material)) {
       draw_mtoon(pipelines.mtoon_outline, mesh, entry, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;

@@ -209,9 +209,17 @@ reaches into it. World widths use the stage unit; screen widths include
 the projection and vertex depth. The bounds are conservative for width
 textures, so partially zero maps and animated UVs retain their full-width
 envelope. Hulls crossing the near/far planes are retained; fully clipped
-hulls are omitted before submission. Occlusion omission is not performed.
+hulls are omitted before submission.
 
-`--outline-culling off` retains ordinary hull submission for a reference
+Small rigid opaque meshes can also hide hulls. One triangle must cover the
+entire expanded hull, including raster margins, and its farthest depth
+must be nearer than the hull's nearest depth. Unlit fallback meshes and
+double-sided Opaque MToon surfaces can establish coverage; Mask, Blend,
+skinned and single-sided MToon meshes cannot. The current pose, camera,
+blocker transform and material are used each frame. Combined triangle
+coverage and avatar self-occlusion are not tested.
+
+`--outline-culling off` disables frustum and occlusion omission for a reference
 capture; the default is `on`. Keep the time, camera and samples identical
 when comparing it with `on`. `Hull draws:` counts submitted hulls after
 omission, whereas the scene summary counts materials requesting a hull.
@@ -220,6 +228,8 @@ The comparison rewrites no material and changes no uploads.
 records controlled colour/depth checks and representative VRM captures.
 [Renderer report 29](../reports/renderer/29-2026-10-04-outline-depth-clip.md)
 adds near/far-plane checks and a skinned viewport return sequence.
+[Renderer report 30](../reports/renderer/30-2026-10-04-outline-occlusion.md)
+adds current-frame opaque occlusion and reveal/return checks.
 
 With `vrmImaging` registered in the runtime/plugin environment, compare
 the committed depth-plane fixture at 1x/4x MSAA:
@@ -231,6 +241,17 @@ python scripts/evaluate_outline_depth.py --viewport <viewport-usd build>/adapter
 The driver checks MToon/GPU-skinning selection, hull counts, uploads,
 boundary outline coverage and culling-on/off image equality. Captures,
 logs and a command/hash summary go to `build/outline-depth/`, or `--output`.
+
+With the same plugin environment, evaluate opaque occlusion at 1x/4x:
+
+```sh
+python scripts/evaluate_outline_occlusion.py --viewport <viewport-usd build>/adapters/viewport/toon-viewport
+```
+
+The driver checks every authored reveal/return pose against ordinary hull
+submission, visible outline pixels, sample counts and uploads. A 33-frame
+run additionally checks the returning image and pose-only updates; it
+captures its final frame. Evidence goes to `build/outline-occlusion/`.
 
 The overlay's `Lighting and material` section selects scene lighting or
 the camera key, adjusts direct and ambient strength separately, and moves

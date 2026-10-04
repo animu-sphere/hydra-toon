@@ -38,6 +38,8 @@ struct DrawList {
   bool outlines = true;
   // Evaluation reference: disable conservative six-plane frustum omission.
   bool outline_frustum_culling = true;
+  // Current-frame opaque-triangle occlusion; no history or GPU readback.
+  bool outline_occlusion_culling = true;
   std::vector<MeshSnapshot> draws;
   // Every material of the snapshot, ordered by id, so a consumer keeps one
   // parameter slot per material whether or not a draw binds it this frame.
@@ -64,6 +66,7 @@ public:
       float width, ToonOutlineWidthMode mode, float meters_per_unit) const;
 
 private:
+  friend class OutlineOcclusion;
   struct Box {
     std::array<double, 3> low{};
     std::array<double, 3> high{};
@@ -74,9 +77,35 @@ private:
   double min_weight_ = 0;
   double max_weight_ = 0;
   bool valid_skin_ = false;
+  [[nodiscard]] bool ViewBounds(const MeshSnapshot& mesh, const ToonView& view,
+      float width, ToonOutlineWidthMode mode, float meters_per_unit,
+      Box& bounds, double& radius) const;
   std::uint64_t points_revision_ = 0;
   std::uint64_t topology_revision_ = 0;
   std::uint64_t skin_revision_ = 0;
+};
+
+// A bounded set of small, rigid opaque occluders. Mask, Blend, skinned and
+// single-sided MToon meshes cannot establish full coverage here. A single
+// triangle must cover the entire expanded hull; triangle unions are not used.
+class OutlineOcclusion {
+public:
+  void Update(const DrawList& draws, std::uint32_t width, std::uint32_t height);
+  [[nodiscard]] bool Occludes(const MeshSnapshot& mesh, const OutlineBounds& bounds,
+      const ToonView& view, float width, ToonOutlineWidthMode mode,
+      float meters_per_unit) const;
+
+private:
+  struct Triangle {
+    MeshId mesh = 0;
+    std::array<std::array<double, 3>, 3> points{};
+    double error = 0;
+  };
+  // Fixed storage and work limit, independent of avatar vertex counts.
+  std::array<Triangle, 128> triangles_{};
+  std::size_t count_ = 0;
+  double pixel_margin_ = 0;
+  ToonView view_;
 };
 
 } // namespace Toon

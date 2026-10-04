@@ -362,7 +362,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   }
   BeginSceneRendering(command_, attachments, {width_, height_});
   vulkan_internal::SceneRecord record;
-  meshes_.Record(command_, pipelines_, materials_, draws, &record);
+  meshes_.Record(command_, pipelines_, materials_, draws, {width_, height_}, &record);
   statistics_.outline_draws = record.hulls;
   vkCmdEndRendering(command_);
 

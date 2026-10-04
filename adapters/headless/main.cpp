@@ -1657,6 +1657,137 @@ Check OutlineDepthClipCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", "384 animated near/far-plane poses at 1x/4x, Opaque/Mask/Blend with and without depth writes, world/screen widths and perspective/orthographic views: identical colour/depth, 64 hull omissions and returning boundary silhouettes; pose-only updates, clean Vulkan validation"};
 }
 
+Check OutlineOcclusionCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.outline.occlusion";
+  std::string detail;
+  unsigned comparisons = 0, omissions = 0, visible = 0;
+  for (const unsigned samples : {1U, 4U}) {
+    Toon::FrameStatus status = Toon::FrameStatus::Fail;
+    Toon::RenderOptions options;
+    options.samples = samples;
+    auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+    if (!renderer)
+      return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+    Toon::RenderWorld world;
+    const auto mesh = AddOctahedron(world);
+    Toon::Matrix4 transform;
+    transform.m[0] = transform.m[5] = transform.m[10] = 0.2F;
+    world.SetMeshTransform(mesh, transform);
+    Toon::ToonSkin skin;
+    skin.influences_per_point = 1;
+    skin.constant = true;
+    skin.influences = {{0, 1}};
+    world.SetMeshSkin(mesh, skin);
+    const auto material = world.CreateMaterial();
+    world.SetMeshMaterial(mesh, material);
+    Toon::ToonMaterial toon;
+    toon.model = Toon::ToonShadingModel::MToon;
+    toon.base_color = toon.mtoon.shade_color = {1, 0, 0};
+    toon.outline = true;
+    toon.outline_width = 0.04F;
+    toon.outline_color = {0, 1, 0};
+    toon.mtoon.outline_lighting_mix = 0;
+    const auto blocker = world.CreateMesh();
+    world.SetMeshPoints(blocker, {{-0.8F, -0.8F, 0}, {0.8F, -0.8F, 0}, {0, 0.8F, 0}});
+    world.SetMeshTopology(blocker, {0, 1, 2});
+    world.SetMeshColor(blocker, {0, 0, 1});
+    const auto blocker_material = world.CreateMaterial();
+    world.SetMeshMaterial(blocker, blocker_material);
+    Toon::ColorProduct culled, reference, surface;
+    Toon::DepthProduct depth, reference_depth;
+    for (unsigned variant = 0; variant < 8; ++variant) {
+      Toon::ToonMaterial cover;
+      cover.model = variant == 0 ? Toon::ToonShadingModel::PreviewSurface : Toon::ToonShadingModel::MToon;
+      cover.double_sided = variant != 5;
+      cover.base_color = cover.mtoon.shade_color = {0, 0, 1};
+      cover.alpha_mode = variant == 2 ? Toon::ToonAlphaMode::Mask : variant == 3 || variant == 4 ? Toon::ToonAlphaMode::Blend
+                                                                                                 : Toon::ToonAlphaMode::Opaque;
+      cover.alpha = variant == 2 ? 0.25F : variant == 3 || variant == 4 ? 0.6F
+                                                                        : 1;
+      cover.mtoon.transparent_with_z_write = variant == 4;
+      world.SetMaterial(blocker_material, cover);
+      world.SetMeshSkin(blocker, variant == 7 ? skin : Toon::ToonSkin{});
+      if (variant == 7) {
+        Toon::ToonSkinPose pose;
+        pose.joints.resize(1);
+        world.SetMeshSkinPose(blocker, pose);
+      }
+      for (unsigned alpha_variant = 0; alpha_variant < 4; ++alpha_variant) {
+        for (const auto mode : {Toon::ToonOutlineWidthMode::World, Toon::ToonOutlineWidthMode::Screen}) {
+          toon.mtoon.outline_width_mode = mode;
+          toon.outline_width = mode == Toon::ToonOutlineWidthMode::World ? 0.04F : 0.02F;
+          // Exercise every target alpha route, including transparent depth writes.
+          toon.alpha_mode = alpha_variant == 0 ? Toon::ToonAlphaMode::Opaque : alpha_variant == 1 ? Toon::ToonAlphaMode::Mask
+                                                                                                  : Toon::ToonAlphaMode::Blend;
+          toon.alpha = alpha_variant >= 2 ? 0.6F : 1;
+          toon.mtoon.transparent_with_z_write = alpha_variant == 3;
+          world.SetMaterial(material, toon);
+          for (const bool perspective : {false, true}) {
+            Toon::ToonView view;
+            view.projection.m[10] = -0.2F;
+            if (perspective) {
+              view.projection.m[10] = -4.5F / 3.5F;
+              view.projection.m[14] = -4.0F / 3.5F;
+              view.projection.m[11] = -1;
+              view.projection.m[15] = 0;
+            }
+            world.SetView(view);
+            const std::array<float, 7> positions{0, 0.2F, 0.4F, 0.7F, 0.4F, 0.2F, 0};
+            for (std::size_t phase = 0; phase < positions.size(); ++phase) {
+              Toon::ToonSkinPose pose;
+              pose.joints.resize(1);
+              pose.joints[0].m[12] = positions[phase] / 0.2F;
+              pose.joints[0].m[14] = -2 / 0.2F;
+              world.SetMeshSkinPose(mesh, pose);
+              Toon::Matrix4 blocker_transform;
+              blocker_transform.m[12] = phase == 3 ? 3.0F : 0;
+              blocker_transform.m[14] = phase == 2 ? -3.0F : -1.0F;
+              if (variant == 6)
+                blocker_transform.m[0] = -1; // reversed winding, unculled opaque
+              world.SetMeshTransform(blocker, blocker_transform);
+              auto draws = Toon::ExtractDrawList(world.Commit());
+              draws.outline_frustum_culling = false;
+              if (!renderer->Render(draws, 64, 64, culled, depth, detail))
+                return {id, "fail", detail};
+              const auto before = renderer->statistics();
+              if (before.samples != samples)
+                return {id, "skip", "device does not offer requested MSAA count"};
+              draws.outline_occlusion_culling = false;
+              if (!renderer->Render(draws, 64, 64, reference, reference_depth, detail))
+                return {id, "fail", detail};
+              const auto after = renderer->statistics();
+              if (after.outline_draws != 1 || culled.payload != reference.payload || depth.payload != reference_depth.payload)
+                return {id, "fail", "occlusion changed colour/depth at variant " + std::to_string(variant) + " phase " + std::to_string(phase)};
+              if (before.point_uploads != after.point_uploads || before.topology_uploads != after.topology_uploads ||
+                  before.skin_uploads != after.skin_uploads || before.pose_writes != after.pose_writes ||
+                  before.material_writes != after.material_writes || before.texture_uploads != after.texture_uploads)
+                return {id, "fail", "culling comparison changed resident resources"};
+              ++comparisons;
+              omissions += before.outline_draws == 0 ? 1U : 0U;
+              if (phase == 0 && (variant == 0 || variant == 1 || variant == 6) && before.outline_draws != 0)
+                return {id, "fail", "a fully covered hull was not omitted"};
+              if ((phase == 2 || phase == 3 || variant >= 2 && variant <= 5 || variant == 7) && before.outline_draws != 1)
+                return {id, "fail", "uncertain coverage or current motion incorrectly suppressed a hull"};
+              if (phase == 3) {
+                draws.outlines = false;
+                if (!renderer->Render(draws, 64, 64, surface, reference_depth, detail))
+                  return {id, "fail", detail};
+                visible += culled.payload != surface.payload ? 1U : 0U;
+              }
+            }
+          }
+        }
+      }
+    }
+    const auto& statistics = renderer->statistics();
+    if (statistics.point_uploads != 2 || statistics.topology_uploads != 2 || statistics.validation_message_count)
+      return {id, "fail", "motion changed geometry uploads or emitted Vulkan validation messages"};
+  }
+  if (!omissions || !visible)
+    return {id, "fail", "occlusion evidence needs hidden and visible returning silhouettes"};
+  return {id, "pass", std::to_string(comparisons) + " animated 1x/4x colour/depth comparisons, " + std::to_string(omissions) + " hidden hull omissions, Mask/Blend/single-sided/skinned blocker fallbacks, " + "moving and mirrored opaque occluders, world/screen widths and perspective/orthographic cameras; visible returns, no extra uploads or validation messages"};
+}
+
 // MToon's rim (material policy §4's MToon block), on AddOctahedron's diamond
 // with black lit and shade colours, so a pixel is the rim alone. A green
 // parametric rim of fresnel power 1, unlit, is 1 - N.V: near 0 at the
@@ -2480,6 +2611,7 @@ int main(int argc, char** argv) {
     checks.push_back(OutlineMotionCheck(shaders));
     checks.push_back(OutlineFrustumCheck(shaders));
     checks.push_back(OutlineDepthClipCheck(shaders));
+    checks.push_back(OutlineOcclusionCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));

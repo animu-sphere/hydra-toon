@@ -700,6 +700,7 @@ int RunViewport(int argc, char** argv) {
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
       draws.outline_frustum_culling = arguments.outline_culling;
+      draws.outline_occlusion_culling = arguments.outline_culling;
       draws.lighting = lighting;
       if (arguments.switch_samples && !uploads_at_switch &&
           session->statistics().frames_presented ==
