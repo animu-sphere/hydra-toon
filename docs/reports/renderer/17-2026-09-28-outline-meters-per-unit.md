@@ -9,7 +9,7 @@
   (`sha256:b982656c…`) and the published `vrmImaging` 0.10.0
   (`sha256:894fd616…`) of [report 12](12-2026-09-28-published-vrmimaging.md),
   unchanged
-- Occasion: the first part of [v0.2.0](../../roadmap/v0.2.0.md)'s outline
+- Occasion: the first part of [v0.2.0](../../releases/v0.2.0.md)'s outline
   stability item, after [report 16](16-2026-09-28-msaa.md); report 10 left a
   stage not in metres unchecked
 
@@ -145,7 +145,7 @@ Every difference lies within the avatar's box, 152–444 by 66–467 on the
   With the unit right, the hull lies 0.5 mm behind them and loses. Nothing
   here depends on the unit: an outline thinner than the depth buffer
   resolves at the camera's distance does the same in any stage, which is
-  [v0.2.0](../../roadmap/v0.2.0.md)'s outline stability to settle.
+  [v0.2.0](../../releases/v0.2.0.md)'s outline stability to settle.
 - **The residue is precision.** The 7 pixels that still differ lie on
   edges, by 1 to 20 levels: the scaled stage reaches the same image through
   another transform and camera distance.

@@ -1,5 +1,8 @@
 # Outline temporal sampling: translation, rotation and an animated VRM
 
+Follow-up: [report 32](32-2026-10-04-vrm-reproduction.md) records broader
+continuous capture, reference reproduction and the accepted v0.2.0 baseline.
+
 - Date: 2026-10-04
 - Environment: Windows, NVIDIA RTX A5000; existing MSVC 14.51 build,
   OpenStrata 0.23.14, canonical CY2026 OpenUSD 26.08 `lookdev` runtime

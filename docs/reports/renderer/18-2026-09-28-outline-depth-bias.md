@@ -7,7 +7,7 @@
   (`sha256:b982656c…`) and the published `vrmImaging` 0.10.0
   (`sha256:894fd616…`) of [report 12](12-2026-09-28-published-vrmimaging.md),
   unchanged
-- Occasion: [v0.2.0](../../roadmap/v0.2.0.md)'s outline stability item,
+- Occasion: [v0.2.0](../../releases/v0.2.0.md)'s outline stability item,
   after [report 17](17-2026-09-28-outline-meters-per-unit.md), whose §4
   found a hull thinner than the depth buffer resolves fighting its surface
 

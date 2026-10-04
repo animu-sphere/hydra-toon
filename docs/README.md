@@ -15,7 +15,7 @@ and the document is a bug. When a summary disagrees with
 | [design/](design/) | What the renderer is meant to be, and why. | [DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | [architecture/](architecture/) | Which targets exist, where code goes, and how they depend on each other. | [PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | [reference/](reference/) | What is implemented now, and on what it was measured. | [CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) · [SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
-| [roadmap/](roadmap/) | What is built next, milestone by milestone. | [README.md](roadmap/README.md) · [v0.2.0.md](roadmap/v0.2.0.md) · [v0.3.0.md](roadmap/v0.3.0.md) · [later.md](roadmap/later.md) |
+| [roadmap/](roadmap/) | What is built next, milestone by milestone. | [README.md](roadmap/README.md) · [v0.3.0.md](roadmap/v0.3.0.md) · [later.md](roadmap/later.md) |
 | [guides/](guides/) | How to perform a task. | [BUILDING.md](guides/BUILDING.md) |
 | [releases/](releases/) | What a released version established, and how a release is cut. | [README.md](releases/README.md) |
 | [reports/](reports/) | What was verified, under which conditions, and how. | [README.md](reports/README.md) |

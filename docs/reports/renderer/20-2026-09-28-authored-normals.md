@@ -9,7 +9,7 @@
   [report 19](19-2026-09-28-hydra-fed-viewport.md)
 - Occasion: a faint horizontal line across the avatar's bangs, seen in
   `usdview` and not in a three-vrm rendering of the same model; the normal
-  item of [v0.2.0](../../roadmap/v0.2.0.md#the-rest-of-mtoon)'s "The rest
+  item of [v0.2.0](../../releases/v0.2.0.md)'s "The rest
   of MToon" asks for authored normals
 
 ## TL;DR

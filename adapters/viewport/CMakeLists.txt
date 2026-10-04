@@ -128,6 +128,28 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    # All-frame capture must retain intermediate animation and its returning
+    # image, rather than repeatedly reading a stale final frame.
+    add_test(NAME toon-viewport-motion-sequence
+      COMMAND toon-viewport --hidden --frames 9 --vsync off --overlay off
+        --usd "${CMAKE_CURRENT_SOURCE_DIR}/tests/outline-motion.usda"
+        --time 1 --time-step 0.25 --expect-draws 1
+        --capture-sequence "${CMAKE_CURRENT_BINARY_DIR}/motion-sequence"
+        --camera-output "${CMAKE_CURRENT_BINARY_DIR}/motion-camera.json")
+    set_tests_properties(toon-viewport-motion-sequence PROPERTIES
+      PASS_REGULAR_EXPRESSION "frames read back: 9"
+      LABELS "gpu;viewport;presentation;hydra" SKIP_RETURN_CODE 77 TIMEOUT 60
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    add_test(NAME toon-viewport-motion-sequence-images
+      COMMAND "${CMAKE_COMMAND}"
+        "-DSEQUENCE=${CMAKE_CURRENT_BINARY_DIR}/motion-sequence"
+        "-DCAMERA=${CMAKE_CURRENT_BINARY_DIR}/motion-camera.json"
+        "-DREFERENCE=${CMAKE_CURRENT_BINARY_DIR}/motion-reference.ppm"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_sequence.cmake")
+    set_tests_properties(toon-viewport-motion-sequence-images PROPERTIES
+      DEPENDS "toon-viewport-motion-sequence;toon-viewport-motion-reference"
+      SKIP_REGULAR_EXPRESSION "SKIP:" LABELS "gpu;viewport;presentation;hydra")
     add_test(NAME toon-viewport-motion
       COMMAND toon-viewport --hidden --frames 9 --vsync off --overlay off
         --usd "${CMAKE_CURRENT_SOURCE_DIR}/tests/outline-motion.usda"

@@ -8,7 +8,7 @@
   `8936b58fe26e8c3da834b8f60b06511d537b4c63`, the revision `hydra-merlin`'s
   viewport pins
 - Occasion: the next item of
-  [v0.2.0](../../roadmap/v0.2.0.md)'s viewport foundation: frame time, CPU
+  [v0.2.0](../../releases/v0.2.0.md)'s viewport foundation: frame time, CPU
   and GPU timing and renderer statistics on screen
   ([design policy §24](../../design/DESIGN_POLICY.md#24-profiling),
   [§31](../../design/DESIGN_POLICY.md#31-evaluation-hosts))

@@ -408,3 +408,72 @@ In that tree, `ost renderer viewport --intent viewport-usd` picks the
 viewport among every executable of that name, and the `usdview` host test
 installs a copy under `adapters/hydra2/usdview-install/`, which it may
 launch instead; after a change, run `ost test` there before looking.
+
+## Local VRM reproduction comparison
+
+With the `viewport-usd` build, Pillow/NumPy and the runtime/VRM plugin
+environment registered, install the reference packages under ignored build
+output and start the local comparison page:
+
+```sh
+npm install --prefix build/vrm-reproduction/reference --ignore-scripts \
+    --no-audit --no-fund three@0.180.0 @pixiv/three-vrm@3.5.5
+python scripts/evaluate_vrm_reproduction.py \
+    --viewport <viewport-usd build>/adapters/viewport/toon-viewport \
+    --avatar <local VRM 0.x> --avatar <local VRM 1.0> \
+    --reference-root build/vrm-reproduction/reference/node_modules
+```
+
+Open the printed loopback URL and press `Capture reference set`. It loads
+local model bytes through three-vrm with the exported viewport camera;
+captures and metadata are saved locally. `--reuse` serves existing viewport
+captures after checking the asset hashes/order. The reference evaluates the
+raw rest pose and normalizes Lambert light intensity, not animated springs,
+constraints or expressions. Models, captures and npm modules are not committed.
+
+For the matching host capture, use the current installed `hdToon`, the same
+runtime and VRM plugin paths, and the host Python interpreter. Set
+`USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS=1`, then for each generated case:
+
+```sh
+# Export these environment variables using your shell's syntax.
+TOON_COMPARISON_CAMERA=<output>/avatar-0-full-camera.json
+TOON_HYDRA_IMAGE=<output>/avatar-0-full-usdview.png
+TOON_HYDRA_EVIDENCE=<output>/avatar-0-full-usdview-evidence.log
+TOON_EXPECT_MTOON=<expected material count>
+TOON_EXPECT_DRAWS=<expected mesh count>
+python <runtime>/bin/testusdview <same local avatar> --renderer Toon \
+    --testScript scripts/vrm_reproduction_usdview.py
+```
+
+This driver fixes the physical framebuffer and session camera and suppresses
+host decorations. An interactive renderer session can instead be composed
+by `ost renderer view <stage> --profile lookdev --with <VRM plugin>`, adding
+the same file-format, resolver and imaging plugins listed above. The OST
+renderer command supplies `hdToon`; `ost plugin view` is the plugin-focused
+alternative, not a prerequisite for a composed renderer session.
+
+Once all reference and usdview images exist, run
+`python scripts/evaluate_vrm_reproduction.py --summarize`. It writes
+`summary.json` and a comparison sheet, reporting foreground encoded-sRGB
+differences without a universal fidelity threshold.
+
+Continuous outline evaluation captures each presented frame, rather than
+starting a new process for every pose:
+
+```sh
+python scripts/evaluate_outline_sequence.py \
+    --viewport <viewport-usd build>/adapters/viewport/toon-viewport \
+    --avatar <local motion stage 1> --avatar <local motion stage 2>
+```
+
+Defaults are 61 frames, USD time codes 29 through 89, 20 MToon draws, 4x
+MSAA, full/close views at 640×720. Use `--time`, `--step`, `--frames` and
+`--draws` for another stage. Preview GIF duration assumes 30 time codes per
+second; evidence is indexed by USD time code. Each outlines-on frame must
+match an independent repeat, and geometry must upload only once.
+`--capture-sequence DIR` and `--camera-output FILE` require bounded
+`--frames N`; a sequence and `--screenshot` are mutually exclusive. Captures
+omit the overlay and perturb timing, so use separate uncaptured performance
+runs. [Report 32](../reports/renderer/32-2026-10-04-vrm-reproduction.md)
+records the accepted v0.2.0 baseline and its limitations.

@@ -131,6 +131,13 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    and transparent hulls. The viewport's `--outline-culling off` disables
    both decisions. `scripts/evaluate_outline_occlusion.py` evaluates the
    committed skinned reveal/return fixture through the actual viewport.
+   The Hydra adapter privately links OpenUSD `glf` to recognize typed
+   application helper lights. Its imported OpenGL dependency stays in the
+   host adapter; the renderer backend remains Vulkan. Bounded sequence
+   captures and camera JSON export stay in the viewport host.
+   `scripts/evaluate_outline_sequence.py` and
+   `scripts/evaluate_vrm_reproduction.py` consume those local captures;
+   Pillow, NumPy and three-vrm belong only to evaluation tooling.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 

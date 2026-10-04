@@ -6,7 +6,7 @@
   runtime; published `vrmImaging` 0.10.0 at
   `sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667`;
   the existing local `usdVrmFileFormat` and `usdVrmPackageResolver` bundles
-- Occasion: [v0.2.0](../../roadmap/v0.2.0.md)'s outline stability and cost
+- Occasion: [v0.2.0](../../releases/v0.2.0.md)'s outline stability and cost
   work, following the unit and depth fixes in reports
   [17](17-2026-09-28-outline-meters-per-unit.md) and
   [18](18-2026-09-28-outline-depth-bias.md)

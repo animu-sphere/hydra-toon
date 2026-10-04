@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [32](32-2026-10-04-vrm-reproduction.md) | Matched VRM 0.x/1.0 viewport, usdview and three-vrm captures; helper-light regression fix; every-frame repeat evidence over two motions; accepted 4x practical baseline |
 | [31](31-2026-10-04-outline-temporal.md) | Pixelwise temporal sampling: thin GPU-skinned hull translation/rotation at two distances, finite supersampled comparisons at 1x/4x/8x and signed outline differences over five VRM poses; 4x variation remains |
 | [24](24-2026-09-30-outline-stability-cost.md) | Animated outline evaluation: zero-width texture hull omission, upload synchronization, width and depth regressions, subpixel coverage at 1x/4x/8x, and VRM hull ON/OFF cost |
 | [23](23-2026-09-30-viewport-file-open.md) | Native Open File and Ctrl+O: scene replacement with GPU cache invalidation, Japanese paths and failed-open image retention; raw VRM opened through existing format and imaging plugins |

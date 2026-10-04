@@ -68,6 +68,9 @@ struct Arguments {
   std::optional<std::uint64_t> expect_draws;
   // Where the last of `frame_limit` frames is written, as a binary PPM.
   std::string screenshot;
+  // Bounded all-frame evidence; readbacks perturb timing, so benchmark separately.
+  std::string capture_sequence;
+  std::string camera_output;
   // The sample count asked for halfway through `frame_limit` frames, as the
   // number keys ask for one: the presentation test of a live change.
   std::optional<std::uint32_t> switch_samples;
@@ -183,6 +186,10 @@ Arguments ParseArguments(int argc, char** argv) {
       result.outlines = value == "on";
     } else if (option == "--screenshot") {
       result.screenshot = next();
+    } else if (option == "--capture-sequence") {
+      result.capture_sequence = next();
+    } else if (option == "--camera-output") {
+      result.camera_output = next();
     } else if (option == "--vsync") {
       const auto value = next();
       if (value != "on" && value != "off") {
@@ -227,6 +234,9 @@ Arguments ParseArguments(int argc, char** argv) {
                    "                           N meshes\n"
                    "  --screenshot <file.ppm>  write the last of --frames N\n"
                    "                           frames as it was presented\n"
+                   "  --capture-sequence DIR   capture every bounded frame\n"
+                   "                           (cannot benchmark with readbacks)\n"
+                   "  --camera-output FILE     final view/projection as JSON\n"
                    "Left drag orbits, middle or Shift+left drag pans; right\n"
                    "drag to the right zooms in, to the left zooms out; the\n"
                    "wheel dollies. F frames the scene and R\n"
@@ -248,6 +258,13 @@ Arguments ParseArguments(int argc, char** argv) {
   }
   if (!result.screenshot.empty() && result.frame_limit == 0) {
     throw std::invalid_argument("--screenshot needs --frames N");
+  }
+  if ((!result.capture_sequence.empty() || !result.camera_output.empty()) &&
+      result.frame_limit == 0) {
+    throw std::invalid_argument("capture sequence/camera output needs --frames N");
+  }
+  if (!result.capture_sequence.empty() && !result.screenshot.empty()) {
+    throw std::invalid_argument("choose --capture-sequence or --screenshot");
   }
   if (result.switch_samples) {
     if (*result.switch_samples == 0) {
@@ -374,6 +391,22 @@ void WritePpm(const std::string& path, const Toon::ColorProduct& color) {
   if (!output) {
     throw std::runtime_error("could not write the screenshot " + path);
   }
+}
+
+void WriteCamera(const std::string& path, const Toon::ToonView& view,
+    std::uint32_t width, std::uint32_t height) {
+  std::ofstream output(path);
+  output << std::setprecision(9) << "{\"width\":" << width
+         << ",\"height\":" << height << ",\"view\":[";
+  for (std::size_t i = 0; i < 16; ++i) {
+    output << (i ? "," : "") << view.view.m[i];
+  }
+  output << "],\"projection\":[";
+  for (std::size_t i = 0; i < 16; ++i) {
+    output << (i ? "," : "") << view.projection.m[i];
+  }
+  output << "]}\n";
+  if (!output) throw std::runtime_error("could not write camera " + path);
 }
 
 enum class Drag { None, Orbit, Pan, Dolly };
@@ -586,6 +619,9 @@ int RunViewport(int argc, char** argv) {
     std::string capture_path;
     std::uint64_t captures = 0;
     Toon::ColorProduct capture;
+    if (!arguments.capture_sequence.empty()) {
+      std::filesystem::create_directories(arguments.capture_sequence);
+    }
     // The count the last frame drew at, to report a change once it lands.
     std::uint32_t samples = session->statistics().samples;
     // Uploads before --switch-samples asked, which the change must not add
@@ -625,7 +661,7 @@ int RunViewport(int argc, char** argv) {
               Toon::viewport::Overlay::Hide(overlay_draws);
             }
           } else if (event.key == Toon::viewport::Key::P &&
-                     capture_path.empty()) {
+                     capture_path.empty() && arguments.capture_sequence.empty()) {
             capture_path =
                 "toon-viewport-" + std::to_string(captures + 1) + ".ppm";
             session->RequestCapture();
@@ -697,6 +733,10 @@ int RunViewport(int argc, char** argv) {
       cpu.extract = Milliseconds(overlay_start - extract_start);
       draws.view = camera.View(static_cast<float>(width) /
                                static_cast<float>(height));
+      if (!arguments.camera_output.empty() &&
+          session->statistics().frames_presented + 1 == arguments.frame_limit) {
+        WriteCamera(arguments.camera_output, draws.view, width, height);
+      }
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
       draws.outline_frustum_culling = arguments.outline_culling;
@@ -712,6 +752,14 @@ int RunViewport(int argc, char** argv) {
           session->statistics().frames_presented + 1 ==
               arguments.frame_limit) {
         capture_path = arguments.screenshot;
+        session->RequestCapture();
+      }
+      if (!arguments.capture_sequence.empty() && capture_path.empty()) {
+        std::ostringstream name;
+        name << "frame-" << std::setw(6) << std::setfill('0')
+             << session->statistics().frames_presented << ".ppm";
+        capture_path = (std::filesystem::path(arguments.capture_sequence) /
+                        name.str()).string();
         session->RequestCapture();
       }
       // The overlay shows the frame before this one: its statistics are
@@ -867,6 +915,10 @@ int RunViewport(int argc, char** argv) {
     if (!arguments.screenshot.empty() && captures == 0) {
       std::cerr << "toon-viewport: no frame was captured to "
                 << arguments.screenshot << '\n';
+      return 1;
+    }
+    if (!arguments.capture_sequence.empty() && captures != arguments.frame_limit) {
+      std::cerr << "toon-viewport: incomplete capture sequence\n";
       return 1;
     }
     if (arguments.expect_draws &&

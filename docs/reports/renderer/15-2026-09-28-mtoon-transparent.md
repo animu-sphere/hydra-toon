@@ -8,7 +8,7 @@
   (`sha256:894fd616…`) of [report 12](12-2026-09-28-published-vrmimaging.md)
 - Occasion: the first item of the
   [roadmap's priority](../../roadmap/README.md#priority), MToon transparency,
-  in [v0.2.0](../../roadmap/v0.2.0.md)
+  in [v0.2.0](../../releases/v0.2.0.md)
 
 ## TL;DR
 
