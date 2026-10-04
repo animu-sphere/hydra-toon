@@ -129,6 +129,23 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    add_executable(toon-viewport-morph-debug-test morph_debug_test.cpp hydra_scene.cpp)
+    toon_configure_warnings(toon-viewport-morph-debug-test)
+    target_link_libraries(toon-viewport-morph-debug-test PRIVATE
+      toon-hydra2-runtime Toon::Vulkan usdImaging usdGeom usd)
+    target_compile_definitions(toon-viewport-morph-debug-test PRIVATE
+      NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    add_dependencies(toon-viewport-morph-debug-test toon-renderer-shaders)
+    add_test(NAME toon-viewport-morph-debug-state COMMAND toon-viewport-morph-debug-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda")
+    add_test(NAME toon-viewport-morph-debug-gpu COMMAND toon-viewport-morph-debug-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda"
+      "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+    set_tests_properties(toon-viewport-morph-debug-state toon-viewport-morph-debug-gpu PROPERTIES
+      TIMEOUT 60 LABELS "viewport;hydra"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    set_tests_properties(toon-viewport-morph-debug-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu;viewport;hydra")
     add_test(NAME toon-viewport-playback
       COMMAND "${CMAKE_COMMAND}"
         "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"

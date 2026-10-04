@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include <toon/overlay.hpp>
 #include <toon/vulkan_present.hpp>
@@ -74,6 +75,14 @@ struct OverlayFrame {
   Playback playback;
   bool deterministic_time = false;
   std::uint64_t hydra_syncs = 0;
+  // Current effective values; the snapshot outlives Build.
+  const FrameSnapshot* morph_scene = nullptr;
+};
+
+struct MorphEdit {
+  MeshId mesh = 0;
+  // nullopt releases the override and resumes the latest scene evaluation.
+  std::optional<std::vector<float>> weights;
 };
 
 // What the overlay's controls asked for this frame.
@@ -88,6 +97,7 @@ struct OverlayControls {
   std::optional<double> seek;
   double playback_speed = 1.0;
   bool loop = true;
+  std::vector<MorphEdit> morph_edits;
 };
 
 class Overlay {

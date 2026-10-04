@@ -70,12 +70,17 @@ void SlowState(const Toon::FrameSnapshot& before, const Toon::FrameSnapshot& aft
 void Core() {
   Scene s;
   const auto scene = s.world.Commit();
+  Require(!scene.meshes[0].morph_weights_overridden, "scene falsely reports override");
   Require(s.world.SetMeshMorphWeightsOverride(s.mesh, {0}) &&
       s.world.SetMaterialParametersOverride(s.material, s.values), "baseline override rejected");
   Require(s.world.Commit().revision == scene.revision, "baseline override caused redundant writes");
+  Require(s.world.Commit().meshes[0].morph_weights_overridden,
+      "equal-value override missing from diagnostics");
   s.world.ClearMeshMorphWeightsOverride(s.mesh);
   s.world.ClearMaterialParametersOverride(s.material);
   Require(s.world.Commit().revision == scene.revision, "baseline clear caused redundant writes");
+  Require(!s.world.Commit().meshes[0].morph_weights_overridden,
+      "cleared equal-value override remains in diagnostics");
   auto values = s.values;
   values.base_color = {0.1F, 0.6F, 0.2F};
   values.base_texture.offset = {0.2F, 0.3F};
@@ -131,10 +136,14 @@ void Core() {
   s.world.SetMeshMorph(s.mesh, targets);
   Require(*s.world.Commit().meshes[0].morph_weights == std::vector<float>{0.25F},
       "target edit kept stale expression binding");
+  Require(!s.world.Commit().meshes[0].morph_weights_overridden,
+      "target edit retained override diagnostic state");
   Require(s.world.SetMeshMorphWeightsOverride(s.mesh, {1}), "override rejected");
   s.world.SetMeshMorphWeights(s.mesh, {0, 0});
   Require(*s.world.Commit().meshes[0].morph_weights == std::vector<float>({0, 0}),
       "weight count edit kept stale override");
+  Require(!s.world.Commit().meshes[0].morph_weights_overridden,
+      "weight count edit retained override diagnostic state");
   Require(s.world.SetMaterialParametersOverride(s.material, values), "override rejected");
   s.values.double_sided = true;
   s.world.SetMaterial(s.material, s.values);

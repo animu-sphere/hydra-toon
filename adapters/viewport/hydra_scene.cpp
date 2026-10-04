@@ -133,6 +133,14 @@ public:
     return stage_->GetStartTimeCode();
   }
 
+  bool SetMorphWeightsOverride(MeshId mesh, std::vector<float> weights) override {
+    return delegate_.SetMeshMorphWeightsOverride(mesh, std::move(weights));
+  }
+
+  void ClearMorphWeightsOverride(MeshId mesh) override {
+    delegate_.ClearMeshMorphWeightsOverride(mesh);
+  }
+
   double end_time() const noexcept override {
     return stage_->GetEndTimeCode();
   }

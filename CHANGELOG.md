@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Viewport Morphs panel: inspect evaluated subshape slots, edit signed weights,
+  and release one or all transient overrides to resume current USD animation.
+  Edits use the delegate fast path without USD authoring or Hydra sync.
+- Override activity in mesh snapshots, including equal-value overrides without
+  GPU writes; Hydra-host state and GPU regressions for the viewport debug route.
 - Viewport wall-clock USD animation with play/pause, seeking, single-time-code
   steps, playback speed and looping; Space toggles playback. Deterministic
   `--time-step` captures retain their existing sampling behavior.

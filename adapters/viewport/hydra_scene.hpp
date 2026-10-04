@@ -28,6 +28,11 @@ public:
   virtual void Update(FrameSnapshot& snapshot) = 0;
   // Explicit USD time codes for repeatable animation evaluation.
   virtual void SetTime(double time) = 0;
+  // Evaluated subshape debugging, through the delegate's transient override
+  // route. Calls never author USD or request Hydra sync. Update publishes the
+  // result; ids and overrides belong to this scene instance.
+  virtual bool SetMorphWeightsOverride(MeshId mesh, std::vector<float> weights) = 0;
+  virtual void ClearMorphWeightsOverride(MeshId mesh) = 0;
   [[nodiscard]] virtual double start_time() const noexcept = 0;
   [[nodiscard]] virtual double end_time() const noexcept = 0;
   [[nodiscard]] virtual double time_codes_per_second() const noexcept = 0;

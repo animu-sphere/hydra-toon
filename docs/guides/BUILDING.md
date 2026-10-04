@@ -204,6 +204,17 @@ the actual hull calls, including those in the transparent part;
 `work` with outlines on and off: the GPU overlaps passes, so the first
 pass that fetches geometry also carries that cost.
 
+In a Hydra-fed viewport, expand **Morphs**, then a mesh, to inspect its
+evaluated subshape weights. Drag a weight or Ctrl+click its field to enter
+a value; signed weights are supported. An edit takes effect on the next
+frame and holds that mesh's whole evaluated weight array while playback
+continues underneath it. **Release override** resumes the latest scene
+weights; **Release all overrides** does so for every mesh. Slots are indexed
+renderer subshapes, including any mapped inbetweens, rather than source
+expression names. No USD values are authored. The Uploads panel shows the
+small morph-weight writes; the Animation panel shows Hydra sync count.
+Source expression mapping and material-value controls are separate work.
+
 Hull submission also omits meshes whose full expanded outline is outside
 one of the six clip planes, using the current skinned pose. It keeps
 boundary silhouettes, including a surface outside the image whose hull
