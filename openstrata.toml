@@ -1,6 +1,6 @@
 [project]
 name = "toon"
-version = "0.1.0"
+version = "0.2.0"
 
 [requires]
 platform = "cy2026"
@@ -17,7 +17,4 @@ cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true } }
 # `ost renderer viewport --intent hydra --profile lookdev [--with <plugin>] -- --usd <stage>`,
 # which builds the same adapters in a tree of its own (docs/guides/BUILDING.md).
 [build.intents.viewport-usd]
-cache = {
-  TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true },
-  TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true }
-}
+cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true }, TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true } }

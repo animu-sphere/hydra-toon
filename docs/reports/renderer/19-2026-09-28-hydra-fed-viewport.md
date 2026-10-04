@@ -8,7 +8,7 @@
   [report 13](13-2026-09-28-host-session-formation.md): the canonical
   runtime `sha256:b982656c…` and the published `vrmImaging` 0.10.0
   `sha256:894fd616…`
-- Occasion: [v0.2.0](../../roadmap/v0.2.0.md)'s viewport foundation, whose
+- Occasion: [v0.2.0](../../releases/v0.2.0.md)'s viewport foundation, whose
   first item puts a representative avatar in front of `toon-viewport`, and
   [design policy §31.1](../../design/DESIGN_POLICY.md#311-open-questions)'s
   DP-Q1, which this report answers. [`ost` report

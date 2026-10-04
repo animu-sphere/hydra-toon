@@ -8,7 +8,29 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-04
+
+### Changed
+
+- Accept measured 4x MSAA as the v0.2.0 outline-quality baseline, recording
+  residual subpixel sampling variation as a known limitation.
+
+### Fixed
+
+- Ignore typed Hdx application helper lights advertised as distant/dome
+  lights. Their converted intensity no longer saturates avatars in usdview
+  or disables the camera-light fallback; authored UsdLux rigs are retained.
+- Keep the viewport intent's inline TOML table compatible with Python's
+  standard parser, so release-version preflight accepts the manifest.
+
 ### Added
+
+- Local VRM reproduction comparison against pinned three-vrm and usdview
+  using the viewport's exported camera; full and close-up VRM 0.x/1.0
+  captures, foreground differences and continuous outline sequence evidence.
+- Bounded viewport `--capture-sequence DIR` for every presented frame and
+  `--camera-output FILE` for its final OpenGL-convention view/projection.
+  Captures omit the overlay; readbacks require separate performance runs.
 
 - Reproducible outline temporal-quality evaluation in the Hydra viewport:
   thin GPU-skinned hulls under translation and rotation at two distances,

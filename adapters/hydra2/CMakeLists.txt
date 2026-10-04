@@ -1,5 +1,6 @@
 include(ToonOpenUSD)
 toon_configure_openusd()
+find_package(OpenGL REQUIRED) # glf's imported garch link interface
 
 if(NOT TOON_WITH_VULKAN)
   message(FATAL_ERROR
@@ -14,6 +15,7 @@ target_include_directories(toon-hydra2-runtime PUBLIC
 target_link_libraries(toon-hydra2-runtime
   PUBLIC hd Toon::RenderWorld
   PRIVATE
+    glf
     hio
     usdLux
     Toon::RenderExtraction

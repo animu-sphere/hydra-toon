@@ -9,7 +9,7 @@
   `ost renderer viewport --with`
   ([`ost` report 08](../ost/08-2026-09-30-v0.23.14-report-07-reverified.md))
 - Occasion: the first item of
-  [v0.2.0](../../roadmap/v0.2.0.md#viewport-foundation)'s viewport
+  [v0.2.0](../../releases/v0.2.0.md)'s viewport
   foundation, the MSAA sample count switched while the viewport runs, so
   [report 16](16-2026-09-28-msaa.md)'s baseline can be judged on one
   avatar, one camera and one window

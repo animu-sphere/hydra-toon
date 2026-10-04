@@ -3,6 +3,11 @@
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
 #include <pxr/imaging/hd/tokens.h>
+#include <pxr/imaging/hd/lightSchema.h>
+#include <pxr/imaging/hd/light.h>
+#include <pxr/imaging/hd/retainedDataSource.h>
+#include <pxr/imaging/hd/retainedSceneIndex.h>
+#include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usdLux/blackbody.h>
@@ -97,6 +102,27 @@ int main(int argc, char** argv) {
   const auto restored = sync(2);
   if (!Check(restored.lights.size() == 4 && Find(restored, Type::Point)->id != point->id,
           "re-added light must receive a fresh identity"))
+    return 1;
+  // Hdx's built-in application lights carry a typed GlfSimpleLight payload,
+  // even when advertised as distant/dome. They must not become scene lights
+  // with the converted 15,000 intensity or suppress the camera fallback.
+  const auto host = HdRetainedSceneIndex::New();
+  index->InsertSceneIndex(host, SdfPath::AbsoluteRootPath());
+  const auto helper = HdRetainedContainerDataSource::New(
+      HdLightSchema::GetSchemaToken(), HdRetainedContainerDataSource::New(
+          HdLightTokens->params,
+          HdRetainedTypedSampledDataSource<GlfSimpleLight>::New(GlfSimpleLight()),
+          HdLightTokens->intensity,
+          HdRetainedTypedSampledDataSource<float>::New(15000.0F)));
+  host->AddPrims({{SdfPath("/HostKey"), HdPrimTypeTokens->distantLight, helper},
+      {SdfPath("/HostDome"), HdPrimTypeTokens->domeLight, helper}});
+  if (!Check(sync(2).lights.size() == 4,
+          "host GlfSimpleLights must not alter the authored USD rig"))
+    return 1;
+  for (const char* path : {"/Key", "/Point", "/Spot", "/Ambient"})
+    stage->RemovePrim(SdfPath(path));
+  if (!Check(sync(2).lights.empty(),
+          "host helpers alone must retain the camera-light fallback"))
     return 1;
   return 0;
 }

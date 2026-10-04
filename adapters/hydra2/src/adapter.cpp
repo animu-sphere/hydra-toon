@@ -6,6 +6,7 @@
 #include <pxr/base/gf/matrix4f.h>
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/staticTokens.h>
+#include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/imaging/hd/aov.h>
 #include <pxr/imaging/hd/camera.h>
 #include <pxr/imaging/hd/changeTracker.h>
@@ -1027,7 +1028,7 @@ public:
   HdToonLight(const SdfPath& path, const TfToken& type,
       std::shared_ptr<HdToonAdapterState> state)
       : HdLight(path), type_(type), state_(std::move(state)),
-        light_(path.IsEmpty() ? 0 : state_->CreateLight()) {
+        light_(0) {
   }
 
   ~HdToonLight() override {
@@ -1039,10 +1040,23 @@ public:
   }
 
   void Sync(HdSceneDelegate* delegate, HdRenderParam*, HdDirtyBits* bits) override {
-    if (light_ == 0 || (*bits & (DirtyTransform | DirtyParams | DirtyResource)) == 0) {
+    if (GetId().IsEmpty() || (*bits & (DirtyTransform | DirtyParams | DirtyResource)) == 0) {
       *bits = Clean;
       return;
     }
+    // Hdx converts its application-owned GlfSimpleLights into distant/dome
+    // sprims for non-Storm delegates, with a 15,000-intensity distant key.
+    // They are host helpers, not the authored UsdLux rig this renderer reads.
+    // Keep the same camera-key fallback as the standalone viewport. Inspect
+    // the typed payload rather than reserving a host-specific prim path.
+    if (delegate->GetLightParamValue(GetId(), HdLightTokens->params)
+            .IsHolding<GlfSimpleLight>()) {
+      state_->RemoveLight(light_);
+      light_ = 0;
+      *bits = Clean;
+      return;
+    }
+    if (light_ == 0) light_ = state_->CreateLight();
     const auto scalar = [&](const TfToken& name, float fallback) {
       const VtValue value = VtValue::Cast<float>(delegate->GetLightParamValue(GetId(), name));
       return value.IsHolding<float>() ? value.UncheckedGet<float>() : fallback;

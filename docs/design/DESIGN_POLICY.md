@@ -238,11 +238,15 @@ order: it draws after its own surface
 ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §6). Later the mode may become selectable
 (`None | InvertedHull | ScreenSpace`), but only after the inverted hull's width
 stability, aliasing and cost are finished; a second method does not come first.
-Finishing it means: a stable width in world and screen units; no aliasing of
-thin outlines and no flicker under animation; no depth conflict with the
+For v0.2.0, finishing it means: a stable width in world and screen units;
+thin-outline sampling and motion measured against finite supersampling,
+with 4x MSAA accepted as the practical baseline and its remaining subpixel
+variation recorded as a known limitation; no depth conflict with the
 surface it outlines; the width texture sampled correctly; no hull drawn that
 cannot be seen; and its draw and GPU cost measured. Anti-aliasing is part of
 outline quality (§16), and both are judged in the dedicated viewport (§31).
+Eliminating residual aliasing and flicker requires further anti-aliasing
+work; v0.2.0 does not promise temporal filtering or an alias-free silhouette.
 The MToon outline *semantics* (`outlineWidthMode` and friends) are
 the avatar's request, not a rendering instruction
 ([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §5).
