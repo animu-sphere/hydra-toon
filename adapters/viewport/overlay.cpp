@@ -15,6 +15,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace Toon::viewport {
@@ -384,6 +386,51 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
         ImGui::Text("%.3f time codes/s; Space plays/pauses", playback.codes_per_second());
       }
       ImGui::Text("Hydra syncs: %llu", static_cast<unsigned long long>(frame.hydra_syncs));
+    }
+
+    if (frame.morph_scene != nullptr && ImGui::CollapsingHeader("Morphs")) {
+      ImGui::TextWrapped("Edit evaluated subshape weights; release overrides to follow animation.");
+      if (ImGui::Button("Release all overrides")) {
+        for (const MeshSnapshot& mesh : frame.morph_scene->meshes) {
+          if (mesh.morph_weights_overridden)
+            controls.morph_edits.push_back({mesh.id, std::nullopt});
+        }
+      } else {
+        bool found = false;
+        ImGui::BeginChild("morph-list", ImVec2(360.0F * scale, 220.0F * scale));
+        for (const MeshSnapshot& mesh : frame.morph_scene->meshes) {
+          if (mesh.morph_offsets == nullptr || mesh.morph_offsets->empty() ||
+              mesh.morph_weights == nullptr || mesh.morph_weights->empty()) continue;
+          found = true;
+          // String ids retain the full uint32 range of MeshId.
+          const std::string id = std::to_string(mesh.id);
+          ImGui::PushID(id.c_str());
+          char label[64];
+          std::snprintf(label, sizeof(label), "Mesh %u (%zu weights)", mesh.id,
+              mesh.morph_weights->size());
+          if (ImGui::TreeNode(label)) {
+            ImGui::TextDisabled("%s", mesh.morph_weights_overridden ? "Override active" : "Following scene");
+            ImGui::BeginDisabled(!mesh.morph_weights_overridden);
+            const bool release = ImGui::Button("Release override");
+            ImGui::EndDisabled();
+            std::vector<float> weights;
+            for (std::size_t slot = 0; slot < mesh.morph_weights->size(); ++slot) {
+              std::snprintf(label, sizeof(label), "Weight %zu", slot);
+              float value = (*mesh.morph_weights)[slot];
+              if (ImGui::DragFloat(label, &value, 0.01F, 0.0F, 0.0F, "%.3f")) {
+                if (weights.empty()) weights = *mesh.morph_weights;
+                weights[slot] = value;
+              }
+            }
+            if (release) controls.morph_edits.push_back({mesh.id, std::nullopt});
+            else if (!weights.empty()) controls.morph_edits.push_back({mesh.id, std::move(weights)});
+            ImGui::TreePop();
+          }
+          ImGui::PopID();
+        }
+        if (!found) ImGui::TextDisabled("No resident GPU morph weights");
+        ImGui::EndChild();
+      }
     }
 
     const Summary& interval =

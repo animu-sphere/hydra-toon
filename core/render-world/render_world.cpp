@@ -559,6 +559,7 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
     }
     snapshot.meshes.push_back(record.snapshot);
     if (record.morph_weights_override) {
+      snapshot.meshes.back().morph_weights_overridden = true;
       snapshot.meshes.back().morph_weights = record.morph_weights_override;
       snapshot.meshes.back().morph_weights_revision = record.morph_weights_override_revision;
     }

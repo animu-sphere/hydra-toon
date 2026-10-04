@@ -127,6 +127,18 @@ and lighting diagnostics remain draw-list values. The state test compiles
 the transport under `validation/` without OpenUSD, Vulkan or windowing;
 `check_playback.cmake` verifies the actual Hydra-fed presentation path.
 
+The viewport's Morphs panel reads effective weights and
+`MeshSnapshot::morph_weights_overridden` from the current commit. This
+diagnostic flag does not advance rendering revisions. Overlay commands go
+through `HydraScene::SetMorphWeightsOverride` / `ClearMorphWeightsOverride`
+in `hydra_scene.cpp` and are published by the next frame's commit without
+USD authoring or a sync request. No UI copy of the binding or override state
+is retained, so target/count invalidation and scene replacement follow the
+render world's lifetime. The panel identifies evaluated subshape slots by
+mesh id and weight index; source expression names and mappings are not
+defined here. `toon-viewport-morph-debug-test`, built only with the viewport
+and Hydra adapter, exercises this host route with state and GPU checks.
+
 ## 4. Dependency directions
 
 ```text

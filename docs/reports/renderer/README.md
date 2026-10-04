@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [38](38-2026-10-05-viewport-morph-debug.md) | Viewport evaluated subshape inspection, signed weight overrides and release controls; equal-value override diagnostics; actual HydraScene state/GPU route with no debug-induced sync or static uploads |
 | [37](37-2026-10-05-viewport-playback.md) | Viewport wall-clock transport, play/pause/seek/step/speed/loop controls, one Hydra sync for paused frames, unchanged static uploads during playback and deterministic capture compatibility |
 | [36](36-2026-10-05-expression-overrides.md) | Transient evaluated expression overrides separate from scene values; direct Hydra host updates without scene sync; 180 persistent Vulkan comparisons and 24 direct-Hydra CPU-oracle comparisons with weight/material writes only |
 | [35](35-2026-10-05-morph-normals.md) | Hydra sparse, dense and normal-only offsets with inbetweens; 72 lit-surface/hull CPU-oracle comparisons; authored/derived rest-normal fallback and target-only edits |

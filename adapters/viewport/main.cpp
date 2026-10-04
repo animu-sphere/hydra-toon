@@ -842,12 +842,26 @@ int RunViewport(int argc, char** argv) {
         shown.deterministic_time = arguments.time_step.has_value();
 #if TOON_VIEWPORT_HAS_HYDRA
         shown.hydra_syncs = hydra == nullptr ? 0 : hydra->sync_count();
+        shown.morph_scene = hydra == nullptr ? nullptr : &snapshot;
 #endif
         const Toon::viewport::OverlayControls controls = overlay->Build(shown,
             Milliseconds(overlay_start - last_overlay) / 1000.0,
             overlay_draws);
         last_overlay = overlay_start;
         open_file_requested = controls.open_file;
+#if TOON_VIEWPORT_HAS_HYDRA
+        // Applied on the next Update, with no USD change or Hydra sync.
+        if (hydra != nullptr) {
+          for (const auto& edit : controls.morph_edits) {
+            if (edit.weights) {
+              if (!hydra->SetMorphWeightsOverride(edit.mesh, *edit.weights))
+                open_error = "Morph override rejected: the binding or weights changed.";
+            } else {
+              hydra->ClearMorphWeightsOverride(edit.mesh);
+            }
+          }
+        }
+#endif
         lighting = controls.lighting;
         draws.lighting = lighting;
         if (!arguments.time_step) {
