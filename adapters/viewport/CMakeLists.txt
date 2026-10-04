@@ -128,6 +128,17 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    add_test(NAME toon-viewport-morph
+      COMMAND "${CMAKE_COMMAND}"
+        "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"
+        "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/morph-sequence"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_morph.cmake")
+    set_tests_properties(toon-viewport-morph PROPERTIES
+      SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
+      LABELS "gpu;viewport;presentation;hydra"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
     # All-frame capture must retain intermediate animation and its returning
     # image, rather than repeatedly reading a stale final frame.
     add_test(NAME toon-viewport-motion-sequence

@@ -101,6 +101,9 @@ struct OffscreenStatistics {
   // Joint buffers written: one per skinned mesh whose pose changed, the only
   // work a pose change does (design policy §11).
   std::uint64_t pose_writes = 0;
+  // Static sparse morph targets uploaded, and small weight buffers written.
+  std::uint64_t morph_uploads = 0;
+  std::uint64_t morph_weight_writes = 0;
   bool validation_available = false;
   std::uint32_t validation_message_count = 0;
   std::string validation_detail;

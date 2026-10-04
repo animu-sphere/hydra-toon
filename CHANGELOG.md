@@ -8,8 +8,21 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- Sparse GPU morphs before skinning in every Vulkan scene pipeline, with
+  independent target and weight revisions and resident rest geometry.
+- Morph upload/write statistics in both renderer paths, Hydra evidence and
+  the viewport upload panel; CPU-reference image checks and a continuous
+  Hydra-fed morph capture test.
+
 ### Changed
 
+- Linear UsdSkel blend-shape weights, including inbetweens, update the GPU
+  weight buffer without baking or uploading points. Morphed hulls bypass
+  rest-envelope culling conservatively; morphed meshes cannot act as rigid
+  occluders. Hydra normal-offset ingestion and dual quaternion GPU evaluation
+  remain outside this change.
 - The committed VRM host Formation pins the published `toon` 0.2.0 package.
   Renderer report 33 verifies release assets, anonymous GHCR access,
   Formation smoke and headless GPU checks, and four avatar captures matching

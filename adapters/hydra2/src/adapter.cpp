@@ -149,6 +149,8 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " material_writes=" << statistics.material_writes
          << " texture_uploads=" << statistics.texture_uploads
          << " skin_uploads=" << statistics.skin_uploads
+         << " morph_uploads=" << statistics.morph_uploads
+         << " morph_weight_writes=" << statistics.morph_weight_writes
          << " pose_writes=" << statistics.pose_writes
          << " textures=" << snapshot.textures.size()
          << " materials_preview=" << preview_materials
@@ -292,6 +294,16 @@ public:
   void SetMeshSkinPose(Toon::MeshId mesh, Toon::ToonSkinPose pose) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshSkinPose(mesh, std::move(pose));
+  }
+
+  void SetMeshMorph(Toon::MeshId mesh, Toon::ToonMorph morph) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshMorph(mesh, std::move(morph));
+  }
+
+  void SetMeshMorphWeights(Toon::MeshId mesh, std::vector<float> weights) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshMorphWeights(mesh, std::move(weights));
   }
 
   void SetTimeSeconds(double seconds) {
@@ -780,11 +792,11 @@ private:
       rest_revision_ = revision;
     }
 
-    // Blend shapes are applied to the rest points here, so a weight change
-    // uploads the points, until morphs are evaluated on the GPU.
+    // The GPU evaluates sparse morphs before skinning; a weight edit never
+    // sets points or targets, even when the pose holds.
     if (rest_changed || weights != weights_) {
       weights_ = weights;
-      state_->SetMeshPoints(mesh_, RestPoints());
+      state_->SetMeshMorphWeights(mesh_, std::vector<float>(weights.begin(), weights.end()));
     }
 
     Toon::ToonSkinPose pose;
@@ -841,38 +853,44 @@ private:
       }
     }
     state_->SetMeshSkin(mesh_, std::move(skin));
+    state_->SetMeshPoints(mesh_, ReadPoints(VtValue(rest_points_)));
+    state_->SetMeshMorph(mesh_, ReadMorph());
     skinned_ = true;
     return true;
   }
 
-  // The rest points with the current blend shape weights applied, as
-  // usdSkelImaging's kernels apply them before skinning.
-  std::vector<Toon::Float3> RestPoints() const {
-    std::vector<Toon::Float3> points = ReadPoints(VtValue(rest_points_));
-    const std::size_t count = std::min(blend_ranges_.size(), points.size());
+  // Normalize usdSkelImaging's per-point ranges into renderer-private sparse
+  // targets once per aggregator edit, retaining its inbetween weight indices.
+  Toon::ToonMorph ReadMorph() const {
+    Toon::ToonMorph morph;
+    morph.ranges.resize(rest_points_.size());
+    const std::size_t count = std::min(blend_ranges_.size(), rest_points_.size());
     for (std::size_t point = 0; point < count; ++point) {
+      auto& output = morph.ranges[point];
+      output.first = static_cast<std::uint32_t>(morph.offsets.size());
       const GfVec2i range = blend_ranges_[point];
       for (int offset = std::max(range[0], 0);
            offset < range[1] &&
            static_cast<std::size_t>(offset) < blend_offsets_.size();
            ++offset) {
         const GfVec4f& shape = blend_offsets_[static_cast<std::size_t>(offset)];
-        const int index = static_cast<int>(shape[3]);
-        if (index < 0 || static_cast<std::size_t>(index) >= weights_.size()) {
+        if (!std::isfinite(shape[3]) || shape[3] < 0 ||
+            static_cast<double>(shape[3]) > std::numeric_limits<std::uint32_t>::max()) {
           continue;
         }
-        const float weight = weights_[static_cast<std::size_t>(index)];
-        points[point].x += shape[0] * weight;
-        points[point].y += shape[1] * weight;
-        points[point].z += shape[2] * weight;
+        morph.offsets.push_back({{shape[0], shape[1], shape[2]},
+            static_cast<std::uint32_t>(shape[3]), {}, 0});
+        ++output.count;
       }
     }
-    return points;
+    return morph;
   }
 
   void Unskin() {
     if (skinned_) {
       state_->SetMeshSkin(mesh_, {});
+      state_->SetMeshMorph(mesh_, {});
+      state_->SetMeshMorphWeights(mesh_, {});
       skinned_ = false;
     }
     rest_revision_ = 0;

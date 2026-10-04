@@ -43,17 +43,17 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
              "shaderSampledImageArrayDynamicIndexing";
     return false;
   }
-  // The material set: its parameter buffer, the texture table and the
-  // samplers, each stage that reads them counting them once.
+  // Two material/frame buffers and five skin/morph buffers, plus the texture
+  // table and samplers. Each vertex stage counts the complete shared layout.
   const VkPhysicalDeviceLimits& limits = properties.limits;
   if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity ||
       limits.maxDescriptorSetSampledImages < kTextureCapacity ||
       limits.maxPerStageDescriptorSamplers < kSamplerCount ||
-      limits.maxPerStageDescriptorStorageBuffers < 4U ||
-      limits.maxDescriptorSetStorageBuffers < 4U ||
-      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 4U) {
+      limits.maxPerStageDescriptorStorageBuffers < 7U ||
+      limits.maxDescriptorSetStorageBuffers < 7U ||
+      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 7U) {
     detail = std::string(properties.deviceName) + " cannot bind a table of " +
-             std::to_string(kTextureCapacity) + " textures";
+             std::to_string(kTextureCapacity) + " textures and seven scene storage buffers";
     return false;
   }
   return true;
@@ -522,15 +522,15 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
           "vkCreateDescriptorSetLayout", detail)) {
     return false;
   }
-  // A mesh's influences and joint buffer, read by the vertex stage alone.
-  VkDescriptorSetLayoutBinding skin_bindings[2]{};
-  for (std::uint32_t binding = 0; binding < 2U; ++binding) {
+  // Influences, joints, morph offsets, ranges and weights: vertex-only.
+  VkDescriptorSetLayoutBinding skin_bindings[5]{};
+  for (std::uint32_t binding = 0; binding < 5U; ++binding) {
     skin_bindings[binding].binding = binding;
     skin_bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     skin_bindings[binding].descriptorCount = 1;
     skin_bindings[binding].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
   }
-  set_layout_create.bindingCount = 2;
+  set_layout_create.bindingCount = 5;
   set_layout_create.pBindings = skin_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.skin_layout),
@@ -1258,7 +1258,7 @@ bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
       !AllocateSkinSet(unskinned_set_, pool, detail)) {
     return false;
   }
-  PointSkinSet(unskinned_set_, zero_skin_.buffer, zero_skin_.buffer);
+  PointSkinSet(unskinned_set_);
   return true;
 }
 
@@ -1329,21 +1329,26 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
 // entry carries the geometry bind transform. A mesh whose skin does not
 // cover this frame's topology, or whose pose lacks a joint it names, draws
 // its points unskinned and keeps its buffers for when it is whole again.
+// Morph targets have their own structural revision; weight changes write
+// only that buffer, including on a mesh without a skin.
 bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     std::string& detail) {
+  const bool was_skinned = entry.skinned;
+  const bool was_morphed = entry.morphed;
   entry.skinned = IsSkinned(mesh);
-  if (!entry.skinned) {
+  entry.morphed = IsMorphed(mesh);
+  if (!entry.skinned && !entry.morphed) {
     entry.skin_flags = 0;
     return true;
   }
-  bool rebind = false;
+  bool rebind = was_skinned != entry.skinned || was_morphed != entry.morphed;
   if (entry.skin_set == VK_NULL_HANDLE) {
     if (!AllocateSkinSet(entry.skin_set, entry.skin_pool, detail)) {
       return false;
     }
     rebind = true;
   }
-  if (entry.skin_revision != mesh.skin_revision) {
+  if (entry.skinned && entry.skin_revision != mesh.skin_revision) {
     const VkBuffer before = entry.influences.buffer;
     if (!Upload(entry.influences, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             mesh.influences->data(),
@@ -1355,7 +1360,7 @@ bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     entry.pose_revision = 0;
     ++skin_uploads_;
   }
-  if (entry.pose_revision != mesh.pose_revision) {
+  if (entry.skinned && entry.pose_revision != mesh.pose_revision) {
     joint_scratch_.clear();
     joint_scratch_.push_back(mesh.skeleton_to_mesh);
     for (const Matrix4& joint : *mesh.joints) {
@@ -1371,12 +1376,32 @@ bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     entry.pose_revision = mesh.pose_revision;
     ++pose_writes_;
   }
-  if (rebind) {
-    PointSkinSet(entry.skin_set, entry.influences.buffer, entry.joints.buffer);
+  if (entry.morphed && entry.morph_revision != mesh.morph_revision) {
+    if (!Upload(entry.morph_offsets, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            mesh.morph_offsets->data(),
+            mesh.morph_offsets->size() * sizeof(ToonMorphOffset), detail) ||
+        !Upload(entry.morph_ranges, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            mesh.morph_ranges->data(),
+            mesh.morph_ranges->size() * sizeof(ToonMorphRange), detail)) return false;
+    entry.morph_revision = mesh.morph_revision;
+    rebind = true;
+    ++morph_uploads_;
   }
-  entry.skin_flags = kDrawSkinned |
+  if (entry.morphed && entry.morph_weights_revision != mesh.morph_weights_revision) {
+    const VkBuffer before = entry.morph_weights.buffer;
+    const VkDeviceSize bytes = mesh.morph_weights->size() * sizeof(float);
+    if (!Upload(entry.morph_weights, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            mesh.morph_weights->data(), bytes, detail)) return false;
+    rebind = rebind || before != entry.morph_weights.buffer || bytes != entry.morph_weight_bytes;
+    entry.morph_weight_bytes = bytes;
+    entry.morph_weights_revision = mesh.morph_weights_revision;
+    ++morph_weight_writes_;
+  }
+  if (rebind) PointSkinSet(entry.skin_set, &entry);
+  entry.skin_flags = (entry.skinned ? kDrawSkinned |
                      (mesh.constant_influences ? kDrawConstantInfluences : 0U) |
-                     (mesh.influences_per_point << kInfluenceCountShift);
+                     (mesh.influences_per_point << kInfluenceCountShift) : 0U) |
+                     (entry.morphed ? kDrawMorphed : 0U);
   return true;
 }
 
@@ -1401,7 +1426,7 @@ bool MeshCache::AllocateSkinSet(VkDescriptorSet& set, std::size_t& pool,
   }
   VkDescriptorPoolSize size{};
   size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  size.descriptorCount = kSetsPerPool * 2U;
+  size.descriptorCount = kSetsPerPool * 5U;
   VkDescriptorPoolCreateInfo pool_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -1421,17 +1446,29 @@ bool MeshCache::AllocateSkinSet(VkDescriptorSet& set, std::size_t& pool,
       "vkAllocateDescriptorSets(skin)", detail);
 }
 
-void MeshCache::PointSkinSet(VkDescriptorSet set, VkBuffer influences,
-    VkBuffer joints) {
-  VkDescriptorBufferInfo buffers[2]{};
-  buffers[0].buffer = influences;
-  buffers[0].range = VK_WHOLE_SIZE;
-  buffers[1].buffer = joints;
-  buffers[1].range = VK_WHOLE_SIZE;
+void MeshCache::PointSkinSet(VkDescriptorSet set, const Entry* entry) {
+  VkDescriptorBufferInfo buffers[5]{};
+  for (auto& buffer : buffers) {
+    buffer.buffer = zero_skin_.buffer;
+    buffer.range = VK_WHOLE_SIZE;
+  }
+  if (entry != nullptr) {
+    if (entry->skinned) {
+      buffers[0].buffer = entry->influences.buffer;
+      buffers[1].buffer = entry->joints.buffer;
+    }
+    if (entry->morphed) {
+      buffers[2].buffer = entry->morph_offsets.buffer;
+      buffers[3].buffer = entry->morph_ranges.buffer;
+      buffers[4].buffer = entry->morph_weights.buffer;
+      // GetDimensions sees the current count, including after shrink.
+      buffers[4].range = entry->morph_weight_bytes;
+    }
+  }
   VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
   write.dstSet = set;
   write.dstBinding = 0;
-  write.descriptorCount = 2;
+  write.descriptorCount = 5;
   write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   write.pBufferInfo = buffers;
   vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
@@ -1444,6 +1481,9 @@ void MeshCache::Release(Entry& entry) {
   DestroyHostBuffer(device_, entry.indices);
   DestroyHostBuffer(device_, entry.influences);
   DestroyHostBuffer(device_, entry.joints);
+  DestroyHostBuffer(device_, entry.morph_offsets);
+  DestroyHostBuffer(device_, entry.morph_ranges);
+  DestroyHostBuffer(device_, entry.morph_weights);
   if (entry.skin_set != VK_NULL_HANDLE) {
     vkFreeDescriptorSets(device_, skin_pools_[entry.skin_pool], 1,
         &entry.skin_set);
@@ -1495,7 +1535,7 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdBindVertexBuffers(command, 0, 1, &entry.vertices.buffer, &offset);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
     const VkDescriptorSet skin_set =
-        entry.skinned ? entry.skin_set : unskinned_set_;
+        (entry.skinned || entry.morphed) ? entry.skin_set : unskinned_set_;
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipelines.mesh.layout, 1, 1, &skin_set, 0, nullptr);
     DrawConstants constants{};
@@ -1556,7 +1596,7 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
         VK_INDEX_TYPE_UINT32);
     const VkDescriptorSet skin_set =
-        entry.skinned ? entry.skin_set : unskinned_set_;
+        (entry.skinned || entry.morphed) ? entry.skin_set : unskinned_set_;
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline.layout, 1, 1, &skin_set, 0, nullptr);
     MToonDrawConstants constants{};

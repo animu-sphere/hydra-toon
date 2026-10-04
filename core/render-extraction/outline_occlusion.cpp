@@ -78,7 +78,7 @@ void OutlineOcclusion::Update(const DrawList& draws, std::uint32_t width,
   const auto world_magnitude = Product(Absolute(draws.view.projection), Absolute(draws.view.view));
   std::size_t inspected = 0;
   for (const auto& mesh : draws.draws) {
-    if (!mesh.visible || mesh.influences_per_point || !mesh.points || !mesh.indices ||
+    if (!mesh.visible || mesh.influences_per_point || IsMorphed(mesh) || !mesh.points || !mesh.indices ||
         mesh.indices->empty() || mesh.indices->size() > 64 * 3 || !Affine(mesh.transform))
       continue;
     const auto material = std::lower_bound(draws.materials.begin(), draws.materials.end(), mesh.material,
