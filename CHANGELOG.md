@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Viewport wall-clock USD animation with play/pause, seeking, single-time-code
+  steps, playback speed and looping; Space toggles playback. Deterministic
+  `--time-step` captures retain their existing sampling behavior.
+- Playback state and GPU regressions: paused/unchanged time syncs Hydra once,
+  matches deterministic capture pixels, and playback keeps static uploads fixed.
 - Transient evaluated morph-weight and material-parameter overrides in the
   render world and Hydra delegate, accepting host updates without USD edits
   or Hydra sync. Scene values remain separate; clearing restores their latest
@@ -29,6 +34,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The viewport syncs Hydra only after time or scene-index changes; paused
+  camera and diagnostic frames reuse scene state. The overlay and final log
+  expose the sync count.
 - Linear UsdSkel blend-shape weights, including inbetweens, update the GPU
   weight buffer without baking or uploading points. Morphed hulls bypass
   rest-envelope culling conservatively; morphed meshes cannot act as rigid

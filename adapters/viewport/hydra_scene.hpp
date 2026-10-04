@@ -22,13 +22,16 @@ public:
   static std::unique_ptr<HydraScene> Open(const std::string& path);
   virtual ~HydraScene() = default;
 
-  // Syncs the render index at the stage's time and commits the delegate's
-  // render world into `snapshot`, reusing its storage. The snapshot's camera
-  // is not the viewport's; the caller sets its own.
+  // Applies pending stage updates; syncs the render index only after time or
+  // scene-index changes, then commits the delegate's world into `snapshot`.
+  // The snapshot's camera is not the viewport's; the caller sets its own.
   virtual void Update(FrameSnapshot& snapshot) = 0;
   // Explicit USD time codes for repeatable animation evaluation.
   virtual void SetTime(double time) = 0;
   [[nodiscard]] virtual double start_time() const noexcept = 0;
+  [[nodiscard]] virtual double end_time() const noexcept = 0;
+  [[nodiscard]] virtual double time_codes_per_second() const noexcept = 0;
+  [[nodiscard]] virtual std::uint64_t sync_count() const noexcept = 0;
 
   // The stage's metersPerUnit and upAxis, which Hydra does not carry.
   [[nodiscard]] virtual float meters_per_unit() const noexcept = 0;

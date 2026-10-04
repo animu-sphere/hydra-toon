@@ -313,11 +313,13 @@ must be in the local registry: pull it as
 
 For repeatable animation evaluation, `--time T` sets an initial USD time
 code and `--time-step S` advances by S time codes per presented frame.
-Without `--time`, stepping starts at the stage's start time. With neither,
-an animated stage stays at its start, and a static stage at Default.
+Without `--time`, stepping starts at the stage's start time. Without playback
+or either time option, an animated stage stays at its start, and a static
+stage at Default.
 This is a fixed sequence, independent of wall time, with no looping;
 time codes outside the authored range use USD's sampling behavior. Both
 options require `--usd`; opening a replacement restarts its sequence.
+An unchanged selected time skips Hydra sync after initialization.
 For example, this committed fixture moves a joint and returns to its
 initial pose in nine frames:
 
@@ -326,6 +328,37 @@ ost renderer viewport --intent viewport-usd --profile lookdev -- \
     --usd adapters/viewport/tests/outline-motion.usda \
     --time 1 --time-step 0.25 --hidden --frames 9 --vsync off --overlay off
 ```
+
+For interactive playback, open a stage with a finite authored start/end range
+and use the overlay's `Animation` panel. `Play` / `Pause` and Space toggle
+playback. `Time code` seeks within the range; `Start`, `< Step` and `Step >`
+seek to the beginning or by one time code. Manual seeks pause. `Speed`
+multiplies the stage's time-code rate by 0.05–4; `Loop` wraps at the end,
+while disabling it stops on the endpoint. Playing again from that endpoint
+restarts at the beginning. Playback defaults to paused, speed 1 and looping.
+A successful file open resets the transport with the new stage's range and
+the launch settings; cancellation or a failed open preserves it.
+
+`--play` starts wall-clock playback, `--playback-speed N` chooses its multiplier
+and `--loop on|off` chooses its endpoint behavior. `--play` requires `--usd`
+and an authored animation range. It cannot be combined with `--time-step`;
+that option keeps its deterministic per-presented-frame evaluation and
+disables interactive transport controls. File-dialog and minimized-window
+waits do not advance the wall clock. Paused frames still process pending USD
+changes; camera-only frames need no Hydra sync. `Hydra syncs` in the panel and
+the final `Animation:` log show this boundary.
+
+The measured regression runs paused, deterministic and wall-clock morph
+captures, checking sync counts, static uploads and paused image equality:
+
+```sh
+ctest --test-dir build/cy2026-windows-x86_64-py313-lookdev--viewport-usd \
+    --output-on-failure -R 'toon-playback|toon-viewport-playback'
+```
+
+[Renderer report 37](../reports/renderer/37-2026-10-05-viewport-playback.md)
+records this run. Wall-clock playback evaluates the USD scene before
+extraction; it does not latch a motion sample at GPU submission.
 
 For a VRM stage with the material and file plugins registered, use the same
 time options with `--samples 1`, `4` or `8` and `--outlines on` or `off`.

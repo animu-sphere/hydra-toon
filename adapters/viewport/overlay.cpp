@@ -302,6 +302,8 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
   }
 
   OverlayControls controls;
+  controls.playback_speed = frame.playback.speed();
+  controls.loop = frame.playback.loop();
   ImGui::NewFrame();
   const float scale = state_->scale;
   ImGui::SetNextWindowPos(ImVec2(10.0F * scale, 10.0F * scale),
@@ -353,6 +355,35 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
       controls.lighting.material = static_cast<MaterialDebug>(mode);
       if (ImGui::Button("Reset lighting and material"))
         controls.lighting = {};
+    }
+
+    if (frame.can_open_file && ImGui::CollapsingHeader("Animation", ImGuiTreeNodeFlags_DefaultOpen)) {
+      const Playback& playback = frame.playback;
+      if (frame.deterministic_time) {
+        ImGui::TextDisabled("Deterministic --time-step capture");
+      } else if (!playback.available()) {
+        ImGui::TextDisabled("Open a stage with an authored time range");
+      } else {
+        controls.toggle_playback = ImGui::Button(playback.playing() ? "Pause" : "Play");
+        ImGui::SameLine();
+        if (ImGui::Button("Start")) controls.seek = playback.start();
+        ImGui::SameLine();
+        if (ImGui::Button("< Step")) controls.seek = playback.time() - 1.0;
+        ImGui::SameLine();
+        if (ImGui::Button("Step >")) controls.seek = playback.time() + 1.0;
+        double time = playback.time();
+        const double start = playback.start();
+        const double end = playback.end();
+        if (ImGui::SliderScalar("Time code", ImGuiDataType_Double, &time, &start, &end, "%.3f"))
+          controls.seek = time;
+        const double slow = 0.05;
+        const double fast = 4.0;
+        ImGui::SliderScalar("Speed", ImGuiDataType_Double, &controls.playback_speed,
+            &slow, &fast, "%.2fx");
+        ImGui::Checkbox("Loop", &controls.loop);
+        ImGui::Text("%.3f time codes/s; Space plays/pauses", playback.codes_per_second());
+      }
+      ImGui::Text("Hydra syncs: %llu", static_cast<unsigned long long>(frame.hydra_syncs));
     }
 
     const Summary& interval =

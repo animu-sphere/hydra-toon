@@ -7,12 +7,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include <toon/overlay.hpp>
 #include <toon/vulkan_present.hpp>
 
 #include "telemetry.hpp"
+#include "playback.hpp"
 #include "window.hpp"
 
 namespace Toon::viewport {
@@ -69,6 +71,9 @@ struct OverlayFrame {
   // The last frame's uploads, and the session's.
   UploadCounts frame_uploads;
   UploadCounts uploads;
+  Playback playback;
+  bool deterministic_time = false;
+  std::uint64_t hydra_syncs = 0;
 };
 
 // What the overlay's controls asked for this frame.
@@ -79,6 +84,10 @@ struct OverlayControls {
   bool outlines_changed = false;
   bool outlines = true;
   LightingDebug lighting;
+  bool toggle_playback = false;
+  std::optional<double> seek;
+  double playback_speed = 1.0;
+  bool loop = true;
 };
 
 class Overlay {

@@ -232,6 +232,8 @@ private:
       return Key::O;
     case GLFW_KEY_R:
       return Key::R;
+    case GLFW_KEY_SPACE:
+      return Key::Space;
     case GLFW_KEY_1:
       return Key::Digit1;
     case GLFW_KEY_2:

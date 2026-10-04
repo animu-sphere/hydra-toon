@@ -31,6 +31,7 @@ add_executable(toon-viewport
   camera.cpp
   main.cpp
   overlay.cpp
+  playback.cpp
   telemetry.cpp
   window_glfw.cpp)
 toon_configure_warnings(toon-viewport)
@@ -128,6 +129,24 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    add_test(NAME toon-viewport-playback
+      COMMAND "${CMAKE_COMMAND}"
+        "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"
+        "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/playback"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_playback.cmake")
+    set_tests_properties(toon-viewport-playback PROPERTIES
+      SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
+      LABELS "gpu;viewport;presentation;hydra"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    add_test(NAME toon-viewport-playback-conflicting-time
+      COMMAND toon-viewport --play --usd "${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda"
+        --time-step 1)
+    set_tests_properties(toon-viewport-playback-conflicting-time PROPERTIES
+      WILL_FAIL TRUE TIMEOUT 10
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
     add_test(NAME toon-viewport-morph
       COMMAND "${CMAKE_COMMAND}"
         "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"

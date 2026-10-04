@@ -16,6 +16,12 @@ toon_configure_warnings(toon-render-world-test)
 target_link_libraries(toon-render-world-test PRIVATE Toon::RenderExtraction)
 add_test(NAME toon-render-world COMMAND toon-render-world-test)
 
+add_executable(toon-playback-test playback_test.cpp
+  ../adapters/viewport/playback.cpp)
+toon_configure_warnings(toon-playback-test)
+target_compile_features(toon-playback-test PRIVATE cxx_std_20)
+add_test(NAME toon-playback-state COMMAND toon-playback-test)
+
 add_executable(toon-morph-test morph_test.cpp)
 toon_configure_warnings(toon-morph-test)
 target_link_libraries(toon-morph-test PRIVATE Toon::Vulkan)
