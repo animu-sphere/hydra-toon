@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Reproducible outline temporal-quality evaluation in the Hydra viewport:
+  thin GPU-skinned hulls under translation and rotation at two distances,
+  linear-light spatial and temporal residuals against finite supersampling,
+  and signed outlines-on/off comparisons over animated VRM poses. Renderer
+  report 31 records 248 capture runs; default 4x sampling variation remains.
+
 - Current-frame opaque-triangle occlusion for MToon hulls, including
   animated Opaque, Mask and Blend targets. A rigid unlit or double-sided
   Opaque blocker must cover the entire expanded hull and be wholly nearer
