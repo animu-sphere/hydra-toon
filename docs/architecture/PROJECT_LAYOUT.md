@@ -104,7 +104,10 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    evaluation driver in `scripts/evaluate_antialiasing.py` generates local
    fixtures and consumes viewport captures without a renderer dependency.
    The outline comparison switch is `DrawList::outlines`, consumed during
-   backend command recording without changing scene materials. Texture
+   backend command recording without changing scene materials.
+   `scripts/evaluate_outline_temporal.py` consumes viewport captures for
+   spatial/temporal outline comparisons; its Pillow/NumPy dependencies
+   belong to evaluation tooling, not a renderer target. Texture
    zero-width metadata stays in the backend's revision-keyed texture cache.
    `OutlineBounds` in `core/render-extraction/outline_bounds.cpp` builds
    rest-point and per-joint envelopes on points, topology or skin revisions.

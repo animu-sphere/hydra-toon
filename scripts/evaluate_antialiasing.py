@@ -108,7 +108,7 @@ def Xform "Test" {
     return path
 
 
-def run(viewport, output, name, stage, samples, width, height, time, frames=2, step=None, capture=True, draws=None, hulls=None, close=None):
+def run(viewport, output, name, stage, samples, width, height, time, frames=2, step=None, capture=True, draws=None, hulls=None, close=None, outlines=None):
     path = output / f'{name}.ppm'
     command = [str(viewport), '--usd', str(stage), '--hidden', '--vsync', 'off', '--overlay', 'off',
                '--samples', str(samples), '--width', str(width), '--height', str(height),
@@ -121,6 +121,8 @@ def run(viewport, output, name, stage, samples, width, height, time, frames=2, s
         command += ['--expect-draws', str(draws)]
     if hulls is not None:
         command += ['--expect-hulls', str(hulls)]
+    if outlines is not None:
+        command += ['--outlines', outlines]
     if close is not None:
         command += ['--camera-pan', str(close[0]), str(close[1]), '--camera-dolly', str(close[2])]
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)

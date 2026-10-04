@@ -356,6 +356,27 @@ local. [Renderer report 27](../reports/renderer/27-2026-10-01-antialiasing-quali
 records the 4x baseline decision and the limits of its spatial and temporal
 measurements.
 
+The outline temporal evaluation additionally requires NumPy. With the same
+viewport and plugin environment, run:
+
+```sh
+python scripts/evaluate_outline_temporal.py \
+    --viewport <viewport-usd build>/adapters/viewport/toon-viewport \
+    --avatar <local Alicia motion stage> --output build/outline-temporal
+```
+
+Omit `--avatar` for only the generated GPU-skinned thin hulls. Translation
+and rotation at two distances are evaluated at 1x/4x/8x against 4x MSAA
+at four times the linear resolution. Repeated and returning poses must
+match exactly. The optional avatar uses five time codes, 29 through 30
+by 0.25, at 1280x720 with a 2560x1440 comparison, and isolates its signed
+outline contribution using outlines-on/off pairs. `--avatar-time`,
+`--avatar-step`, `--avatar-phases`, `--avatar-draws`, `--close-pan X Y` and
+`--close-dolly N` adapt the sequence and view to another asset. Captures,
+logs, contact sheets, hashes, commands and `summary.json` remain local.
+These are finite sampling comparisons; [renderer report 31](../reports/renderer/31-2026-10-04-outline-temporal.md)
+defines the statistics and records remaining temporal limitations.
+
 Opening a raw `.vrm` also needs `usdVrmFileFormat` and
 `usdVrmPackageResolver` for embedded textures; `vrmImaging` alone handles
 material imaging, not file ingestion. With those local bundles already built
