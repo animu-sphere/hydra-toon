@@ -9,6 +9,8 @@
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
+#include <pxr/imaging/hd/sceneIndex.h>
+#include <pxr/imaging/hd/sceneIndexObserver.h>
 #include <pxr/imaging/hd/task.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/usd/stage.h>
@@ -18,6 +20,7 @@
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -67,7 +70,7 @@ private:
 // No Hydra task draws: the render index is synced for the geometry
 // collection a render pass would draw, and the viewport draws the committed
 // scene itself, so nothing is rendered offscreen and read back.
-class UsdHydraScene final : public HydraScene {
+class UsdHydraScene final : public HydraScene, public HdSceneIndexObserver {
 public:
   explicit UsdHydraScene(UsdStageRefPtr stage)
       : stage_(std::move(stage)),
@@ -83,6 +86,7 @@ public:
     }
     index_->InsertSceneIndex(indices_.finalSceneIndex,
         SdfPath::AbsoluteRootPath());
+    indices_.finalSceneIndex->AddObserver(HdSceneIndexObserverPtr(this));
     // Leave static stages at Default until an explicit time is requested.
     indices_.stageSceneIndex->SetTime(stage_->HasAuthoredTimeCodeRange()
                                           ? UsdTimeCode(
@@ -98,18 +102,28 @@ public:
   }
 
   ~UsdHydraScene() override {
+    indices_.finalSceneIndex->RemoveObserver(HdSceneIndexObserverPtr(this));
     // Prims are destroyed through the delegate, so the index goes first.
     index_.reset();
   }
 
   void Update(FrameSnapshot& snapshot) override {
     indices_.stageSceneIndex->ApplyPendingUpdates();
-    index_->EnqueueCollectionToSync(collection_);
-    index_->SyncAll(&tasks_, &context_);
+    if (needs_sync_) {
+      needs_sync_ = false;
+      index_->EnqueueCollectionToSync(collection_);
+      index_->SyncAll(&tasks_, &context_);
+      ++sync_count_;
+    }
     delegate_.CommitScene(snapshot);
   }
 
   void SetTime(double time) override {
+    if (time_ && *time_ == time) {
+      return;
+    }
+    time_ = time;
+    needs_sync_ = true;
     indices_.stageSceneIndex->SetTime(UsdTimeCode(time));
     delegate_.SetRenderSetting(TfToken("toon:timeSeconds"),
         VtValue(time / stage_->GetTimeCodesPerSecond()));
@@ -117,6 +131,29 @@ public:
 
   double start_time() const noexcept override {
     return stage_->GetStartTimeCode();
+  }
+
+  double end_time() const noexcept override {
+    return stage_->GetEndTimeCode();
+  }
+
+  double time_codes_per_second() const noexcept override {
+    return stage_->GetTimeCodesPerSecond();
+  }
+
+  std::uint64_t sync_count() const noexcept override { return sync_count_; }
+
+  void PrimsAdded(const HdSceneIndexBase&, const AddedPrimEntries&) override {
+    needs_sync_ = true;
+  }
+  void PrimsRemoved(const HdSceneIndexBase&, const RemovedPrimEntries&) override {
+    needs_sync_ = true;
+  }
+  void PrimsDirtied(const HdSceneIndexBase&, const DirtiedPrimEntries&) override {
+    needs_sync_ = true;
+  }
+  void PrimsRenamed(const HdSceneIndexBase&, const RenamedPrimEntries&) override {
+    needs_sync_ = true;
   }
 
   float meters_per_unit() const noexcept override {
@@ -137,6 +174,9 @@ private:
   HdTaskContext context_;
   float meters_per_unit_ = 1.0F;
   UpAxis up_axis_ = UpAxis::Y;
+  bool needs_sync_ = true;
+  std::uint64_t sync_count_ = 0;
+  std::optional<double> time_;
 };
 
 } // namespace

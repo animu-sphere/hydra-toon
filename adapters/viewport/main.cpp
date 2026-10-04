@@ -9,6 +9,7 @@
 // Exit codes: 0 success, 1 failure, 77 skip (the environment cannot present).
 #include "camera.hpp"
 #include "overlay.hpp"
+#include "playback.hpp"
 #include "telemetry.hpp"
 #include "window.hpp"
 
@@ -57,6 +58,9 @@ struct Arguments {
   Toon::LightingDebug lighting;
   std::optional<double> time;
   std::optional<double> time_step;
+  bool play = false;
+  double playback_speed = 1.0;
+  bool loop = true;
   std::optional<std::uint64_t> expect_hulls;
   float camera_pan_x = 0.0F;
   float camera_pan_y = 0.0F;
@@ -153,6 +157,21 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument(std::string(option) + " must be finite");
       }
       (option == "--time" ? result.time : result.time_step) = number;
+    } else if (option == "--play") {
+      result.play = true;
+    } else if (option == "--playback-speed") {
+      const std::string value(next());
+      std::size_t consumed = 0;
+      result.playback_speed = std::stod(value, &consumed);
+      if (consumed != value.size() || !std::isfinite(result.playback_speed) ||
+          result.playback_speed < 0.05 || result.playback_speed > 4.0) {
+        throw std::invalid_argument("--playback-speed must be in [0.05, 4]");
+      }
+    } else if (option == "--loop") {
+      const auto value = next();
+      if (value != "on" && value != "off")
+        throw std::invalid_argument("--loop must be on or off");
+      result.loop = value == "on";
     } else if (option == "--direct-strength" || option == "--ambient-strength") {
       const std::string value(next());
       std::size_t consumed = 0;
@@ -218,6 +237,9 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --time T                 initial USD time code\n"
                    "  --time-step T            USD time codes per presented\n"
                    "                           frame (deterministic evaluation)\n"
+                   "  --play                   start wall-clock USD playback\n"
+                   "  --playback-speed N       playback multiplier [0.05, 4]\n"
+                   "  --loop on|off            loop the authored range (on)\n"
                    "  --expect-hulls N         check actual last-frame hulls\n"
                    "  --camera-pan X Y         initial drag in window pixels\n"
                    "  --camera-dolly N         initial wheel notches (in > 0)\n"
@@ -244,6 +266,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "toon-viewport-<n>.ppm, without the overlay; 1, 2, 4\n"
                    "and 8 set the MSAA samples per pixel; O shows or hides\n"
                    "the overlay; Ctrl+O opens a scene file in a Hydra build.\n"
+                   "Space plays/pauses USD animation. The Animation panel\n"
+                   "seeks and steps; manual seeks pause playback.\n"
                    "Esc or closing the window exits.\n";
       std::exit(0);
     } else {
@@ -274,9 +298,15 @@ Arguments ParseArguments(int argc, char** argv) {
       throw std::invalid_argument("--switch-samples needs --frames N, N >= 2");
     }
   }
+  if (result.play && result.time_step) {
+    throw std::invalid_argument("--play and --time-step are mutually exclusive");
+  }
+  if (result.play && result.usd.empty()) {
+    throw std::invalid_argument("--play needs --usd <stage>");
+  }
 #if !TOON_VIEWPORT_HAS_HYDRA
   if (!result.usd.empty() || !result.switch_file.empty() || result.time ||
-      result.time_step) {
+      result.time_step || result.play) {
     throw std::invalid_argument("--usd needs a build with the Hydra adapter "
                                 "(the viewport-usd intent)");
   }
@@ -492,12 +522,26 @@ int RunViewport(int argc, char** argv) {
     Toon::viewport::UpAxis up_axis = Toon::viewport::UpAxis::Y;
     float meters_per_unit = 1.0F;
     std::string scene_name = "bootstrap";
+    Toon::viewport::Playback playback;
 #if TOON_VIEWPORT_HAS_HYDRA
+    const auto configure_playback = [&](const Toon::viewport::HydraScene& scene) {
+      Toon::viewport::Playback next;
+      next.Reset(scene.start_time(), scene.end_time(), scene.time_codes_per_second(),
+          arguments.time.value_or(scene.start_time()));
+      next.SetSpeed(arguments.playback_speed);
+      next.SetLoop(arguments.loop);
+      next.SetPlaying(arguments.play);
+      if (arguments.play && !next.available()) {
+        throw std::runtime_error("--play needs a finite authored animation range");
+      }
+      return next;
+    };
     std::unique_ptr<Toon::viewport::HydraScene> hydra;
     if (!arguments.usd.empty()) {
       hydra = Toon::viewport::HydraScene::Open(arguments.usd);
+      playback = configure_playback(*hydra);
       if (arguments.time) {
-        hydra->SetTime(*arguments.time);
+        hydra->SetTime(playback.time());
       }
       hydra->Update(snapshot);
       up_axis = hydra->up_axis();
@@ -576,6 +620,7 @@ int RunViewport(int argc, char** argv) {
     Toon::viewport::UploadCounts frame_uploads;
     std::optional<Clock::time_point> last_present;
     auto last_overlay = Clock::now();
+    auto playback_clock = Clock::now();
 
     bool running = true;
     PointerState pointer;
@@ -590,8 +635,9 @@ int RunViewport(int argc, char** argv) {
       open_error.clear();
       try {
         auto next_scene = Toon::viewport::HydraScene::Open(path);
+        auto next_playback = configure_playback(*next_scene);
         if (arguments.time) {
-          next_scene->SetTime(*arguments.time);
+          next_scene->SetTime(next_playback.time());
         }
         Toon::FrameSnapshot next_snapshot;
         next_scene->Update(next_snapshot);
@@ -599,6 +645,8 @@ int RunViewport(int argc, char** argv) {
         next_camera.Frame(Toon::viewport::SceneBounds(next_snapshot));
         std::string next_name = FileName(path);
         hydra = std::move(next_scene);
+        playback = next_playback;
+        playback_clock = Clock::now();
         time_origin_frame = session->statistics().frames_presented;
         snapshot = std::move(next_snapshot);
         camera = next_camera;
@@ -650,6 +698,9 @@ int RunViewport(int argc, char** argv) {
             camera.Frame(Toon::viewport::SceneBounds(snapshot));
           } else if (event.key == Toon::viewport::Key::R) {
             camera.Reset();
+          } else if (event.key == Toon::viewport::Key::Space && !arguments.time_step) {
+            playback.SetPlaying(!playback.playing());
+            playback_clock = Clock::now();
           } else if (event.key == Toon::viewport::Key::O && event.control) {
 #if TOON_VIEWPORT_HAS_HYDRA
             open_file_requested = true;
@@ -696,6 +747,7 @@ int RunViewport(int argc, char** argv) {
         }
         last_present.reset();
         last_overlay = Clock::now();
+        playback_clock = Clock::now();
       }
       if (!arguments.switch_file.empty() && !file_switched &&
           session->statistics().frames_presented >= arguments.frame_limit / 2) {
@@ -707,12 +759,14 @@ int RunViewport(int argc, char** argv) {
       const std::uint32_t height = window->height();
       if (width == 0 || height == 0) {
         window->WaitForEvent();
+        playback_clock = Clock::now();
         continue;
       }
       Toon::viewport::CpuSample cpu;
       const auto hydra_start = Clock::now();
 #if TOON_VIEWPORT_HAS_HYDRA
       if (hydra != nullptr) {
+        const auto now = Clock::now();
         if (arguments.time_step) {
           const double time = arguments.time.value_or(hydra->start_time()) +
                               *arguments.time_step *
@@ -722,7 +776,11 @@ int RunViewport(int argc, char** argv) {
             throw std::runtime_error("animation time overflow");
           }
           hydra->SetTime(time);
+        } else if (playback.available()) {
+          playback.Advance(std::chrono::duration<double>(now - playback_clock).count());
+          hydra->SetTime(playback.time());
         }
+        playback_clock = now;
         hydra->Update(snapshot);
       }
 #endif
@@ -780,6 +838,11 @@ int RunViewport(int argc, char** argv) {
         shown.counts = CountScene(draws);
         shown.frame_uploads = frame_uploads;
         shown.uploads = Toon::viewport::UploadCounts::Of(session->statistics());
+        shown.playback = playback;
+        shown.deterministic_time = arguments.time_step.has_value();
+#if TOON_VIEWPORT_HAS_HYDRA
+        shown.hydra_syncs = hydra == nullptr ? 0 : hydra->sync_count();
+#endif
         const Toon::viewport::OverlayControls controls = overlay->Build(shown,
             Milliseconds(overlay_start - last_overlay) / 1000.0,
             overlay_draws);
@@ -787,6 +850,18 @@ int RunViewport(int argc, char** argv) {
         open_file_requested = controls.open_file;
         lighting = controls.lighting;
         draws.lighting = lighting;
+        if (!arguments.time_step) {
+          playback.SetSpeed(controls.playback_speed);
+          playback.SetLoop(controls.loop);
+          if (controls.toggle_playback) {
+            playback.SetPlaying(!playback.playing());
+            playback_clock = Clock::now();
+          }
+          if (controls.seek) {
+            playback.Seek(*controls.seek);
+            playback_clock = Clock::now();
+          }
+        }
         if (controls.samples != 0) {
           session->SetSamples(controls.samples);
         }
@@ -852,6 +927,12 @@ int RunViewport(int argc, char** argv) {
     }
 
     const Toon::PresentStatistics& statistics = session->statistics();
+#if TOON_VIEWPORT_HAS_HYDRA
+    if (hydra != nullptr) {
+      std::cout << "Animation: Hydra syncs=" << hydra->sync_count()
+                << " time_seconds=" << snapshot.time_seconds << '\n';
+    }
+#endif
     std::cout << "Scene summary: " << SceneSummary(draws) << '\n'
               << "Uploads: topology=" << statistics.topology_uploads
               << " points=" << statistics.point_uploads

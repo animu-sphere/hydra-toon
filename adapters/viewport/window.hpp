@@ -31,6 +31,7 @@ enum class Key {
   O,
   P,
   R,
+  Space,
   // The number row's 1, 2, 4 and 8: MSAA samples per pixel.
   Digit1,
   Digit2,

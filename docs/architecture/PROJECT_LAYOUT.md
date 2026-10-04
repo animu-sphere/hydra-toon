@@ -117,6 +117,16 @@ latching after draw extraction. `validation/expression_test.cpp` verifies
 state isolation and persistent Vulkan draws; the Hydra material and skinning
 checks verify the direct host route and restoration after scene sync.
 
+The viewport's USD playback transport lives in `adapters/viewport/playback.*`
+within `toon-viewport`. It converts elapsed seconds using the stage's time
+codes per second, and owns play/pause, range seeking, speed and loop state.
+It evaluates no motion or expression semantics. `hydra_scene.cpp` observes
+the terminal scene index and syncs only after time or prim changes; unchanged
+frames still apply pending updates and commit the delegate's state. Camera
+and lighting diagnostics remain draw-list values. The state test compiles
+the transport under `validation/` without OpenUSD, Vulkan or windowing;
+`check_playback.cmake` verifies the actual Hydra-fed presentation path.
+
 ## 4. Dependency directions
 
 ```text
