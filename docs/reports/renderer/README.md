@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [41](41-2026-10-05-viewport-material-debug.md) | Evaluated material values, bindings and override activity; MToon value controls and release; late host-route state/GPU checks, diagnostic-only equal values and removal/replacement isolation |
 | [40](40-2026-10-05-viewport-skeleton-debug.md) | Viewport evaluated USD joint names/parents/world origins, bones/markers/selection; remapping/rest fallback, six-plane clipping, unchanged GPU images/state and a 128-joint avatar playback inspection |
 | [39](39-2026-10-05-late-frame-input.md) | Evaluated input after extraction/GPU waits; atomic structural rejection, exact GPU comparisons, actual presentation timestamps, JSON/variance and representative avatar pose-buffer costs |
 | [38](38-2026-10-05-viewport-morph-debug.md) | Viewport evaluated subshape inspection, signed weight overrides and release controls; equal-value override diagnostics; actual HydraScene state/GPU route with no debug-induced sync or static uploads |

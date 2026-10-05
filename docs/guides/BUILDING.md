@@ -600,3 +600,15 @@ analysis. `present_endpoint` is `vkQueuePresentKHR_return` and
 `display_time_measured` is false: use external display instrumentation for
 scanout latency. [Report 39](../reports/renderer/39-2026-10-05-late-frame-input.md)
 records the receiver regression and representative avatar measurements.
+
+In a USD viewport session, expand `Materials` to inspect effective normalized
+values, renderer material ids and the meshes bound to them. Expand a material
+to see its model, alpha mode, sidedness and override activity. For MToon,
+drag colour/scalar or texture-transform fields, or Ctrl+click to enter a
+numeric value. Colours are linear. `Release material override` and
+`Release all material overrides` resume the latest evaluated scene values.
+These controls use the same late commit as the Morphs panel, so edits require
+no USD authoring or Hydra sync. Model, alpha mode, sidedness and texture ids
+are display-only. PreviewSurface values are read-only while that fallback
+draws mesh display colour. Runtime expression names and source-owner mappings
+are not supplied by these renderer-id diagnostics.

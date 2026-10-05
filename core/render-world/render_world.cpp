@@ -569,6 +569,7 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
     const auto override = material_overrides_.find(entry.first);
     snapshot.materials.push_back(override == material_overrides_.end()
             ? entry.second : override->second);
+    snapshot.materials.back().parameters_overridden = override != material_overrides_.end();
   }
   snapshot.textures.clear();
   for (const auto& entry : textures_) {

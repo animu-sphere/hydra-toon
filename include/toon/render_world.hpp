@@ -356,6 +356,8 @@ struct MaterialSnapshot {
   ToonMaterial material;
   std::uint64_t parameters_revision = 0;
   std::uint64_t structure_revision = 0;
+  // Diagnostic only; activating an equal-value override advances no revision.
+  bool parameters_overridden = false;
 };
 
 struct FrameSnapshot {
