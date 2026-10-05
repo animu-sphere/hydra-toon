@@ -112,8 +112,7 @@ ids from `CommitScene`; no USD authoring, scene-index read or Hydra sync is
 involved in a host override. Scene evaluation can continue underneath it.
 The host supplies evaluated subshape weights and normalized material values;
 source expression semantics and inbetween evaluation remain outside core.
-These operations still precede commit/extraction; they do not implement late
-latching after draw extraction. `validation/expression_test.cpp` verifies
+`validation/expression_test.cpp` verifies
 state isolation and persistent Vulkan draws; the Hydra material and skinning
 checks verify the direct host route and restoration after scene sync.
 
@@ -131,13 +130,51 @@ The viewport's Morphs panel reads effective weights and
 `MeshSnapshot::morph_weights_overridden` from the current commit. This
 diagnostic flag does not advance rendering revisions. Overlay commands go
 through `HydraScene::SetMorphWeightsOverride` / `ClearMorphWeightsOverride`
-in `hydra_scene.cpp` and are published by the next frame's commit without
+in `hydra_scene.cpp` and are published by this frame's late commit without
 USD authoring or a sync request. No UI copy of the binding or override state
 is retained, so target/count invalidation and scene replacement follow the
 render world's lifetime. The panel identifies evaluated subshape slots by
 mesh id and weight index; source expression names and mappings are not
 defined here. `toon-viewport-morph-debug-test`, built only with the viewport
 and Hydra adapter, exercises this host route with state and GPU checks.
+
+Late evaluated values reuse the existing targets. `ApplyFastSnapshot` lives
+in `core/render-extraction/fast_snapshot.cpp`: it validates the entire
+candidate before replacing fast draw values in existing storage. Draw
+membership, material bindings, immutable structural arrays, slow revisions,
+palette/weight counts, material structure and textures must match. Camera,
+pose, signed weights, material parameters and lights must be finite.
+Structural changes remain ordinary extraction work.
+
+Both Vulkan sessions expose `LateFrameSource` in `vulkan_backend.hpp`.
+After frame/acquire waits, structural resource preparation and overlay
+uploads, they call the host once, validate its complete `FrameSnapshot`,
+then write fast buffers and record commands using the selected values. A
+rejected structural candidate retains the extracted frame and exposes a
+reason/count; a callback error fails the frame. There is no format-library
+link or source expression evaluator here. The host owns evaluation,
+serialization, source clock conversion and revisions. Immutable arrays
+must be shared with ordinary extraction, and the callback/context must
+remain valid until unregistered. An empty source disables the late read.
+
+The viewport uses `HydraScene::ReadFast`, a delegate commit without USD time
+changes, pending-update processing or Hydra sync, and supplies its current
+orbit camera afterward. Debug edits made after extraction can therefore
+reach the current submit. USD playback still evaluates before extraction;
+this path does not create a new live MotionPose or gaze evaluator.
+
+`FrameSnapshot::InputTimes` carries host-monotonic input timestamps without
+making the render world own a producer clock. Vulkan statistics record late
+read, buffer-write, submit and present-API-return endpoints, plus joint,
+morph and material write CPU costs. The existing viewport telemetry keeps
+1024-frame windows, variance and standard deviation, with a live Latency
+panel and `--telemetry-output` JSON. Each response series records only the
+first completed frame for an input update; missing timestamps are absent
+samples. Per-frame JSON retains timestamps for age analysis. Present return
+is not scanout; offscreen frames have no present endpoint. Source-produced
+sample and display measurements require external host instrumentation.
+`toon-late-frame-test` verifies atomic rejection and GPU image equivalence;
+`check_latency.cmake` checks exported actual presentation endpoints.
 
 ## 4. Dependency directions
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <toon/render_world.hpp>
@@ -26,6 +27,7 @@ struct LightingDebug {
 // What a frame draws: every visible mesh whose topology its points can
 // satisfy, the materials they bind, and the camera they are seen through.
 struct DrawList {
+  FrameSnapshot::InputTimes inputs;
   std::uint64_t source_revision = 0;
   ToonView view;
   std::uint64_t view_revision = 0;
@@ -52,6 +54,13 @@ struct DrawList {
 // Fills `draws`, reusing its storage.
 void ExtractDrawList(const FrameSnapshot& snapshot, DrawList& draws);
 [[nodiscard]] DrawList ExtractDrawList(const FrameSnapshot& snapshot);
+
+// Apply the latest evaluated frame after extraction, retaining resident draw
+// membership and every structural resource. Rejects a changed binding, target,
+// weight count, material structure or texture before changing anything.
+// Rejection means a host must take the change through ordinary extraction.
+[[nodiscard]] bool ApplyFastSnapshot(const FrameSnapshot& latest,
+    DrawList& draws, std::string& error);
 
 // Rest-point envelopes, rebuilt only on points, topology or skin changes.
 // Pose evaluation transforms joint boxes, never skins the vertex array.

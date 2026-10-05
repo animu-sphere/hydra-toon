@@ -359,6 +359,14 @@ struct MaterialSnapshot {
 };
 
 struct FrameSnapshot {
+  // Host-clock timestamps in steady-clock nanoseconds; zero means absent.
+  // Producers map their own clocks explicitly before supplying these values.
+  struct InputTimes {
+    std::int64_t pose = 0;
+    std::int64_t expression = 0;
+    std::int64_t look_at = 0;
+    std::int64_t camera = 0;
+  } inputs;
   // Advances once per commit that follows any change.
   std::uint64_t revision = 0;
   ToonView view;

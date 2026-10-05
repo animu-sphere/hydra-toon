@@ -1077,71 +1077,73 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
 }
 
 bool MaterialCache::Update(const DrawList& draws,
-    const TextureCache& textures, std::string& detail) {
-  auto* frame = static_cast<float*>(frame_buffer_.mapped);
-  std::memset(frame, 0, kFrameBytes);
-  frame[0] = static_cast<float>(draws.time_seconds);
-  frame[2] = static_cast<float>(draws.lighting.material);
-  frame[3] = draws.meters_per_unit;
-  const auto transform = [&](Float3 value, float w) {
-    const auto& m = draws.view.view.m;
-    return Float3{m[0] * value.x + m[4] * value.y + m[8] * value.z + m[12] * w,
-        m[1] * value.x + m[5] * value.y + m[9] * value.z + m[13] * w,
-        m[2] * value.x + m[6] * value.y + m[10] * value.z + m[14] * w};
-  };
-  std::uint32_t count = 0;
-  const auto append = [&](const ToonLight& light, bool view_space) {
-    if (!light.visible) {
-      return;
+    const TextureCache& textures, std::string& detail, bool fast_values) {
+  if (fast_values) {
+    auto* frame = static_cast<float*>(frame_buffer_.mapped);
+    std::memset(frame, 0, kFrameBytes);
+    frame[0] = static_cast<float>(draws.time_seconds);
+    frame[2] = static_cast<float>(draws.lighting.material);
+    frame[3] = draws.meters_per_unit;
+    const auto transform = [&](Float3 value, float w) {
+      const auto& m = draws.view.view.m;
+      return Float3{m[0] * value.x + m[4] * value.y + m[8] * value.z + m[12] * w,
+          m[1] * value.x + m[5] * value.y + m[9] * value.z + m[13] * w,
+          m[2] * value.x + m[6] * value.y + m[10] * value.z + m[14] * w};
+    };
+    std::uint32_t count = 0;
+    const auto append = [&](const ToonLight& light, bool view_space) {
+      if (!light.visible) {
+        return;
+      }
+      if (light.type == ToonLightType::Ambient) {
+        frame[4] += light.color.x * draws.lighting.ambient_scale;
+        frame[5] += light.color.y * draws.lighting.ambient_scale;
+        frame[6] += light.color.z * draws.lighting.ambient_scale;
+        return;
+      }
+      if (count == kLightCapacity) {
+        return;
+      }
+      float* slot = frame + 8 + count++ * 16;
+      slot[0] = light.color.x * draws.lighting.direct_scale;
+      slot[1] = light.color.y * draws.lighting.direct_scale;
+      slot[2] = light.color.z * draws.lighting.direct_scale;
+      slot[3] = static_cast<float>(light.type);
+      const Float3 position = view_space ? light.position : transform(light.position, 1.0F);
+      slot[4] = position.x;
+      slot[5] = position.y;
+      slot[6] = position.z;
+      slot[7] = light.radius;
+      const Float3 direction = view_space ? light.direction : transform(light.direction, 0.0F);
+      slot[8] = direction.x;
+      slot[9] = direction.y;
+      slot[10] = direction.z;
+      constexpr float radians = 0.017453292519943295F;
+      slot[11] = std::cos(light.cone_angle * radians);
+      slot[12] = std::cos(light.cone_angle * (1.0F - light.cone_softness) * radians);
+    };
+    if (!draws.lighting.scene_lights || draws.lights.empty()) {
+      ToonLight key;
+      key.direction = {-draws.lighting.key_direction.x,
+          -draws.lighting.key_direction.y, -draws.lighting.key_direction.z};
+      // A zero debug direction keeps the default key instead of producing NaNs.
+      if (key.direction == Float3{}) {
+        key.direction = {-0.25F, -0.5F, -1.0F};
+      }
+      append(key, true);
+      ToonLight ambient;
+      ambient.type = ToonLightType::Ambient;
+      ambient.color = {0.25F, 0.25F, 0.25F};
+      append(ambient, true);
+    } else {
+      for (const auto& light : draws.lights) {
+        append(light.light, false);
+      }
     }
-    if (light.type == ToonLightType::Ambient) {
-      frame[4] += light.color.x * draws.lighting.ambient_scale;
-      frame[5] += light.color.y * draws.lighting.ambient_scale;
-      frame[6] += light.color.z * draws.lighting.ambient_scale;
-      return;
+    frame[1] = static_cast<float>(count);
+    if (!FlushIfNeeded(device_, frame_buffer_, detail)) {
+      return false;
     }
-    if (count == kLightCapacity) {
-      return;
-    }
-    float* slot = frame + 8 + count++ * 16;
-    slot[0] = light.color.x * draws.lighting.direct_scale;
-    slot[1] = light.color.y * draws.lighting.direct_scale;
-    slot[2] = light.color.z * draws.lighting.direct_scale;
-    slot[3] = static_cast<float>(light.type);
-    const Float3 position = view_space ? light.position : transform(light.position, 1.0F);
-    slot[4] = position.x;
-    slot[5] = position.y;
-    slot[6] = position.z;
-    slot[7] = light.radius;
-    const Float3 direction = view_space ? light.direction : transform(light.direction, 0.0F);
-    slot[8] = direction.x;
-    slot[9] = direction.y;
-    slot[10] = direction.z;
-    constexpr float radians = 0.017453292519943295F;
-    slot[11] = std::cos(light.cone_angle * radians);
-    slot[12] = std::cos(light.cone_angle * (1.0F - light.cone_softness) * radians);
-  };
-  if (!draws.lighting.scene_lights || draws.lights.empty()) {
-    ToonLight key;
-    key.direction = {-draws.lighting.key_direction.x,
-        -draws.lighting.key_direction.y, -draws.lighting.key_direction.z};
-    // A zero debug direction keeps the default key instead of producing NaNs.
-    if (key.direction == Float3{}) {
-      key.direction = {-0.25F, -0.5F, -1.0F};
-    }
-    append(key, true);
-    ToonLight ambient;
-    ambient.type = ToonLightType::Ambient;
-    ambient.color = {0.25F, 0.25F, 0.25F};
-    append(ambient, true);
-  } else {
-    for (const auto& light : draws.lights) {
-      append(light.light, false);
-    }
-  }
-  frame[1] = static_cast<float>(count);
-  if (!FlushIfNeeded(device_, frame_buffer_, detail)) {
-    return false;
   }
   ++generation_;
   bool written = false;
@@ -1166,8 +1168,9 @@ bool MaterialCache::Update(const DrawList& draws,
     // entry. No slot write is needed: it only controls command recording.
     entry.zero_width_texture =
         textures.ZeroGreen(material.material.mtoon.outline_width_texture.texture);
-    if (entry.parameters_revision != material.parameters_revision ||
-        entry.entries != entries) {
+    if (fast_values && (entry.parameters_revision != material.parameters_revision ||
+        entry.entries != entries)) {
+      const auto write_start = SteadyNanoseconds();
       auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
       WriteParameters(material.material, entries, slots[entry.slot]);
       entry.parameters_revision = material.parameters_revision;
@@ -1182,6 +1185,7 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.depth_write = WritesDepth(material.material);
       ++writes_;
       written = true;
+      parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
     }
     entry.generation = generation_;
   }
@@ -1193,7 +1197,11 @@ bool MaterialCache::Update(const DrawList& draws,
       ++entry;
     }
   }
-  return !written || FlushIfNeeded(device_, buffer_, detail);
+  if (!written) return true;
+  const auto flush_start = SteadyNanoseconds();
+  const bool flushed = FlushIfNeeded(device_, buffer_, detail);
+  parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - flush_start) / 1e6;
+  return flushed;
 }
 
 const MaterialCache::Entry* MaterialCache::Find(MaterialId material) const {
@@ -1262,7 +1270,7 @@ bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
   return true;
 }
 
-bool MeshCache::Update(const DrawList& draws, std::string& detail) {
+bool MeshCache::Update(const DrawList& draws, std::string& detail, bool fast_values) {
   ++generation_;
   for (const MeshSnapshot& mesh : draws.draws) {
     Entry& entry = entries_[mesh.id];
@@ -1308,7 +1316,7 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
     // Against this frame's topology, which can reach past UVs that were
     // long enough before, or come back within them.
     entry.has_uvs = uvs_present && mesh.uvs->size() >= mesh.index_bound;
-    if (!UpdateSkin(mesh, entry, detail)) {
+    if (!UpdateSkin(mesh, entry, detail, fast_values)) {
       return false;
     }
     entry.generation = generation_;
@@ -1332,7 +1340,7 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail) {
 // Morph targets have their own structural revision; weight changes write
 // only that buffer, including on a mesh without a skin.
 bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
-    std::string& detail) {
+    std::string& detail, bool fast_values) {
   const bool was_skinned = entry.skinned;
   const bool was_morphed = entry.morphed;
   entry.skinned = IsSkinned(mesh);
@@ -1360,7 +1368,8 @@ bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     entry.pose_revision = 0;
     ++skin_uploads_;
   }
-  if (entry.skinned && entry.pose_revision != mesh.pose_revision) {
+  if (fast_values && entry.skinned && entry.pose_revision != mesh.pose_revision) {
+    const auto write_start = SteadyNanoseconds();
     joint_scratch_.clear();
     joint_scratch_.push_back(mesh.skeleton_to_mesh);
     for (const Matrix4& joint : *mesh.joints) {
@@ -1375,6 +1384,7 @@ bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     rebind = rebind || entry.joints.buffer != before;
     entry.pose_revision = mesh.pose_revision;
     ++pose_writes_;
+    pose_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
   }
   if (entry.morphed && entry.morph_revision != mesh.morph_revision) {
     if (!Upload(entry.morph_offsets, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -1387,7 +1397,8 @@ bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     rebind = true;
     ++morph_uploads_;
   }
-  if (entry.morphed && entry.morph_weights_revision != mesh.morph_weights_revision) {
+  if (fast_values && entry.morphed && entry.morph_weights_revision != mesh.morph_weights_revision) {
+    const auto write_start = SteadyNanoseconds();
     const VkBuffer before = entry.morph_weights.buffer;
     const VkDeviceSize bytes = mesh.morph_weights->size() * sizeof(float);
     if (!Upload(entry.morph_weights, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -1396,6 +1407,7 @@ bool MeshCache::UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
     entry.morph_weight_bytes = bytes;
     entry.morph_weights_revision = mesh.morph_weights_revision;
     ++morph_weight_writes_;
+    morph_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
   }
   if (rebind) PointSkinSet(entry.skin_set, &entry);
   entry.skin_flags = (entry.skinned ? kDrawSkinned |
@@ -1455,14 +1467,14 @@ void MeshCache::PointSkinSet(VkDescriptorSet set, const Entry* entry) {
   if (entry != nullptr) {
     if (entry->skinned) {
       buffers[0].buffer = entry->influences.buffer;
-      buffers[1].buffer = entry->joints.buffer;
+      if (entry->joints.buffer != VK_NULL_HANDLE) buffers[1].buffer = entry->joints.buffer;
     }
     if (entry->morphed) {
       buffers[2].buffer = entry->morph_offsets.buffer;
       buffers[3].buffer = entry->morph_ranges.buffer;
-      buffers[4].buffer = entry->morph_weights.buffer;
+      if (entry->morph_weights.buffer != VK_NULL_HANDLE) buffers[4].buffer = entry->morph_weights.buffer;
       // GetDimensions sees the current count, including after shrink.
-      buffers[4].range = entry->morph_weight_bytes;
+      if (entry->morph_weight_bytes != 0) buffers[4].range = entry->morph_weight_bytes;
     }
   }
   VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};

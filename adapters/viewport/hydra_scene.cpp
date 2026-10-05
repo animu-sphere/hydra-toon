@@ -2,6 +2,7 @@
 #include "hydra_scene.hpp"
 
 #include "adapter.hpp"
+#include <toon/vulkan_backend.hpp>
 
 #include <pxr/pxr.h>
 
@@ -116,6 +117,12 @@ public:
       ++sync_count_;
     }
     delegate_.CommitScene(snapshot);
+    snapshot.inputs = inputs_;
+  }
+
+  void ReadFast(FrameSnapshot& snapshot) override {
+    delegate_.CommitScene(snapshot);
+    snapshot.inputs = inputs_;
   }
 
   void SetTime(double time) override {
@@ -123,6 +130,7 @@ public:
       return;
     }
     time_ = time;
+    inputs_.pose = inputs_.expression = Toon::SteadyNanoseconds();
     needs_sync_ = true;
     indices_.stageSceneIndex->SetTime(UsdTimeCode(time));
     delegate_.SetRenderSetting(TfToken("toon:timeSeconds"),
@@ -134,11 +142,14 @@ public:
   }
 
   bool SetMorphWeightsOverride(MeshId mesh, std::vector<float> weights) override {
-    return delegate_.SetMeshMorphWeightsOverride(mesh, std::move(weights));
+    if (!delegate_.SetMeshMorphWeightsOverride(mesh, std::move(weights))) return false;
+    inputs_.expression = Toon::SteadyNanoseconds();
+    return true;
   }
 
   void ClearMorphWeightsOverride(MeshId mesh) override {
     delegate_.ClearMeshMorphWeightsOverride(mesh);
+    inputs_.expression = Toon::SteadyNanoseconds();
   }
 
   double end_time() const noexcept override {
@@ -185,6 +196,7 @@ private:
   bool needs_sync_ = true;
   std::uint64_t sync_count_ = 0;
   std::optional<double> time_;
+  FrameSnapshot::InputTimes inputs_;
 };
 
 } // namespace

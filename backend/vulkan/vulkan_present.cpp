@@ -183,6 +183,7 @@ public:
   void RequestCapture() override {
     capture_requested_ = true;
   }
+  void SetLateFrameSource(LateFrameSource source) override { late_.source = source; }
 
   void ResetScene() override {
     reset_scene_ = true;
@@ -273,6 +274,7 @@ private:
   VkExtent2D capture_extent_{};
   HostBuffer capture_;
   PresentStatistics statistics_;
+  vulkan_internal::LateFrameState late_;
 };
 
 bool VulkanPresentSession::CapturableFormat(VkFormat format, bool& bgra) {
@@ -687,7 +689,7 @@ bool VulkanPresentSession::ApplySamples(std::string& error) {
   return true;
 }
 
-bool VulkanPresentSession::RenderFrame(const DrawList& draws,
+bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
     const OverlayDrawList& overlay, std::uint32_t width,
     std::uint32_t height, bool& presented,
     std::string& error) {
@@ -735,11 +737,23 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
     return VulkanOk(acquire, "vkAcquireNextImageKHR", error);
   }
-  if (!meshes_.Update(draws, error) || !textures_.Update(draws, error) ||
-      !materials_.Update(draws, textures_, error) ||
+  const double pose_before = meshes_.pose_write_ms();
+  const double morph_before = meshes_.morph_write_ms();
+  const double material_before = materials_.parameter_write_ms();
+  if (!textures_.Update(extracted, error) ||
+      (late_.enabled() && (!meshes_.Update(extracted, error, false) ||
+          !materials_.Update(extracted, textures_, error, false))) ||
       !overlay_.Update(overlay, error)) {
     return false;
   }
+  const DrawList* frame = nullptr;
+  if (!late_.Read(extracted, frame, statistics_, error)) return false;
+  const DrawList& draws = *frame;
+  if (!meshes_.Update(draws, error) || !materials_.Update(draws, textures_, error)) return false;
+  statistics_.latency.buffers_written = SteadyNanoseconds();
+  statistics_.latency.pose_write_ms = meshes_.pose_write_ms() - pose_before;
+  statistics_.latency.morph_write_ms = meshes_.morph_write_ms() - morph_before;
+  statistics_.latency.material_write_ms = materials_.parameter_write_ms() - material_before;
   statistics_.topology_uploads = meshes_.topology_uploads();
   statistics_.point_uploads = meshes_.point_uploads();
   statistics_.material_writes = materials_.writes();
@@ -930,6 +944,8 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
     return false;
   }
   ++submitted_;
+  statistics_.latency.frame = submitted_;
+  statistics_.latency.submitted = SteadyNanoseconds();
   timed_frame_ = timestamps_ != VK_NULL_HANDLE ? submitted_ : 0U;
   statistics_.draws = {record.unlit, record.outline, record.opaque,
       record.transparent, record.triangles, record.pipeline_binds,
@@ -948,6 +964,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& draws,
   present.pSwapchains = &swapchain_;
   present.pImageIndices = &image_index;
   const VkResult present_result = vkQueuePresentKHR(queue_, &present);
+  statistics_.latency.present_returned = SteadyNanoseconds();
   if (present_result == VK_ERROR_OUT_OF_DATE_KHR ||
       present_result == VK_SUBOPTIMAL_KHR) {
     if (present_result == VK_SUBOPTIMAL_KHR) {

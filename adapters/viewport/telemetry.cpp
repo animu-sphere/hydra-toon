@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <locale>
 #include <sstream>
 
 namespace Toon::viewport {
@@ -24,6 +25,7 @@ Series::Series(std::size_t capacity) : capacity_(capacity) {
 }
 
 void Series::Push(double value) {
+  if (capacity_ == 0 || !std::isfinite(value) || value < 0) return;
   if (values_.size() < capacity_) {
     values_.push_back(value);
     return;
@@ -45,6 +47,12 @@ Summary Series::Summarize() const {
     total += value;
   }
   summary.mean = total / static_cast<double>(sorted_.size());
+  for (double value : sorted_) {
+    const double delta = value - summary.mean;
+    summary.variance += delta * delta;
+  }
+  summary.variance /= static_cast<double>(sorted_.size());
+  summary.stddev = std::sqrt(summary.variance);
   summary.p50 = Percentile(sorted_, 0.50);
   summary.p95 = Percentile(sorted_, 0.95);
   summary.p99 = Percentile(sorted_, 0.99);
@@ -68,6 +76,37 @@ FrameTelemetry::FrameTelemetry()
       gpu_transparent_(kWindow), gpu_resolve_(kWindow),
       gpu_capture_(kWindow), gpu_overlay_(kWindow), gpu_work_(kWindow),
       gpu_frame_(kWindow) {
+  latency_frames_.reserve(kWindow);
+}
+
+void FrameTelemetry::PushLatency(const FrameLatency& sample) {
+  const auto age = [&](std::size_t index, Series& series, std::int64_t input, std::int64_t endpoint) {
+    if (input > 0 && endpoint >= input && input != measured_inputs_[index]) {
+      series.Push(static_cast<double>(endpoint - input) / 1e6);
+      measured_inputs_[index] = input;
+    }
+  };
+  age(0, pose_buffer_, sample.inputs.pose, sample.buffers_written);
+  age(1, pose_submit_, sample.inputs.pose, sample.submitted);
+  age(2, pose_present_, sample.inputs.pose, sample.present_returned);
+  age(3, expression_submit_, sample.inputs.expression, sample.submitted);
+  age(4, look_at_submit_, sample.inputs.look_at, sample.submitted);
+  age(5, camera_present_, sample.inputs.camera, sample.present_returned);
+  pose_write_.Push(sample.pose_write_ms);
+  morph_write_.Push(sample.morph_write_ms);
+  material_write_.Push(sample.material_write_ms);
+  if (latency_frames_.size() < kWindow) latency_frames_.push_back(sample);
+  else {
+    latency_frames_[latency_next_] = sample;
+    latency_next_ = (latency_next_ + 1U) % kWindow;
+  }
+}
+
+std::vector<FrameTelemetry::Named> FrameTelemetry::Latency() const {
+  return {{"pose_buffer", &pose_buffer_}, {"pose_submit", &pose_submit_},
+      {"pose_present_api", &pose_present_}, {"expression_submit", &expression_submit_},
+      {"look_at_submit", &look_at_submit_}, {"camera_present_api", &camera_present_},
+      {"pose_write", &pose_write_}, {"morph_write", &morph_write_}, {"material_write", &material_write_}};
 }
 
 void FrameTelemetry::PushCpu(const CpuSample& sample) {
@@ -119,7 +158,8 @@ std::string FrameTelemetry::Report() const {
     report << "Timing: " << group << ' ' << named.name
            << " frames=" << summary.count << " mean=" << summary.mean
            << " p50=" << summary.p50 << " p95=" << summary.p95
-           << " p99=" << summary.p99 << " max=" << summary.max << " ms\n";
+           << " p99=" << summary.p99 << " max=" << summary.max
+           << " stddev=" << summary.stddev << " ms\n";
   };
   for (const Named& named : Cpu()) {
     line("cpu", named);
@@ -127,7 +167,42 @@ std::string FrameTelemetry::Report() const {
   for (const Named& named : Gpu()) {
     line("gpu", named);
   }
+  for (const Named& named : Latency()) line("latency", named);
   return report.str();
+}
+
+std::string FrameTelemetry::Json() const {
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(12) << "{\"schema\":1,\"clock\":\"steady_nanoseconds\","
+      << "\"present_endpoint\":\"vkQueuePresentKHR_return\",\"display_time_measured\":false,\"summaries_ms\":{";
+  bool first = true;
+  const auto summary = [&](const char* group, const Named& row) {
+    if (!first) out << ',';
+    first = false;
+    const auto s = row.series->Summarize();
+    out << '"' << group << '_' << row.name << "\":{\"count\":" << s.count
+        << ",\"mean\":" << s.mean << ",\"p95\":" << s.p95 << ",\"p99\":" << s.p99
+        << ",\"max\":" << s.max << ",\"variance_ms2\":" << s.variance << ",\"stddev\":" << s.stddev << '}';
+  };
+  for (const auto& row : Cpu()) summary("cpu", row);
+  for (const auto& row : Gpu()) summary("gpu", row);
+  for (const auto& row : Latency()) summary("latency", row);
+  out << "},\"frames\":[";
+  for (std::size_t i = 0; i < latency_frames_.size(); ++i) {
+    if (i != 0) out << ',';
+    const auto& f = latency_frames_[(latency_next_ + i) % latency_frames_.size()];
+    out << "{\"frame\":" << f.frame << ",\"pose_input_ns\":" << f.inputs.pose
+        << ",\"expression_input_ns\":" << f.inputs.expression << ",\"look_at_input_ns\":" << f.inputs.look_at
+        << ",\"camera_input_ns\":" << f.inputs.camera << ",\"latched_ns\":" << f.latched
+        << ",\"buffers_written_ns\":" << f.buffers_written << ",\"submitted_ns\":" << f.submitted
+        << ",\"present_returned_ns\":" << f.present_returned
+        << ",\"pose_write_ms\":" << f.pose_write_ms << ",\"morph_write_ms\":" << f.morph_write_ms
+        << ",\"material_write_ms\":" << f.material_write_ms
+        << ",\"late_sample_applied\":" << (f.late_sample_applied ? "true" : "false") << '}';
+  }
+  out << "]}\n";
+  return out.str();
 }
 
 } // namespace Toon::viewport

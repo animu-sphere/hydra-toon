@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,6 +21,8 @@ struct Summary {
   double p95 = 0.0;
   double p99 = 0.0;
   double max = 0.0;
+  double variance = 0.0;
+  double stddev = 0.0;
 };
 
 // The last `capacity` values of one quantity, oldest first once full.
@@ -64,6 +67,7 @@ public:
   void PushCpu(const CpuSample& sample);
   // A frame's GPU times, pushed once each, as they arrive.
   void PushGpu(const PresentGpuTimes& times);
+  void PushLatency(const FrameLatency& sample);
 
   // One named series per quantity; the GPU's are empty until a frame's
   // times arrive.
@@ -73,12 +77,14 @@ public:
   };
   [[nodiscard]] std::vector<Named> Cpu() const;
   [[nodiscard]] std::vector<Named> Gpu() const;
+  [[nodiscard]] std::vector<Named> Latency() const;
   [[nodiscard]] const Series& interval() const {
     return interval_;
   }
 
   // The run's last lines: every series, summarized over the window.
   [[nodiscard]] std::string Report() const;
+  [[nodiscard]] std::string Json() const;
 
 private:
   Series interval_;
@@ -99,6 +105,14 @@ private:
   // The frame without its image wait: the GPU's own work.
   Series gpu_work_;
   Series gpu_frame_;
+  Series pose_buffer_{kWindow}, pose_submit_{kWindow}, pose_present_{kWindow};
+  Series expression_submit_{kWindow}, look_at_submit_{kWindow}, camera_present_{kWindow};
+  Series pose_write_{kWindow}, morph_write_{kWindow}, material_write_{kWindow};
+  std::vector<FrameLatency> latency_frames_;
+  std::size_t latency_next_ = 0;
+  // Response latency uses the first completed frame for each input update.
+  // Repeated frames of a stationary camera are not new response samples.
+  std::array<std::int64_t, 6> measured_inputs_{};
 };
 
 } // namespace Toon::viewport

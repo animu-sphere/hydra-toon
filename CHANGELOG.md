@@ -10,6 +10,17 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Evaluated late-frame input in both Vulkan sessions: after GPU/acquire waits
+  and structural preparation, accept latest poses, morph weights, material
+  parameters and camera values without another extraction or static upload.
+  Structural or non-finite samples are rejected atomically and retain the
+  ordinary extracted frame. Source evaluation remains external.
+- Monotonic input/write/submit/present-API timestamps, fast-buffer CPU costs,
+  frame-time variance, a viewport Latency panel and `--telemetry-output` JSON.
+  Repeated unchanged inputs do not inflate response-latency samples; actual
+  display timing remains unmeasured.
+- Late-input state/GPU and viewport presentation regressions, including
+  post-extraction updates and structural fallback with exact image checks.
 - Viewport Morphs panel: inspect evaluated subshape slots, edit signed weights,
   and release one or all transient overrides to resume current USD animation.
   Edits use the delegate fast path without USD authoring or Hydra sync.
