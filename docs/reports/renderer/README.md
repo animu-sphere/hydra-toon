@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [42](42-2026-10-05-avatar-state-adapter.md) | Optional revision-3 runtime consumer; retained snapshots and explicit resource mappings, reset/layout checks, controlled late Vulkan comparisons, release and independent installed consumers |
 | [41](41-2026-10-05-viewport-material-debug.md) | Evaluated material values, bindings and override activity; MToon value controls and release; late host-route state/GPU checks, diagnostic-only equal values and removal/replacement isolation |
 | [40](40-2026-10-05-viewport-skeleton-debug.md) | Viewport evaluated USD joint names/parents/world origins, bones/markers/selection; remapping/rest fallback, six-plane clipping, unchanged GPU images/state and a 128-joint avatar playback inspection |
 | [39](39-2026-10-05-late-frame-input.md) | Evaluated input after extraction/GPU waits; atomic structural rejection, exact GPU comparisons, actual presentation timestamps, JSON/variance and representative avatar pose-buffer costs |

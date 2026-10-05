@@ -16,7 +16,7 @@ function(toon_install_renderer)
       DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders")
   endif()
   install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" PATTERN "fast" EXCLUDE)
 
   set(_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/Toon")
   configure_package_config_file(

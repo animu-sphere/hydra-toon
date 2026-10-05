@@ -37,6 +37,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
+| `adapters/fast/` | `toon-avatar-state` | `Toon::AvatarState` | optional revision-3 runtime state consumer (`TOON_ENABLE_AVATAR_STATE`); only the runtime C headers are required, with snapshot calls supplied by the host |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
 `formations/vrm-host-session/` builds nothing: it is an OpenStrata Formation
@@ -64,7 +65,7 @@ placement rule; it does not say the component exists.
 | WebGPU backend | `backend/webgpu/` | new backend target |
 | Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
-| Public evaluated avatar state → renderer-private values | `adapters/fast/` when introduced | new optional adapter target |
+| Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/` | `toon-viewport` |
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
@@ -73,11 +74,17 @@ The evaluated-state consumer belongs in the optional `adapters/fast/` target,
 not in render-world, render-extraction or a backend. It may consume the minimal
 public contract from `usd-avatar-runtime`; orchestration and format providers
 stay in the external host. Adapter-specific public headers must be separate
-from core headers. Target/option names and install rules are defined with the
-implementation; this placement rule adds no build target or package dependency.
+from core headers. The option is `TOON_ENABLE_AVATAR_STATE` (default `OFF`);
+`TOON_AVATAR_RUNTIME_INCLUDE_DIR` supplies the public C headers.
+`include/toon/fast/avatar_state.hpp` is its separate public header. It maps
+explicit host bindings into a renderer snapshot and retains runtime snapshots
+through the supplied C function table. No evaluator or runtime library is
+linked. The optional target is installed in a separate CMake export, loaded
+only by `find_package(Toon COMPONENTS AvatarState)`; this component requires
+the runtime headers at consumption time. Core-only consumers require none.
 The runtime's evaluation Scene Index remains upstream, consumed through the
-Hydra adapter's data-source route. Both adapters normalize into `RenderWorld`
-and use the same extraction and backend paths.
+Hydra adapter's data-source route. Both adapters normalize into renderer-private
+snapshot values and use the same extraction and backend paths.
 
 The sparse morph representation lives in `include/toon/render_world.hpp`:
 `ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,
@@ -205,7 +212,7 @@ sample and display measurements require external host instrumentation.
 ## 4. Dependency directions
 
 ```text
-adapters/{headless,viewport,hydra2} (+ optional fast adapter when introduced)
+adapters/{headless,viewport,hydra2,fast}
         │
         ▼
 backend/vulkan ──→ core/render-extraction ──→ core/render-world
