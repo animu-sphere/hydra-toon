@@ -1,7 +1,7 @@
 set(core_headers
   "@PROJECT_SOURCE_DIR@/include/toon/render_world.hpp"
   "@PROJECT_SOURCE_DIR@/include/toon/extraction.hpp")
-set(forbidden_tokens "vulkan/" "pxr/" "Qt" "windows.h" "d3d" "Metal/")
+set(forbidden_tokens "vulkan/" "pxr/" "Qt" "windows.h" "d3d" "Metal/" "avatarRuntime/")
 
 foreach(header IN LISTS core_headers)
   file(READ "${header}" source)

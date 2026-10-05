@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Optional `Toon::AvatarState` adapter for `usd-avatar-runtime` experimental
+  C ABI revision 3: retained results, explicit pose/subshape/MToon/visibility
+  mappings, layout and host binding checks, and release to the current scene.
+  Controlled Vulkan late-input comparisons and real-runtime reset/destruction
+  lifetime checks; independent core and installed component consumers.
 - Viewport Materials panel: effective normalized values, bound mesh ids and
   override activity; MToon colour/scalar/texture-transform edits with per-material
   and release-all controls through the late value route. Equal-value overrides

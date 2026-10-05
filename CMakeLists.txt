@@ -26,6 +26,7 @@ option(TOON_ENABLE_HYDRA2 "Build the optional co-built OpenUSD Hydra 2 adapter"
   OFF)
 option(TOON_ENABLE_VIEWPORT "Build the optional GLFW/Vulkan viewport adapter"
   OFF)
+option(TOON_ENABLE_AVATAR_STATE "Build the optional avatar runtime state consumer" OFF)
 if("hydra2" IN_LIST OST_RENDERER_ADAPTERS)
   set(TOON_ENABLE_HYDRA2 ON CACHE BOOL
     "Build the optional co-built OpenUSD Hydra 2 adapter" FORCE)
@@ -49,6 +50,9 @@ toon_configure_dependencies()
 add_subdirectory(core/render-world)
 add_subdirectory(core/render-extraction)
 add_subdirectory(backend/vulkan)
+if(TOON_ENABLE_AVATAR_STATE)
+  add_subdirectory(adapters/fast)
+endif()
 add_subdirectory(adapters/headless)
 if(TOON_ENABLE_HYDRA2)
   add_subdirectory(adapters/hydra2)

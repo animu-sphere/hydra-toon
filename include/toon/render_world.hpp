@@ -189,7 +189,8 @@ struct MeshSnapshot {
   WeightArray morph_weights;
   std::uint64_t morph_weights_revision = 0;
   // Diagnostic state, even when an override equals the scene weights and
-  // therefore causes no GPU write. Only Commit sets this flag.
+  // therefore causes no GPU write. Published with the effective weights;
+  // changing the flag alone advances no rendering revision.
   bool morph_weights_overridden = false;
   Matrix4 transform;
   Float3 color{0.5F, 0.5F, 0.5F};
