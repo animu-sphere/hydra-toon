@@ -2,13 +2,16 @@
 
 [![License: Apache-2.0](https://img.shields.io/github/license/animu-sphere/hydra-toon)](LICENSE)
 
-> A low-latency, avatar-first Hydra raster renderer, optimized for
-> continuously changing animation rather than continuously changing scenes.
+> A low-latency, avatar-first toon rendering runtime with Hydra integration,
+> optimized for continuously changing animation rather than continuously
+> changing scenes.
 
 ## Scope
 
-`hydra-toon` renders VRM / MToon and MMD avatars through Hydra, on Vulkan first
-and WebGPU later. Its measure is input-to-photon latency and stable frame time,
+`hydra-toon` renders VRM / MToon and MMD avatars, on Vulkan first and WebGPU
+later. Hydra integration and direct evaluated-state input feed one renderer
+core ([design policy §34](docs/design/DESIGN_POLICY.md#34-evaluated-avatar-input-and-transport-parity)).
+Its measure is input-to-photon latency and stable frame time,
 not peak FPS. It is built for VTuber and streaming applications and for
 real-time motion from tracking, mocap and XR input.
 
@@ -21,8 +24,11 @@ semantics or device input. Those belong to
 [`usd-vrm-plugins`](https://github.com/animu-sphere/usd-vrm-plugins),
 [`usd-mmd-plugins`](https://github.com/animu-sphere/usd-mmd-plugins),
 [`usd-motion-plugins`](https://github.com/animu-sphere/usd-motion-plugins) and
-[`motion-connectors`](https://github.com/animu-sphere/motion-connectors), and
-the contract with each is the composed USD stage, never a link
+[`motion-connectors`](https://github.com/animu-sphere/motion-connectors).
+Avatar evaluation composition and shared evaluated state belong to
+[`usd-avatar-runtime`](https://github.com/animu-sphere/usd-avatar-runtime).
+Authored format semantics cross through USD; resolved runtime state crosses
+through an optional consumer adapter
 ([integration scope](docs/design/INTEGRATION_SCOPE_POLICY.md)). General USD
 rendering is [`hydra-merlin`](https://github.com/animu-sphere/hydra-merlin)'s
 role.
@@ -30,17 +36,21 @@ role.
 ## Architecture
 
 ```text
-             slow path
-USD stage ─→ Hydra ─→ hdToon adapter ─→ ToonScene ─→ DrawPackets ─┐
-                         (MToon / MMD / PreviewSurface             │
-                          → ToonMaterial)                          ▼
-             fast path                                   GPU resource update ─→ Vulkan | WebGPU
-MotionPose · expression · look-at · camera ──── late latch ──────┘
+USD stage ─→ Hydra / format imaging ───────────────┐
+Evaluated state ─→ Hydra output ──────────────────┴→ hdToon adapter ─┐
+       └────────→ fast adapter ────────────────────────────────────┤
+                                                                   ▼
+                                                              RenderWorld
+                                                               extraction
+                                                           late latch / GPU update
+                                                             Vulkan | WebGPU
 ```
 
 Static scene state and per-frame motion state take separate paths. A pose
-change updates a skeleton buffer and nothing else. Hydra is the scene
-integration layer: `usdview` checks the integration, and the renderer itself
+change updates a skeleton buffer and nothing else. The diagram is the target
+architecture; the [capability matrix](docs/reference/CAPABILITY_MATRIX.md)
+distinguishes existing late-frame input from runtime integration. Hydra is the
+scene integration layer: `usdview` checks the integration, and the renderer itself
 is judged in its own viewport. See the
 [design policy](docs/design/DESIGN_POLICY.md).
 

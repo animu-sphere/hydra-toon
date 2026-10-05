@@ -12,7 +12,9 @@ owner: hydra-toon
 > distilled from the 2026-09-26 implementation policy, whose section numbers it
 > keeps so either can be cited by number, and revised by the 2026-09-28
 > direction, which brought the dedicated viewport forward and put platform
-> coverage after the renderer. Where this repository departs from the
+> coverage after the renderer, and the 2026-10-05 direction, which makes
+> Hydra and direct evaluated-state input two adapters into one renderer core.
+> Where this repository departs from the
 > implementation policy, §30 records it; §31 onward are this repository's own.
 > Two focused documents own the detail of one area each, and **on its own area
 > the focused document wins**:
@@ -27,7 +29,8 @@ owner: hydra-toon
 
 ## 1. Purpose
 
-`hydra-toon` is a **low-latency, responsiveness-first Hydra raster renderer**
+`hydra-toon` is a **low-latency, responsiveness-first toon rendering runtime
+with first-class Hydra integration**
 for VRM / MToon and MMD looks. It is not merely "a renderer that supports a
 toon shader". Its primary uses are:
 
@@ -52,7 +55,7 @@ in order:
 
 ## 2. Core concept
 
-> **hydra-toon is a low-latency, avatar-first Hydra raster renderer optimized
+> **hydra-toon is a low-latency, avatar-first raster renderer optimized
 > for continuously changing animation rather than continuously changing
 > scenes.**
 
@@ -75,8 +78,8 @@ USD / Hydra ─────────────────→ Scene / Geome
                                Topology / Skeleton definition
 
                  fast path
-MotionPose, expression, look-at,
-camera, small material values ─→ Skeleton / Morph / Parameters
+Evaluated pose, deformation,
+appearance, camera values ─────→ Skeleton / Morph / Parameters
                                     │
                                     │ late latch
                                     ▼
@@ -84,6 +87,10 @@ camera, small material values ─→ Skeleton / Morph / Parameters
 ```
 
 This separation is never given up for a feature.
+
+Hydra and direct input are two integration paths into one renderer core. They
+share the renderer-private scene, material normalization, extraction, culling,
+shaders and GPU resource model (§34). Avatar behavior is evaluated upstream.
 
 ## 3. Relationship with hydra-merlin
 
@@ -259,7 +266,7 @@ change every frame; updating them never rebuilds topology or GPU vertex
 resources.
 
 ```text
-MotionPose → joint matrices → GPU buffer update → skinning
+Evaluated final rig pose → joint palette → GPU buffer update → skinning
 ```
 
 Skinning starts in a vertex or compute shader.
@@ -270,21 +277,24 @@ Skinning starts in a vertex or compute shader.
 
 ## 12. Late motion latching
 
-The latest `MotionPose`, expression, look-at and camera are written to GPU
-resources **after** the ordinary Hydra scene sync, immediately before submit:
+The latest complete evaluated pose, deformation and appearance, with the
+host's camera, are written to GPU resources **after** structural preparation
+and any ordinary Hydra scene sync, immediately before submit:
 
 ```text
-Hydra scene sync → render world snapshot → draw list extraction
-        │
-latest MotionPose, expression, look-at, camera
-        → late motion latch → joint / morph / camera buffers → GPU submit
+Scene preparation / Hydra sync → render world snapshot → draw list extraction
+Published evaluated avatar state + host camera
+        → fast adapter → late latch → joint / morph / material / camera writes
+        → GPU submit
 ```
 
 This shortens `tracking → motion processing → pose → GPU → display`, which
-matters most for MediaPipe, mocap, controller and XR input. The boundary the
-latest pose crosses is shaped so `usd-motion-plugins`' `MotionPose` can feed
-it directly (§13). The end goal is to trace one motion sample from when it
-was produced to when it reached the display (§24).
+matters most for MediaPipe, mocap, controller and XR input. The late read
+consumes a published, internally consistent result; it does not run avatar
+evaluators or advance simulation. Binding compatibility and retained snapshot
+lifetime must be checked before applying it (§34). The end goal is to trace
+one motion sample from production to display (§24); a present API return
+remains a distinct endpoint.
 
 ## 13. USD state and real-time state are separate
 
@@ -292,12 +302,14 @@ Turning real-time input into many `UsdAttribute::Set()` calls per frame is not
 the primary path.
 
 ```text
-USD stage      persistent / structural state
-MotionStream   transient real-time state
+USD stage              authored / structural state
+Evaluated avatar state transient resolved runtime state
 ```
 
 ```text
-MediaPipe → motion-connectors → MotionStream / MotionPose → hydra-toon real-time override
+External sources → motion-connectors → usd-avatar-runtime
+                    (motion / format evaluators)
+                 → evaluated state → Hydra output | toon fast adapter
 ```
 
 Recording that stream as USD animation is a separate recording layer's job.
@@ -312,13 +324,20 @@ Dirty propagation is designed exactly, because it decides performance:
 | --- | --- |
 | camera | camera buffer only |
 | pose | skeleton buffer only |
-| expression | morph buffer only |
+| evaluated expression / look-at effects | affected joint, morph and/or material buffers only |
 | material parameter | material buffer only |
 | texture | texture / descriptor only |
 | topology | mesh rebuild |
 
 High frequency: pose, morph, expression, look-at, camera. Low frequency: mesh
 topology, material graph structure, texture topology, skeleton topology.
+
+Update frequency and invalidation are separate axes. Expression-driven material
+values can change every frame; visibility, render queue or outline policy can
+affect draw membership, ordering or pipeline choice regardless of frequency.
+Classify each field by what it invalidates. Value-only updates retain static
+resources; structural changes take ordinary scene preparation. Material
+classification belongs to [MATERIAL_POLICY.md §8](MATERIAL_POLICY.md#8-values-that-change-at-run-time).
 
 ## 15. Persistent draw packets
 
@@ -440,6 +459,12 @@ Maximum FPS is not the measure. In order of priority:
 - **Renderer latency:** pose update → GPU buffer write → submit → present;
   expression update → submit; camera update → present; CPU render-thread
   time, GPU frame time.
+- **Endpoint meaning:** preserve producer time separately from evaluation and
+  publication time, with explicit clock mapping. Present API return measures
+  a submission/presentation API endpoint, not scanout or photon time. Report
+  only measured endpoints. v0.3.0 requires producer-to-submit/present-return
+  evidence; actual display instrumentation is tracked separately in the
+  [roadmap](../roadmap/README.md#not-yet-in-a-milestone).
 - **Frame consistency:** p50 / p95 / p99 frame time and its variance, hitch
   count, shader compilation stalls, upload stalls.
 - **Update cost:** joint-buffer writes, morph updates, material parameter
@@ -543,33 +568,25 @@ When a decision is unclear, prefer in this order:
 ## 28. Target architecture
 
 ```text
-                         USD Stage
-                             │
-                    Hydra / Scene Index
-                ┌────────────┴────────────┐
-          structural state         toon normalization
-                └────────────┬────────────┘
-                         ToonScene
-                    persistent resources
-                         DrawPackets
-Motion connector             │
-      → MotionStream         │
-      → MotionPose           │
-  expression, look-at,       │
-  camera ───── late latch ───┤
-                             ▼
-                    GPU resource update
-                     ┌───────┴───────┐
-                   Vulkan          WebGPU
-                     └───────┬───────┘
-                 low-latency presentation
+Authored USD stage → Hydra / format imaging ─────────────┐
+Stage bindings + inputs → usd-avatar-runtime             │
+                                 ↓                      │
+                        evaluated avatar state          │
+                          ├→ Hydra output ──────────────┴→ Hydra adapter ─┐
+                          └→ fast adapter ────────────────────────────────┤
+                                                                          ▼
+                                                           renderer-private scene
+                                                                draw extraction
+                                                           late latch / GPU update
+                                                              Vulkan | WebGPU
+                                                           low-latency presentation
 ```
 
 ## 29. Conclusion
 
 `hydra-toon` does not stop at "a Hydra renderer that can draw MToon and MMD".
-It is **a low-latency, highly responsive Hydra renderer for real-time digital
-characters**, built on: Vulkan-first, avatar-first, animation-first, late
+It is **a low-latency, highly responsive toon rendering runtime for real-time
+digital characters**, built on: Vulkan-first, avatar-first, animation-first, late
 motion latching, persistent draw packets, strict dirty propagation, minimal
 synchronization, and separation of USD structural state from real-time motion
 state. It draws MToon faithfully and MMD's look naturally, skins and morphs on
@@ -682,3 +699,49 @@ Before a feature is added, it is checked against these questions:
 9. Does it widen platform coverage early? Until the architecture and quality
    are settled on Windows, Linux and multi-vendor coverage are no release
    gate (§25).
+
+## 34. Evaluated avatar input and transport parity
+
+`usd-avatar-runtime` composes motion and format evaluators and publishes their
+resolved result. `hydra-toon` owns the consumer adapter and renderer-private
+normalization, under the
+[integration scope](INTEGRATION_SCOPE_POLICY.md). The runtime's
+[evaluated-state](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md)
+and [publication](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md)
+contracts own shared identities, layouts and snapshot semantics. This policy
+does not freeze their draft ABI or move evaluator algorithms into the renderer.
+
+The fast adapter maps bound runtime targets to renderer resources. It must
+preserve the full resolved rig, including auxiliary joints, and map resolved
+deformation to resident subshape slots without repeating expression arbitration
+or applying bone effects twice. It normalizes canonical typed material values
+using the same rules as the Hydra path. Shared evaluated state contains no
+`ToonMaterial`, GPU handle or renderer-specific palette layout.
+
+Binding preparation establishes skeleton/morph/material target mappings and
+static resources. Per-frame input updates only compatible fast values. A late
+snapshot from another binding generation is rejected as a whole; rebinding
+takes the structural path. Consumers retain the complete published snapshot
+for the duration of its use. Frame identity, binding compatibility, input
+provenance and clock mapping survive adaptation. Unsupported effects follow
+explicit capability negotiation and diagnostics, not silent omission.
+
+The runtime owns evaluation order and competition between expressions and gaze.
+The renderer's late callback obtains the latest compatible completed snapshot;
+it cannot trigger another evaluation or simulation step. It may keep a previous
+valid result on failure while retaining that result's original identity and
+input timestamps. Application camera state remains a separate host input.
+
+Parity uses one evaluation and sends the same resolved snapshot to Hydra and
+direct adapters. Compare target mapping, transforms/joints, mapped deformation
+and material values, draw packets and pipeline selection before comparing
+colour/depth on the same backend and configuration. Declare numeric tolerances
+and test structural rebinding, override removal, retained lifetime and
+unsupported effects. Measure update cost and latency separately; equal pixels
+alone do not establish equivalent invalidation or performance.
+
+The renderer-private `RenderWorld` and `FrameSnapshot` remain distinct from
+the shared avatar result. A future public C ABI or language binding is separate
+work; runtime interoperability must not make upstream orchestration, Hydra or
+format libraries dependencies of the renderer core. Code placement is owned
+by [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md).

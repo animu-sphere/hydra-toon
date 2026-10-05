@@ -64,9 +64,20 @@ placement rule; it does not say the component exists.
 | WebGPU backend | `backend/webgpu/` | new backend target |
 | Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
+| Public evaluated avatar state → renderer-private values | `adapters/fast/` when introduced | new optional adapter target |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/` | `toon-viewport` |
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
+
+The evaluated-state consumer belongs in the optional `adapters/fast/` target,
+not in render-world, render-extraction or a backend. It may consume the minimal
+public contract from `usd-avatar-runtime`; orchestration and format providers
+stay in the external host. Adapter-specific public headers must be separate
+from core headers. Target/option names and install rules are defined with the
+implementation; this placement rule adds no build target or package dependency.
+The runtime's evaluation Scene Index remains upstream, consumed through the
+Hydra adapter's data-source route. Both adapters normalize into `RenderWorld`
+and use the same extraction and backend paths.
 
 The sparse morph representation lives in `include/toon/render_world.hpp`:
 `ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,
@@ -179,7 +190,7 @@ sample and display measurements require external host instrumentation.
 ## 4. Dependency directions
 
 ```text
-adapters/{headless,viewport,hydra2}
+adapters/{headless,viewport,hydra2} (+ optional fast adapter when introduced)
         │
         ▼
 backend/vulkan ──→ core/render-extraction ──→ core/render-world
@@ -256,6 +267,15 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    core nor the backend receives skeleton hierarchy or debug geometry.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
+6. The optional evaluated-state consumer under `adapters/fast/` may depend on
+   the runtime's minimal public state/ABI contract and renderer targets. That
+   dependency never flows into core/backend headers or required package
+   dependencies for core, backend or Hydra-only consumers. The adapter does
+   not link runtime orchestration or evaluator providers and includes no
+   OpenUSD types. Static resource preparation, identity mapping and generation
+   checks precede late value updates; incompatible bindings return to the
+   ordinary structural route. `RenderWorld` and `FrameSnapshot` remain
+   renderer-private contracts, not the shared runtime output type.
 
 ## 5. Build intents and runtime profiles
 

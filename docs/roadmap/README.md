@@ -17,7 +17,7 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.3.0 | Avatar animation fast path: GPU morphs, the expression, look-at and camera fast paths, late motion latching, latency telemetry | [v0.3.0.md](v0.3.0.md) |
+| v0.3.0 | Avatar animation fast path: evaluated-state runtime integration, Hydra/direct parity, late latching and producer-to-present-return evidence | [v0.3.0.md](v0.3.0.md) |
 | v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
 | v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
 | v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
@@ -60,6 +60,13 @@ Not tied to a milestone:
 Planned, but not yet given to a milestone. When one takes an item, it moves
 to that milestone's page.
 
+- **Actual display latency evidence.** Extend explicitly clock-mapped producer
+  timestamps beyond present API return with display instrumentation, and trace
+  which source-produced sample reached the display. Scanout/photon timing is
+  distinct from submit and API return
+  ([design policy §23](../design/DESIGN_POLICY.md#23-performance-kpis)).
+  v0.3.0 closes at submit/present API return; actual motion-to-photon evidence
+  remains a separate measurement task.
 - **Off-thread asset upload.** Geometry, textures and morph targets decoded
   and staged off the render thread and copied on a transfer queue, with a
   placeholder until they arrive, so asset loading never stalls a playing
