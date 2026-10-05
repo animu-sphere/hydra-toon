@@ -1,0 +1,56 @@
+#usda 1.0
+(
+    doc = "Diagnostic oracle: reversed animation order, missing-joint rest fallback, nonidentity bind and world transforms."
+    startTimeCode = 1
+    endTimeCode = 2
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+def SkelRoot "Root"
+{
+    double3 xformOp:translate = (2,3,0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+    def Skeleton "Skel" (prepend apiSchemas = ["SkelBindingAPI"])
+    {
+        float xformOp:rotateZ = 90
+        uniform token[] xformOpOrder = ["xformOp:rotateZ"]
+        uniform token[] joints = ["root", "root/arm", "root/arm/tip"]
+        uniform matrix4d[] bindTransforms = [
+            ((1,0,0,0),(0,1,0,0),(0,0,1,0),(100,0,0,1)),
+            ((1,0,0,0),(0,1,0,0),(0,0,1,0),(100,1,0,1)),
+            ((1,0,0,0),(0,1,0,0),(0,0,1,0),(100,1,0.5,1))]
+        uniform matrix4d[] restTransforms = [
+            ((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1)),
+            ((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,1,0,1)),
+            ((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0.5,1))]
+        rel skel:animationSource = </Root/Anim>
+    }
+    def SkelAnimation "Anim"
+    {
+        uniform token[] joints = ["root/arm/tip", "root"]
+        float3[] translations.timeSamples = {
+            1: [(0,0,0.5),(0.25,0,0)], 2: [(0,0,1),(0.75,0,0)]
+        }
+        quatf[] rotations = [(1,0,0,0),(1,0,0,0)]
+        half3[] scales = [(1,1,1),(1,1,1)]
+    }
+    def Mesh "Triangle" (prepend apiSchemas = ["SkelBindingAPI"])
+    {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0,1,2]
+        point3f[] points = [(99.5,-0.5,0),(100.5,-0.5,0),(100,0.5,0)]
+        normal3f[] primvars:normals = [(0,0,1),(0,0,1),(0,0,1)] (interpolation = "vertex")
+        color3f[] primvars:displayColor = [(1,0,0)]
+        rel skel:skeleton = </Root/Skel>
+        int[] primvars:skel:jointIndices = [0] (
+            interpolation = "constant"
+            elementSize = 1
+        )
+        float[] primvars:skel:jointWeights = [1] (
+            interpolation = "constant"
+            elementSize = 1
+        )
+        matrix4d primvars:skel:geomBindTransform = ((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))
+    }
+}

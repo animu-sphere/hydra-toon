@@ -15,8 +15,13 @@
 #include <pxr/imaging/hd/task.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usdGeom/xformCache.h>
+#include <pxr/usd/usdSkel/cache.h>
+#include <pxr/usd/usdSkel/skeleton.h>
+#include <pxr/usd/usdSkel/skeletonQuery.h>
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
@@ -152,6 +157,49 @@ public:
     inputs_.expression = Toon::SteadyNanoseconds();
   }
 
+  std::vector<SkeletonDebug> ReadSkeletons() override {
+    // Cache invalidation follows USD notices, including binding/animation edits.
+    // No evaluation or traversal takes place while diagnostics are closed.
+    if (skeletons_dirty_) {
+      skeleton_cache_.Clear();
+      skeleton_queries_.clear();
+      for (const UsdPrim& prim : stage_->Traverse()) {
+        if (prim.IsA<UsdSkelSkeleton>()) {
+          skeleton_queries_.emplace_back(prim.GetPath().GetString(),
+              skeleton_cache_.GetSkelQuery(UsdSkelSkeleton(prim)));
+        }
+      }
+      skeletons_dirty_ = false;
+    }
+    UsdGeomXformCache transforms(time_ ? UsdTimeCode(*time_) :
+        stage_->HasAuthoredTimeCodeRange() ? UsdTimeCode(stage_->GetStartTimeCode()) :
+                                           UsdTimeCode::Default());
+    std::vector<SkeletonDebug> result;
+    for (const auto& [path, query] : skeleton_queries_) {
+      SkeletonDebug skeleton;
+      skeleton.path = path;
+      VtMatrix4dArray world;
+      if (!query || !query.ComputeJointWorldTransforms(&world, &transforms)) {
+        skeleton.error = "Joint transforms unavailable";
+      } else {
+        const auto names = query.GetJointOrder();
+        const auto& parents = query.GetTopology().GetParentIndices();
+        if (world.size() != names.size() || parents.size() != names.size()) {
+          skeleton.error = "Joint order and transform counts differ";
+        } else {
+          for (std::size_t i = 0; i < names.size(); ++i) {
+            const GfVec3d origin = world[i].Transform(GfVec3d(0));
+            skeleton.joints.push_back({names[i].GetString(), parents[i],
+                {static_cast<float>(origin[0]), static_cast<float>(origin[1]),
+                    static_cast<float>(origin[2])}});
+          }
+        }
+      }
+      result.push_back(std::move(skeleton));
+    }
+    return result;
+  }
+
   double end_time() const noexcept override {
     return stage_->GetEndTimeCode();
   }
@@ -163,15 +211,19 @@ public:
   std::uint64_t sync_count() const noexcept override { return sync_count_; }
 
   void PrimsAdded(const HdSceneIndexBase&, const AddedPrimEntries&) override {
+    skeletons_dirty_ = true;
     needs_sync_ = true;
   }
   void PrimsRemoved(const HdSceneIndexBase&, const RemovedPrimEntries&) override {
+    skeletons_dirty_ = true;
     needs_sync_ = true;
   }
   void PrimsDirtied(const HdSceneIndexBase&, const DirtiedPrimEntries&) override {
+    skeletons_dirty_ = true;
     needs_sync_ = true;
   }
   void PrimsRenamed(const HdSceneIndexBase&, const RenamedPrimEntries&) override {
+    skeletons_dirty_ = true;
     needs_sync_ = true;
   }
 
@@ -197,6 +249,9 @@ private:
   std::uint64_t sync_count_ = 0;
   std::optional<double> time_;
   FrameSnapshot::InputTimes inputs_;
+  UsdSkelCache skeleton_cache_;
+  std::vector<std::pair<std::string, UsdSkelSkeletonQuery>> skeleton_queries_;
+  bool skeletons_dirty_ = true;
 };
 
 } // namespace

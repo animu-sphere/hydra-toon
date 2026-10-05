@@ -869,9 +869,11 @@ int RunViewport(int argc, char** argv) {
         shown.uploads = Toon::viewport::UploadCounts::Of(session->statistics());
         shown.playback = playback;
         shown.deterministic_time = arguments.time_step.has_value();
+        shown.view = draws.view;
 #if TOON_VIEWPORT_HAS_HYDRA
         shown.hydra_syncs = hydra == nullptr ? 0 : hydra->sync_count();
         shown.morph_scene = hydra == nullptr ? nullptr : &snapshot;
+        if (hydra != nullptr) shown.read_skeletons = [&] { return hydra->ReadSkeletons(); };
 #endif
         const Toon::viewport::OverlayControls controls = overlay->Build(shown,
             Milliseconds(overlay_start - last_overlay) / 1000.0,

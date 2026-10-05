@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -17,6 +18,7 @@
 #include "telemetry.hpp"
 #include "playback.hpp"
 #include "window.hpp"
+#include "skeleton_debug.hpp"
 
 namespace Toon::viewport {
 
@@ -77,6 +79,9 @@ struct OverlayFrame {
   std::uint64_t hydra_syncs = 0;
   // Current effective values; the snapshot outlives Build.
   const FrameSnapshot* morph_scene = nullptr;
+  ToonView view;
+  // Called only while the Skeleton panel or its screen display is active.
+  std::function<std::vector<SkeletonDebug>()> read_skeletons;
 };
 
 struct MorphEdit {

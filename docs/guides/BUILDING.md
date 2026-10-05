@@ -287,6 +287,17 @@ records the tested controls and scene route.
 
 ### A USD stage in the viewport
 
+The `Skeleton` panel lists each USD skeleton's joint names, parents and
+evaluated world positions in stage units. Enable `Show bones and joints` to
+draw them through surfaces, and `Joint labels` for names. Selecting a joint
+row highlights its marker and label. The display follows the selected USD
+time, including mapped animation and missing-joint rest fallback; it does
+not show external late pose overrides. Bones crossing clip planes are
+clipped before projection. Diagnostics never author USD or request Hydra
+sync. Closing the panel with screen display disabled stops the diagnostic
+reads. `O` hides all overlays, and screenshots remain overlay-free.
+Disable diagnostics when measuring the renderer's baseline motion cost.
+
 In a build with Hydra, `Open File...` on the overlay or Ctrl+O opens the
 native file chooser, including when starting on the bootstrap scene. The
 filters include USD (`usd`, `usda`, `usdc`, `usdz`), VRM and PMX; the selected
