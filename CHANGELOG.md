@@ -10,6 +10,15 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Viewport Skeleton panel: USD joint names, parents and evaluated world
+  positions, with optional bones, joint markers, labels and selection
+  highlighting. Diagnostics use UsdSkel's animation mapping and rest fallback,
+  with homogeneous six-plane clipping, and never request Hydra sync or
+  change renderer state. The display follows selected USD time; external
+  late pose overrides remain outside this diagnostic view.
+- Skeleton state/GPU and projection regressions: nonidentity world/bind
+  transforms, reordered and partial animation, layer edits/removal,
+  unchanged colour/depth and scene writes, and near-plane crossings.
 - Evaluated late-frame input in both Vulkan sessions: after GPU/acquire waits
   and structural preparation, accept latest poses, morph weights, material
   parameters and camera values without another extraction or static upload.

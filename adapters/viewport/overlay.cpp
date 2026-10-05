@@ -211,6 +211,10 @@ UploadCounts operator-(const UploadCounts& after, const UploadCounts& before) {
 }
 
 struct Overlay::State {
+  bool show_skeleton = false;
+  bool joint_labels = false;
+  std::string selected_skeleton;
+  std::string selected_joint;
   ImGuiContext* context = nullptr;
   float scale = 1.0F;
   // The summaries on screen, refreshed every kRefreshSeconds.
@@ -445,6 +449,80 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
 
     const Summary& interval =
         state_->cpu.empty() ? Summary{} : state_->cpu.front();
+    if (frame.read_skeletons) {
+      const bool expanded = ImGui::CollapsingHeader("Skeleton");
+      if (expanded) {
+        ImGui::Checkbox("Show bones and joints", &state_->show_skeleton);
+        ImGui::SameLine();
+        ImGui::Checkbox("Joint labels", &state_->joint_labels);
+        ImGui::TextWrapped("Evaluated USD joints in world space (stage units). Display is through surfaces; external late pose overrides are not shown.");
+      }
+      if (expanded || state_->show_skeleton) {
+        const auto skeletons = frame.read_skeletons();
+        if (expanded && skeletons.empty()) ImGui::TextDisabled("No USD skeletons");
+        if (expanded) ImGui::BeginChild("skeleton-list", ImVec2(480.0F * scale, 240.0F * scale));
+        for (const auto& skeleton : skeletons) {
+          if (expanded) {
+            ImGui::PushID(skeleton.path.c_str());
+            if (ImGui::TreeNode(skeleton.path.c_str())) {
+              if (!skeleton.error.empty()) ImGui::TextWrapped("%s", skeleton.error.c_str());
+              ImGui::Text("%zu joints", skeleton.joints.size());
+              if (ImGui::BeginTable("joints", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+                ImGui::TableSetupColumn("Joint");
+                ImGui::TableSetupColumn("Parent");
+                ImGui::TableSetupColumn("World position");
+                ImGui::TableHeadersRow();
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(skeleton.joints.size()));
+                while (clipper.Step()) {
+                  for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
+                    const auto& joint = skeleton.joints[static_cast<std::size_t>(index)];
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::PushID(index);
+                    const bool selected = state_->selected_skeleton == skeleton.path && state_->selected_joint == joint.name;
+                    if (ImGui::Selectable(joint.name.c_str(), selected)) {
+                      state_->selected_skeleton = skeleton.path;
+                      state_->selected_joint = joint.name;
+                    }
+                    ImGui::PopID();
+                    ImGui::TableNextColumn();
+                    if (joint.parent >= 0 && static_cast<std::size_t>(joint.parent) < skeleton.joints.size())
+                      ImGui::TextUnformatted(skeleton.joints[static_cast<std::size_t>(joint.parent)].name.c_str());
+                    else ImGui::TextDisabled("root");
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.3f %.3f %.3f", joint.world.x, joint.world.y, joint.world.z);
+                  }
+                }
+                ImGui::EndTable();
+              }
+              ImGui::TreePop();
+            }
+            ImGui::PopID();
+          }
+          if (state_->show_skeleton) {
+            auto* drawing = ImGui::GetBackgroundDrawList();
+            const float width = static_cast<float>(frame.width), height = static_cast<float>(frame.height);
+            for (const auto& joint : skeleton.joints) {
+              const bool selected = state_->selected_skeleton == skeleton.path && state_->selected_joint == joint.name;
+              const ImU32 color = selected ? IM_COL32(255, 230, 60, 255) : IM_COL32(70, 220, 255, 230);
+              if (joint.parent >= 0 && static_cast<std::size_t>(joint.parent) < skeleton.joints.size()) {
+                if (const auto bone = ProjectBone(frame.view,
+                        skeleton.joints[static_cast<std::size_t>(joint.parent)].world, joint.world, width, height))
+                  drawing->AddLine(ImVec2(bone->start.x, bone->start.y), ImVec2(bone->end.x, bone->end.y), color, 2.0F * scale);
+              }
+              if (const auto point = ProjectJoint(frame.view, joint.world, width, height)) {
+                drawing->AddCircleFilled(ImVec2(point->x, point->y), (selected ? 5.0F : 3.0F) * scale, color);
+                if (state_->joint_labels || selected)
+                  drawing->AddText(ImVec2(point->x + 6.0F * scale, point->y), color, joint.name.c_str());
+              }
+            }
+          }
+        }
+        if (expanded) ImGui::EndChild();
+      }
+    }
+
     ImGui::Separator();
     ImGui::Text("Frame %.2f ms  %.0f fps  p99 %.2f ms", interval.mean,
         interval.mean > 0.0 ? 1000.0 / interval.mean : 0.0, interval.p99);

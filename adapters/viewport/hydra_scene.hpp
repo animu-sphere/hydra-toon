@@ -5,6 +5,7 @@
 #pragma once
 
 #include "camera.hpp"
+#include "skeleton_debug.hpp"
 
 #include <toon/render_world.hpp>
 
@@ -36,6 +37,9 @@ public:
   // publishes the result; ids and overrides belong to this scene instance.
   virtual bool SetMorphWeightsOverride(MeshId mesh, std::vector<float> weights) = 0;
   virtual void ClearMorphWeightsOverride(MeshId mesh) = 0;
+  // Read the selected USD time's joint hierarchy and evaluated world origins.
+  // Diagnostic only: never authors USD, commits renderer state or syncs Hydra.
+  [[nodiscard]] virtual std::vector<SkeletonDebug> ReadSkeletons() = 0;
   [[nodiscard]] virtual double start_time() const noexcept = 0;
   [[nodiscard]] virtual double end_time() const noexcept = 0;
   [[nodiscard]] virtual double time_codes_per_second() const noexcept = 0;

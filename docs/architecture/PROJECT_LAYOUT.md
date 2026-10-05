@@ -246,6 +246,14 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    `scripts/evaluate_outline_sequence.py` and
    `scripts/evaluate_vrm_reproduction.py` consume those local captures;
    Pillow, NumPy and three-vrm belong only to evaluation tooling.
+   Skeleton diagnostics stay in the viewport adapter: `skeleton_debug.hpp`
+   carries names, parent indices and world origins, and `skeleton_debug.cpp`
+   projects/clips the overlay's joints and bones using `ToonView`. Only
+   `hydra_scene.cpp` links `usdSkel` and evaluates the selected USD time with
+   `UsdSkelSkeletonQuery` and `UsdGeomXformCache`. USD scene-index notices
+   invalidate the scene-owned diagnostic query cache. The overlay requests
+   diagnostics only while its panel or screen display is active; neither the
+   core nor the backend receives skeleton hierarchy or debug geometry.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
 

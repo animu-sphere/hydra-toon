@@ -22,6 +22,12 @@ toon_configure_warnings(toon-playback-test)
 target_compile_features(toon-playback-test PRIVATE cxx_std_20)
 add_test(NAME toon-playback-state COMMAND toon-playback-test)
 
+add_executable(toon-skeleton-projection-test skeleton_projection_test.cpp
+  ../adapters/viewport/skeleton_debug.cpp ../adapters/viewport/camera.cpp)
+toon_configure_warnings(toon-skeleton-projection-test)
+target_link_libraries(toon-skeleton-projection-test PRIVATE Toon::RenderWorld)
+add_test(NAME toon-skeleton-projection COMMAND toon-skeleton-projection-test)
+
 add_executable(toon-late-frame-test late_frame_test.cpp ../adapters/viewport/telemetry.cpp)
 toon_configure_warnings(toon-late-frame-test)
 target_link_libraries(toon-late-frame-test PRIVATE Toon::Vulkan)
