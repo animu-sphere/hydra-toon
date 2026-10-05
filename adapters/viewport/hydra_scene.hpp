@@ -26,11 +26,14 @@ public:
   // scene-index changes, then commits the delegate's world into `snapshot`.
   // The snapshot's camera is not the viewport's; the caller sets its own.
   virtual void Update(FrameSnapshot& snapshot) = 0;
+  // Commit already evaluated values only, after the GPU/acquire wait.
+  // Does not apply pending USD changes, change time or sync Hydra.
+  virtual void ReadFast(FrameSnapshot& snapshot) = 0;
   // Explicit USD time codes for repeatable animation evaluation.
   virtual void SetTime(double time) = 0;
   // Evaluated subshape debugging, through the delegate's transient override
-  // route. Calls never author USD or request Hydra sync. Update publishes the
-  // result; ids and overrides belong to this scene instance.
+  // route. Calls never author USD or request Hydra sync. Update or ReadFast
+  // publishes the result; ids and overrides belong to this scene instance.
   virtual bool SetMorphWeightsOverride(MeshId mesh, std::vector<float> weights) = 0;
   virtual void ClearMorphWeightsOverride(MeshId mesh) = 0;
   [[nodiscard]] virtual double start_time() const noexcept = 0;

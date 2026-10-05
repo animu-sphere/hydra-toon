@@ -152,6 +152,17 @@ if(TOON_BUILD_TESTS)
         "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/playback"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_playback.cmake")
+    add_test(NAME toon-viewport-latency
+      COMMAND "${CMAKE_COMMAND}"
+        "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"
+        "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/morph-motion.usda"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/latency"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_latency.cmake")
+    set_tests_properties(toon-viewport-latency PROPERTIES
+      SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
+      LABELS "gpu;viewport;presentation;hydra"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
     set_tests_properties(toon-viewport-playback PROPERTIES
       SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
       LABELS "gpu;viewport;presentation;hydra"

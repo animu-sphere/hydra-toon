@@ -2,6 +2,7 @@
 #include <toon/vulkan_backend.hpp>
 
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -16,6 +17,11 @@
 #endif
 
 namespace Toon {
+
+std::int64_t SteadyNanoseconds() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 SceneShaders SceneShadersIn(const std::string& directory) {
   const std::filesystem::path root(directory);
@@ -125,6 +131,7 @@ public:
   [[nodiscard]] const OffscreenStatistics& statistics() const override {
     return statistics_;
   }
+  void SetLateFrameSource(LateFrameSource source) override { late_.source = source; }
 
 private:
   bool EnsureTargets(std::uint32_t width, std::uint32_t height,
@@ -160,6 +167,7 @@ private:
   HostBuffer color_readback_;
   HostBuffer depth_readback_;
   OffscreenStatistics statistics_;
+  vulkan_internal::LateFrameState late_;
 };
 
 FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
@@ -285,7 +293,7 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
   return FrameStatus::Pass;
 }
 
-bool VulkanOffscreenRenderer::Render(const DrawList& draws,
+bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
     std::uint32_t width, std::uint32_t height, ColorProduct& color,
     DepthProduct& depth, std::string& error) {
   if (width == 0 || height == 0) {
@@ -294,11 +302,25 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
   }
   // One frame in flight: the previous frame has completed before its
   // targets, geometry, textures or material slots are touched.
+  const double pose_before = meshes_.pose_write_ms();
+  const double morph_before = meshes_.morph_write_ms();
+  const double material_before = materials_.parameter_write_ms();
   if (!WaitForCompletion(error) || !EnsureTargets(width, height, error) ||
-      !meshes_.Update(draws, error) || !textures_.Update(draws, error) ||
-      !materials_.Update(draws, textures_, error)) {
+      !textures_.Update(extracted, error) ||
+      (late_.enabled() && (!meshes_.Update(extracted, error, false) ||
+          !materials_.Update(extracted, textures_, error, false)))) {
     return false;
   }
+  const DrawList* frame = nullptr;
+  if (!late_.Read(extracted, frame, statistics_, error)) return false;
+  const DrawList& draws = *frame;
+  if (!meshes_.Update(draws, error) || !materials_.Update(draws, textures_, error)) {
+    return false;
+  }
+  statistics_.latency.buffers_written = SteadyNanoseconds();
+  statistics_.latency.pose_write_ms = meshes_.pose_write_ms() - pose_before;
+  statistics_.latency.morph_write_ms = meshes_.morph_write_ms() - morph_before;
+  statistics_.latency.material_write_ms = materials_.parameter_write_ms() - material_before;
 
   if (!VulkanOk(vkResetCommandBuffer(command_, 0), "vkResetCommandBuffer",
           error)) {
@@ -423,6 +445,8 @@ bool VulkanOffscreenRenderer::Render(const DrawList& draws,
     return false;
   }
   ++submitted_;
+  statistics_.latency.frame = submitted_;
+  statistics_.latency.submitted = SteadyNanoseconds();
 
   // The caller wants this frame's pixels, so the readback waits here.
   if (!WaitForCompletion(error) ||

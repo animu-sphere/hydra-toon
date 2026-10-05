@@ -16,6 +16,36 @@
 
 namespace Toon::vulkan_internal {
 
+class LateFrameState {
+public:
+  LateFrameSource source;
+  bool enabled() const { return source.read != nullptr; }
+  template<class Statistics>
+  bool Read(const DrawList& extracted, const DrawList*& frame,
+      Statistics& stats, std::string& error) {
+    frame = &extracted;
+    stats.latency = {};
+    stats.late_rejection.clear();
+    if (enabled()) {
+      error.clear();
+      if (source.read(source.context, latest_, error)) {
+        prepared_ = extracted;
+        if (ApplyFastSnapshot(latest_, prepared_, stats.late_rejection)) {
+          frame = &prepared_;
+          ++stats.late_samples_applied;
+          stats.latency.late_sample_applied = true;
+        } else ++stats.late_samples_rejected;
+      } else if (!error.empty()) return false;
+    }
+    stats.latency.inputs = frame->inputs;
+    stats.latency.latched = SteadyNanoseconds();
+    return true;
+  }
+private:
+  FrameSnapshot latest_;
+  DrawList prepared_;
+};
+
 // Must match DrawConstants in shaders/mesh.slang.
 struct DrawConstants {
   float clip_from_object[16];
@@ -413,7 +443,7 @@ public:
   // materials it no longer has. No frame that reads the buffer may be in
   // flight, and `textures` has been updated for the same draws.
   bool Update(const DrawList& draws, const TextureCache& textures,
-      std::string& detail);
+      std::string& detail, bool fast_values = true);
   [[nodiscard]] const Entry* Find(MaterialId material) const;
   [[nodiscard]] VkDescriptorSet descriptor_set() const {
     return set_;
@@ -423,6 +453,7 @@ public:
   [[nodiscard]] std::uint64_t writes() const {
     return writes_;
   }
+  double parameter_write_ms() const { return parameter_write_ms_; }
 
 private:
   bool Reserve(std::uint32_t slots, std::string& detail);
@@ -441,6 +472,7 @@ private:
   std::unordered_map<MaterialId, Entry> entries_;
   std::uint64_t generation_ = 0;
   std::uint64_t writes_ = 0;
+  double parameter_write_ms_ = 0;
 };
 
 // What MeshCache::Record drew, part by part, and where it marks the parts'
@@ -480,7 +512,7 @@ public:
       VkDescriptorSetLayout skin_layout, std::string& detail);
   // Upload whatever `draws` changed and release meshes it no longer draws.
   // No frame that reads these buffers may be in flight.
-  bool Update(const DrawList& draws, std::string& detail);
+  bool Update(const DrawList& draws, std::string& detail, bool fast_values = true);
   // Unlit draws first; then the outline hull of every opaque MToon draw
   // that asks for one (design policy §10's first pass); then every opaque
   // draw whose material selected MToon, a Mask one by alpha to coverage
@@ -508,6 +540,8 @@ public:
 
   [[nodiscard]] std::uint64_t morph_uploads() const { return morph_uploads_; }
   [[nodiscard]] std::uint64_t morph_weight_writes() const { return morph_weight_writes_; }
+  double pose_write_ms() const { return pose_write_ms_; }
+  double morph_write_ms() const { return morph_write_ms_; }
 private:
   struct Entry {
     HostBuffer vertices;
@@ -541,11 +575,13 @@ private:
     std::size_t skin_pool = 0;
     std::uint64_t generation = 0;
   };
+  double pose_write_ms_ = 0;
+  double morph_write_ms_ = 0;
 
   bool Upload(HostBuffer& buffer, VkBufferUsageFlags usage, const void* data,
       VkDeviceSize size, std::string& detail);
   bool UpdateSkin(const MeshSnapshot& mesh, Entry& entry,
-      std::string& detail);
+      std::string& detail, bool fast_values);
   bool AllocateSkinSet(VkDescriptorSet& set, std::size_t& pool,
       std::string& detail);
   void PointSkinSet(VkDescriptorSet set, const Entry* entry = nullptr);

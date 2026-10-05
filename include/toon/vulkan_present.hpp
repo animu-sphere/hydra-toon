@@ -74,6 +74,10 @@ struct PresentDrawCounts {
 };
 
 struct PresentStatistics {
+  FrameLatency latency;
+  std::uint64_t late_samples_applied = 0;
+  std::uint64_t late_samples_rejected = 0;
+  std::string late_rejection;
   std::uint64_t frames_presented = 0;
   std::uint32_t swapchain_recreates = 0;
   // Samples per pixel: RenderOptions' count, or the last SetSamples, as far
@@ -127,6 +131,7 @@ struct PresentStatistics {
 class PresentSession {
 public:
   virtual ~PresentSession() = default;
+  virtual void SetLateFrameSource(LateFrameSource source) = 0;
 
   // Render and present one frame at the window's current framebuffer extent,
   // `overlay` drawn over the scene after any capture is copied. A zero

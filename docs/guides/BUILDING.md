@@ -523,3 +523,69 @@ match an independent repeat, and geometry must upload only once.
 omit the overlay and perturb timing, so use separate uncaptured performance
 runs. [Report 32](../reports/renderer/32-2026-10-04-vrm-reproduction.md)
 records the accepted v0.2.0 baseline and its limitations.
+
+## Late evaluated input and latency
+
+A host registers `LateFrameSource` through `OffscreenRenderer::SetLateFrameSource`
+or `PresentSession::SetLateFrameSource`. Its external rig/expression evaluator
+consumes the source owner's motion semantics and publishes renderer values.
+The callback reads those already evaluated values after GPU/acquire waits
+and structural preparation, before fast writes and recording. It must not
+perform USD authoring or scene sync there.
+
+Start each candidate from the same scene snapshot used for ordinary
+extraction. Keep its mesh/material order, bindings, static array identities,
+slow revisions, joint count and subshape count; update only evaluated fast
+values and their normal per-resource revisions. New topology, targets,
+textures or material structure go through ordinary scene processing and
+extraction. Replace stored candidates when replacing the scene.
+
+For example, a host can store a complete evaluated snapshot under a mutex:
+
+```cpp
+struct LatestEvaluatedFrame {
+  std::mutex mutex;
+  std::optional<Toon::FrameSnapshot> frame;
+} latest;
+
+session->SetLateFrameSource({
+    [](void* context, Toon::FrameSnapshot& out, std::string&) {
+      auto& input = *static_cast<LatestEvaluatedFrame*>(context);
+      std::lock_guard lock(input.mutex);
+      if (!input.frame) return false;
+      out = *input.frame;
+      return true;
+    }, &latest});
+```
+
+The publisher takes the same mutex when replacing `frame`. Keep `latest`
+alive until unregistering with `SetLateFrameSource({})`, and keep evaluation
+outside the lock. Return the current snapshot even when unchanged: false
+with an empty error selects that frame's ordinary extracted input, not a
+previously accepted late sample. False with an error fails the frame.
+Structural or non-finite candidates fall back atomically; inspect
+`late_samples_rejected` and `late_rejection` in the session statistics.
+
+Set `snapshot.inputs.pose`, `.expression`, `.look_at` and `.camera` to the
+appropriate input-update times in `Toon::SteadyNanoseconds()` units. Map a
+producer clock explicitly; leave absent timestamps zero. The built-in USD
+host records time-selection input, not sensor-production time. Its late
+commit and current orbit camera require no additional Hydra sync.
+
+Export an uncaptured timing run with:
+
+```sh
+toon-viewport --usd <animated stage> --hidden --frames 1200 \
+  --time 0 --time-step 0.1 --vsync off --overlay off \
+  --telemetry-output <timing.json>
+```
+
+The live Latency panel and JSON expose input-to-buffer/submit/present-API
+response times and CPU joint/morph/material write costs. Summaries cover
+1024 samples with p95/p99, population variance and standard deviation. Each
+input update contributes its first completed frame once; missing input
+series have count zero. Per-frame JSON timestamps remain available for age
+analysis. `present_endpoint` is `vkQueuePresentKHR_return` and
+`display_time_measured` is false: use external display instrumentation for
+scanout latency. [Report 39](../reports/renderer/39-2026-10-05-late-frame-input.md)
+records the receiver regression and representative avatar measurements.

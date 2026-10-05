@@ -10,6 +10,38 @@
 
 namespace Toon {
 
+// Called after GPU/acquire waits and structural uploads, before fast buffer
+// writes and command recording. Read only evaluated values here: no scene
+// sync, USD authoring or structural work. False with an empty error selects
+// the ordinary extracted frame; false with an error fails the frame. The host
+// serializes access and returns its current sample even when unchanged.
+// Context must outlive its registration. Returning a snapshot replaces every
+// fast value, with the usual per-resource revisions; immutable structural
+// arrays must be shared with the extracted frame. Clear with an empty source.
+struct LateFrameSource {
+  bool (*read)(void* context, FrameSnapshot& latest, std::string& error) = nullptr;
+  void* context = nullptr;
+};
+
+struct FrameLatency {
+  std::uint64_t frame = 0;
+  FrameSnapshot::InputTimes inputs;
+  std::int64_t latched = 0;
+  std::int64_t buffers_written = 0;
+  std::int64_t submitted = 0;
+  // Return from the presentation API, not scanout or photon time. Zero in
+  // offscreen rendering. Display latency requires separate instrumentation.
+  std::int64_t present_returned = 0;
+  bool late_sample_applied = false;
+  double pose_write_ms = 0;
+  double morph_write_ms = 0;
+  double material_write_ms = 0;
+};
+
+// The host and renderer use the same monotonic clock. A producer clock is
+// mapped explicitly by the host; zero always represents an absent input.
+[[nodiscard]] std::int64_t SteadyNanoseconds();
+
 struct BackendCapability {
   bool available = false;
   std::string detail;
@@ -81,6 +113,10 @@ struct DepthProduct {
 // What an offscreen renderer has done over its lifetime. The creation and
 // upload counters are the evidence that a steady frame rebuilds nothing.
 struct OffscreenStatistics {
+  FrameLatency latency;
+  std::uint64_t late_samples_applied = 0;
+  std::uint64_t late_samples_rejected = 0;
+  std::string late_rejection;
   // Hull draw calls in the last frame, after width and frustum omission.
   std::uint32_t outline_draws = 0;
   std::uint64_t frames_rendered = 0;
@@ -130,6 +166,7 @@ struct GpuFrameEvidence {
 class OffscreenRenderer {
 public:
   virtual ~OffscreenRenderer() = default;
+  virtual void SetLateFrameSource(LateFrameSource source) = 0;
 
   // Render `draws` at `width` x `height` into `color` and `depth`, reusing
   // their storage. Both products have their origin at the top left.

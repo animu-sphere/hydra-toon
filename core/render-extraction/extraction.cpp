@@ -4,6 +4,7 @@
 namespace Toon {
 
 void ExtractDrawList(const FrameSnapshot& snapshot, DrawList& draws) {
+  draws.inputs = snapshot.inputs;
   draws.source_revision = snapshot.revision;
   draws.view = snapshot.view;
   draws.view_revision = snapshot.view_revision;

@@ -75,6 +75,7 @@ struct Arguments {
   // Bounded all-frame evidence; readbacks perturb timing, so benchmark separately.
   std::string capture_sequence;
   std::string camera_output;
+  std::string telemetry_output;
   // The sample count asked for halfway through `frame_limit` frames, as the
   // number keys ask for one: the presentation test of a live change.
   std::optional<std::uint32_t> switch_samples;
@@ -128,6 +129,8 @@ Arguments ParseArguments(int argc, char** argv) {
       result.height = static_cast<std::uint32_t>(ReadUnsigned(next(), option));
     } else if (option == "--frames") {
       result.frame_limit = ReadUnsigned(next(), option);
+    } else if (option == "--telemetry-output") {
+      result.telemetry_output = next();
     } else if (option == "--samples") {
       result.options.samples =
           static_cast<std::uint32_t>(ReadUnsigned(next(), option));
@@ -225,6 +228,7 @@ Arguments ParseArguments(int argc, char** argv) {
       std::cout << "Usage: toon-viewport [options]\n"
                    "  --width N --height N     window size (default 1280x720)\n"
                    "  --frames N               exit after N presented frames\n"
+                   "  --telemetry-output FILE  save latency/timing JSON on exit\n"
                    "  --vsync on|off           FIFO or immediate present\n"
                    "  --overlay on|off         the measurements over the\n"
                    "                           scene (default on)\n"
@@ -621,6 +625,23 @@ int RunViewport(int argc, char** argv) {
     std::optional<Clock::time_point> last_present;
     auto last_overlay = Clock::now();
     auto playback_clock = Clock::now();
+    std::int64_t camera_input = Toon::SteadyNanoseconds();
+    auto read_latest = [&](Toon::FrameSnapshot& latest, std::string&) {
+#if TOON_VIEWPORT_HAS_HYDRA
+      if (hydra) hydra->ReadFast(latest);
+      else latest = snapshot;
+#else
+      latest = snapshot;
+#endif
+      latest.view = camera.View(static_cast<float>(window->width()) /
+                                static_cast<float>(window->height()));
+      latest.meters_per_unit = meters_per_unit;
+      latest.inputs.camera = camera_input;
+      return true;
+    };
+    session->SetLateFrameSource({[](void* context, Toon::FrameSnapshot& latest, std::string& why) {
+      return (*static_cast<decltype(read_latest)*>(context))(latest, why);
+    }, &read_latest});
 
     bool running = true;
     PointerState pointer;
@@ -650,6 +671,7 @@ int RunViewport(int argc, char** argv) {
         time_origin_frame = session->statistics().frames_presented;
         snapshot = std::move(next_snapshot);
         camera = next_camera;
+        camera_input = Toon::SteadyNanoseconds();
         meters_per_unit = hydra->meters_per_unit();
         scene_name = std::move(next_name);
         pointer = {};
@@ -684,6 +706,8 @@ int RunViewport(int argc, char** argv) {
         // The overlay sees every event; a press or the wheel over it is not
         // the camera's.
         const bool over_overlay = overlay_shown && overlay->WantsPointer();
+        const auto event_input = Toon::SteadyNanoseconds();
+        const auto before_camera = camera.View(1.0F);
         if (overlay_shown) {
           overlay->HandleEvent(event);
         }
@@ -733,6 +757,10 @@ int RunViewport(int argc, char** argv) {
           HandlePointer(event, pointer, camera, window->height());
           break;
         }
+        const auto after_camera = camera.View(1.0F);
+        if (before_camera.view != after_camera.view ||
+            before_camera.projection != after_camera.projection ||
+            event.type == Toon::viewport::EventType::Resize) camera_input = event_input;
       }
       if (!running) {
         break;
@@ -791,6 +819,7 @@ int RunViewport(int argc, char** argv) {
       cpu.extract = Milliseconds(overlay_start - extract_start);
       draws.view = camera.View(static_cast<float>(width) /
                                static_cast<float>(height));
+      draws.inputs.camera = camera_input;
       if (!arguments.camera_output.empty() &&
           session->statistics().frames_presented + 1 == arguments.frame_limit) {
         WriteCamera(arguments.camera_output, draws.view, width, height);
@@ -850,7 +879,7 @@ int RunViewport(int argc, char** argv) {
         last_overlay = overlay_start;
         open_file_requested = controls.open_file;
 #if TOON_VIEWPORT_HAS_HYDRA
-        // Applied on the next Update, with no USD change or Hydra sync.
+        // ReadFast publishes these edits in this frame, without Hydra sync.
         if (hydra != nullptr) {
           for (const auto& edit : controls.morph_edits) {
             if (edit.weights) {
@@ -895,6 +924,7 @@ int RunViewport(int argc, char** argv) {
       }
       const auto render_end = Clock::now();
       if (presented) {
+        telemetry.PushLatency(session->statistics().latency);
         cpu.wait = session->statistics().cpu_wait;
         cpu.submit = session->statistics().cpu_submit;
         // The first frame has no interval before it.
@@ -967,6 +997,13 @@ int RunViewport(int argc, char** argv) {
               << " overlay=" << statistics.draws.overlay << '\n'
               << "Hull draws: " << statistics.draws.hulls << '\n'
               << telemetry.Report();
+    std::cout << "Late latch: applied=" << statistics.late_samples_applied
+              << " rejected=" << statistics.late_samples_rejected << '\n';
+    if (!arguments.telemetry_output.empty()) {
+      std::ofstream output(arguments.telemetry_output);
+      output << telemetry.Json();
+      if (!output) throw std::runtime_error("could not write telemetry output");
+    }
     if (!statistics.gpu_timing) {
       std::cout << "Timing: this queue writes no GPU timestamps\n";
     }

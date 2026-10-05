@@ -1,5 +1,8 @@
 # Viewport morph debugging through evaluated overrides
 
+Later: [report 39](39-2026-10-05-late-frame-input.md) adds late commit, so debug
+edits can reach the current submit after extraction.
+
 - Date: 2026-10-05
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev

@@ -147,7 +147,7 @@ void CopyDraws(const ImDrawData& data, OverlayDrawList& list) {
 // A table of summaries, one row per series, in milliseconds.
 void TimingTable(const char* id, const std::vector<FrameTelemetry::Named>& rows,
     const std::vector<Summary>& summaries) {
-  if (!ImGui::BeginTable(id, 4,
+  if (!ImGui::BeginTable(id, 5,
           ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
     return;
   }
@@ -155,18 +155,28 @@ void TimingTable(const char* id, const std::vector<FrameTelemetry::Named>& rows,
   ImGui::TableSetupColumn("mean");
   ImGui::TableSetupColumn("p95");
   ImGui::TableSetupColumn("max");
+  ImGui::TableSetupColumn("stddev");
   ImGui::TableHeadersRow();
   for (std::size_t row = 0; row < rows.size() && row < summaries.size();
       ++row) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(rows[row].name);
+    if (summaries[row].count == 0) {
+      for (int column = 0; column < 4; ++column) {
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("--");
+      }
+      continue;
+    }
     ImGui::TableNextColumn();
     ImGui::Text("%7.3f", summaries[row].mean);
     ImGui::TableNextColumn();
     ImGui::Text("%7.3f", summaries[row].p95);
     ImGui::TableNextColumn();
     ImGui::Text("%7.3f", summaries[row].max);
+    ImGui::TableNextColumn();
+    ImGui::Text("%7.3f", summaries[row].stddev);
   }
   ImGui::EndTable();
 }
@@ -451,6 +461,17 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
 
     if (ImGui::CollapsingHeader("CPU", ImGuiTreeNodeFlags_DefaultOpen)) {
       TimingTable("cpu", cpu_rows, state_->cpu);
+    }
+    if (ImGui::CollapsingHeader("Latency")) {
+      const auto rows = telemetry.Latency();
+      std::vector<Summary> values;
+      for (const auto& row : rows) values.push_back(row.series->Summarize());
+      TimingTable("latency", rows, values);
+      ImGui::Text("Late samples: %llu applied, %llu deferred",
+          static_cast<unsigned long long>(statistics.late_samples_applied),
+          static_cast<unsigned long long>(statistics.late_samples_rejected));
+      ImGui::TextWrapped("First frame after each input update: buffer write, submit and presentation API return. Display time is not measured.");
+      if (!statistics.late_rejection.empty()) ImGui::TextWrapped("Deferred: %s", statistics.late_rejection.c_str());
     }
     if (ImGui::CollapsingHeader("GPU", ImGuiTreeNodeFlags_DefaultOpen)) {
       if (!statistics.gpu_timing) {
