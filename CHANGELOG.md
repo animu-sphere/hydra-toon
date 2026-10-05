@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Viewport Materials panel: effective normalized values, bound mesh ids and
+  override activity; MToon colour/scalar/texture-transform edits with per-material
+  and release-all controls through the late value route. Equal-value overrides
+  retain diagnostic activity without GPU writes. State/GPU checks cover late
+  application, removal and replacement without additional static uploads.
 - Viewport Skeleton panel: USD joint names, parents and evaluated world
   positions, with optional bones, joint markers, labels and selection
   highlighting. Diagnostics use UsdSkel's animation mapping and rest fallback,

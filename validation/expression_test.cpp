@@ -71,22 +71,29 @@ void Core() {
   Scene s;
   const auto scene = s.world.Commit();
   Require(!scene.meshes[0].morph_weights_overridden, "scene falsely reports override");
+  Require(!scene.materials[0].parameters_overridden, "scene falsely reports material override");
   Require(s.world.SetMeshMorphWeightsOverride(s.mesh, {0}) &&
       s.world.SetMaterialParametersOverride(s.material, s.values), "baseline override rejected");
   Require(s.world.Commit().revision == scene.revision, "baseline override caused redundant writes");
   Require(s.world.Commit().meshes[0].morph_weights_overridden,
       "equal-value override missing from diagnostics");
+  Require(s.world.Commit().materials[0].parameters_overridden,
+      "equal-value material override missing from diagnostics");
   s.world.ClearMeshMorphWeightsOverride(s.mesh);
   s.world.ClearMaterialParametersOverride(s.material);
   Require(s.world.Commit().revision == scene.revision, "baseline clear caused redundant writes");
   Require(!s.world.Commit().meshes[0].morph_weights_overridden,
       "cleared equal-value override remains in diagnostics");
+  Require(!s.world.Commit().materials[0].parameters_overridden,
+      "cleared equal-value material override remains in diagnostics");
   auto values = s.values;
   values.base_color = {0.1F, 0.6F, 0.2F};
   values.base_texture.offset = {0.2F, 0.3F};
   Require(s.world.SetMeshMorphWeightsOverride(s.mesh, {-0.5F}) &&
       s.world.SetMaterialParametersOverride(s.material, values), "valid overrides rejected");
   const auto overridden = s.world.Commit();
+  Require(overridden.materials[0].parameters_overridden && !scene.materials[0].parameters_overridden,
+      "material override diagnostics mutated an old snapshot");
   SlowState(scene, overridden);
   Require(*overridden.meshes[0].morph_weights == std::vector<float>{-0.5F} &&
       overridden.materials[0].material == values, "overrides absent from snapshot");
@@ -123,6 +130,8 @@ void Core() {
   s.world.ClearMeshMorphWeightsOverride(s.mesh);
   s.world.ClearMaterialParametersOverride(s.material);
   const auto restored = s.world.Commit();
+  Require(!restored.materials[0].parameters_overridden && overridden.materials[0].parameters_overridden,
+      "material clear diagnostics mutated an old snapshot");
   Require(*restored.meshes[0].morph_weights == std::vector<float>{0.25F} &&
       restored.materials[0].material == s.values, "clear did not restore latest scene values");
   SlowState(scene, restored);
@@ -148,6 +157,8 @@ void Core() {
   s.values.double_sided = true;
   s.world.SetMaterial(s.material, s.values);
   Require(s.world.Commit().materials[0].material == s.values, "structural edit kept stale override");
+  Require(!s.world.Commit().materials[0].parameters_overridden,
+      "structural edit retained material override diagnostic state");
   s.world.RemoveMesh(s.mesh);
   s.world.RemoveMaterial(s.material);
   Require(!s.world.SetMeshMorphWeightsOverride(s.mesh, {1}) &&

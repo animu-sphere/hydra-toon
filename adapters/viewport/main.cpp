@@ -872,7 +872,7 @@ int RunViewport(int argc, char** argv) {
         shown.view = draws.view;
 #if TOON_VIEWPORT_HAS_HYDRA
         shown.hydra_syncs = hydra == nullptr ? 0 : hydra->sync_count();
-        shown.morph_scene = hydra == nullptr ? nullptr : &snapshot;
+        shown.evaluated_scene = hydra == nullptr ? nullptr : &snapshot;
         if (hydra != nullptr) shown.read_skeletons = [&] { return hydra->ReadSkeletons(); };
 #endif
         const Toon::viewport::OverlayControls controls = overlay->Build(shown,
@@ -889,6 +889,14 @@ int RunViewport(int argc, char** argv) {
                 open_error = "Morph override rejected: the binding or weights changed.";
             } else {
               hydra->ClearMorphWeightsOverride(edit.mesh);
+            }
+          }
+          for (const auto& edit : controls.material_edits) {
+            if (edit.values) {
+              if (!hydra->SetMaterialParametersOverride(edit.material, *edit.values))
+                open_error = "Material override rejected: the binding or structure changed.";
+            } else {
+              hydra->ClearMaterialParametersOverride(edit.material);
             }
           }
         }

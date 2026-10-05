@@ -130,6 +130,23 @@ if(TOON_BUILD_TESTS)
     SKIP_RETURN_CODE 77
     TIMEOUT 60)
   if(TOON_ENABLE_HYDRA2)
+    add_executable(toon-viewport-material-debug-test material_debug_test.cpp hydra_scene.cpp)
+    toon_configure_warnings(toon-viewport-material-debug-test)
+    target_link_libraries(toon-viewport-material-debug-test PRIVATE
+      toon-hydra2-runtime Toon::Vulkan usdImaging usdSkel usdGeom usd)
+    target_compile_definitions(toon-viewport-material-debug-test PRIVATE
+      NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    add_dependencies(toon-viewport-material-debug-test toon-renderer-shaders)
+    add_test(NAME toon-viewport-material-debug-state COMMAND toon-viewport-material-debug-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/material-debug.usda")
+    add_test(NAME toon-viewport-material-debug-gpu COMMAND toon-viewport-material-debug-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/material-debug.usda"
+      "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+    set_tests_properties(toon-viewport-material-debug-state toon-viewport-material-debug-gpu PROPERTIES
+      TIMEOUT 60 LABELS "viewport;hydra"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    set_tests_properties(toon-viewport-material-debug-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu;viewport;hydra")
     add_executable(toon-viewport-skeleton-debug-test skeleton_debug_test.cpp hydra_scene.cpp)
     toon_configure_warnings(toon-viewport-skeleton-debug-test)
     target_link_libraries(toon-viewport-skeleton-debug-test PRIVATE

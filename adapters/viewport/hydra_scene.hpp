@@ -37,6 +37,10 @@ public:
   // publishes the result; ids and overrides belong to this scene instance.
   virtual bool SetMorphWeightsOverride(MeshId mesh, std::vector<float> weights) = 0;
   virtual void ClearMorphWeightsOverride(MeshId mesh) = 0;
+  // Already normalized value-only material edits, with the same late commit
+  // and scene ownership as morph overrides. Structural edits are rejected.
+  virtual bool SetMaterialParametersOverride(MaterialId material, const ToonMaterial& values) = 0;
+  virtual void ClearMaterialParametersOverride(MaterialId material) = 0;
   // Read the selected USD time's joint hierarchy and evaluated world origins.
   // Diagnostic only: never authors USD, commits renderer state or syncs Hydra.
   [[nodiscard]] virtual std::vector<SkeletonDebug> ReadSkeletons() = 0;

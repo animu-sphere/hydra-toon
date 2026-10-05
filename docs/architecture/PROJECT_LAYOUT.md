@@ -149,6 +149,21 @@ mesh id and weight index; source expression names and mappings are not
 defined here. `toon-viewport-morph-debug-test`, built only with the viewport
 and Hydra adapter, exercises this host route with state and GPU checks.
 
+The Materials panel reads the same effective `FrameSnapshot`, listing renderer
+material ids, bound mesh ids, normalized values and
+`MaterialSnapshot::parameters_overridden`. Like the morph flag, this flag is
+diagnostic only: equal-value activation and release advance no rendering
+revision. The panel edits MToon colours, scalars and texture transforms through
+`HydraScene::SetMaterialParametersOverride` and releases through
+`ClearMaterialParametersOverride`; late commit publishes these operations after
+extraction. Model, alpha mode, sidedness and texture identities are displayed,
+not edited. PreviewSurface values are read-only because its current fallback
+draws mesh display colour. UI values come from each commit, so removal,
+structural invalidation and scene replacement retain no independent override
+state. The host-route state/GPU tests live in `material_debug_test.cpp` within
+the existing viewport target layout. Runtime frame identities and source-owner
+expression/material mappings remain the optional runtime adapter's concern.
+
 Late evaluated values reuse the existing targets. `ApplyFastSnapshot` lives
 in `core/render-extraction/fast_snapshot.cpp`: it validates the entire
 candidate before replacing fast draw values in existing storage. Draw

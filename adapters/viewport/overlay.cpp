@@ -12,6 +12,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -29,6 +30,77 @@ static_assert(sizeof(ImDrawIdx) == sizeof(std::uint16_t),
 constexpr double kRefreshSeconds = 0.25;
 // The interval plot's width in frames.
 constexpr std::size_t kPlotFrames = 240;
+
+bool MaterialScalar(const char* label, float& value) {
+  float edited = value;
+  if (!ImGui::DragFloat(label, &edited, 0.01F, 0.0F, 0.0F, "%.3f") ||
+      !std::isfinite(edited)) return false;
+  value = edited;
+  return true;
+}
+
+bool MaterialColor(const char* label, Float3& value) {
+  float edited[3] = {value.x, value.y, value.z};
+  if (!ImGui::DragFloat3(label, edited, 0.01F, 0.0F, 0.0F, "%.3f") ||
+      !std::all_of(std::begin(edited), std::end(edited),
+          [](float x) { return std::isfinite(x); })) return false;
+  value = {edited[0], edited[1], edited[2]};
+  return true;
+}
+
+bool MaterialTexture(const char* label, ToonTextureRef& texture) {
+  if (!ImGui::TreeNode(label)) return false;
+  ImGui::Text("Texture %u", texture.texture);
+  bool changed = MaterialScalar("Offset U", texture.offset.x);
+  changed |= MaterialScalar("Offset V", texture.offset.y);
+  changed |= MaterialScalar("Rotation (radians)", texture.rotation);
+  changed |= MaterialScalar("Scale U", texture.scale.x);
+  changed |= MaterialScalar("Scale V", texture.scale.y);
+  ImGui::TreePop();
+  return changed;
+}
+
+bool MaterialValues(ToonMaterial& values) {
+  bool changed = MaterialColor("Base colour (linear)", values.base_color);
+  changed |= MaterialScalar("Alpha", values.alpha);
+  changed |= MaterialScalar("Alpha cutoff", values.alpha_cutoff);
+  changed |= MaterialColor("Emission (linear)", values.emissive);
+  changed |= MaterialScalar("Normal scale", values.normal_scale);
+  changed |= MaterialScalar("Outline width", values.outline_width);
+  changed |= MaterialColor("Outline colour (linear)", values.outline_color);
+  changed |= MaterialTexture("Base texture", values.base_texture);
+  changed |= MaterialTexture("Emission texture", values.emissive_texture);
+  changed |= MaterialTexture("Normal texture", values.normal_texture);
+  if (values.model == ToonShadingModel::MToon) {
+    auto& m = values.mtoon;
+    ImGui::TextDisabled("MToon");
+    const char* width_mode = m.outline_width_mode == ToonOutlineWidthMode::World ? "world" :
+        m.outline_width_mode == ToonOutlineWidthMode::Screen ? "screen" : "none";
+    ImGui::Text("Outline: %s; width mode: %s", HasOutline(values) ? "on" : "off", width_mode);
+    ImGui::Text("Render queue: %d; depth writes: %s", RenderQueue(values), WritesDepth(values) ? "on" : "off");
+    changed |= MaterialColor("Shade colour", m.shade_color);
+    changed |= MaterialScalar("Shading shift", m.shading_shift);
+    changed |= MaterialScalar("Shift texture scale", m.shading_shift_texture_scale);
+    changed |= MaterialScalar("Toony", m.shading_toony);
+    changed |= MaterialScalar("GI equalization", m.gi_equalization);
+    changed |= MaterialColor("MatCap colour", m.matcap);
+    changed |= MaterialColor("Rim colour", m.rim_color);
+    changed |= MaterialScalar("Rim power", m.rim_fresnel_power);
+    changed |= MaterialScalar("Rim lift", m.rim_lift);
+    changed |= MaterialScalar("Rim lighting mix", m.rim_lighting_mix);
+    changed |= MaterialScalar("Outline lighting mix", m.outline_lighting_mix);
+    changed |= MaterialScalar("UV scroll U", m.uv_scroll_x_speed);
+    changed |= MaterialScalar("UV scroll V", m.uv_scroll_y_speed);
+    changed |= MaterialScalar("UV rotation speed", m.uv_rotation_speed);
+    changed |= MaterialTexture("Shade texture", m.shade_texture);
+    changed |= MaterialTexture("Shift texture", m.shading_shift_texture);
+    changed |= MaterialTexture("MatCap texture", m.matcap_texture);
+    changed |= MaterialTexture("Rim texture", m.rim_multiply_texture);
+    changed |= MaterialTexture("Outline width texture", m.outline_width_texture);
+    changed |= MaterialTexture("UV animation mask", m.uv_animation_mask_texture);
+  }
+  return changed;
+}
 
 int ImGuiButton(PointerButton button) {
   switch (button) {
@@ -402,17 +474,17 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
       ImGui::Text("Hydra syncs: %llu", static_cast<unsigned long long>(frame.hydra_syncs));
     }
 
-    if (frame.morph_scene != nullptr && ImGui::CollapsingHeader("Morphs")) {
+    if (frame.evaluated_scene != nullptr && ImGui::CollapsingHeader("Morphs")) {
       ImGui::TextWrapped("Edit evaluated subshape weights; release overrides to follow animation.");
       if (ImGui::Button("Release all overrides")) {
-        for (const MeshSnapshot& mesh : frame.morph_scene->meshes) {
+        for (const MeshSnapshot& mesh : frame.evaluated_scene->meshes) {
           if (mesh.morph_weights_overridden)
             controls.morph_edits.push_back({mesh.id, std::nullopt});
         }
       } else {
         bool found = false;
         ImGui::BeginChild("morph-list", ImVec2(360.0F * scale, 220.0F * scale));
-        for (const MeshSnapshot& mesh : frame.morph_scene->meshes) {
+        for (const MeshSnapshot& mesh : frame.evaluated_scene->meshes) {
           if (mesh.morph_offsets == nullptr || mesh.morph_offsets->empty() ||
               mesh.morph_weights == nullptr || mesh.morph_weights->empty()) continue;
           found = true;
@@ -443,6 +515,50 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
           ImGui::PopID();
         }
         if (!found) ImGui::TextDisabled("No resident GPU morph weights");
+        ImGui::EndChild();
+      }
+    }
+
+    if (frame.evaluated_scene != nullptr && ImGui::CollapsingHeader("Materials")) {
+      ImGui::TextWrapped("Evaluated material values. Release overrides to follow the scene.");
+      if (ImGui::Button("Release all material overrides")) {
+        for (const auto& material : frame.evaluated_scene->materials) {
+          if (material.parameters_overridden)
+            controls.material_edits.push_back({material.id, std::nullopt});
+        }
+      } else {
+        ImGui::BeginChild("material-list", ImVec2(360.0F * scale, 280.0F * scale));
+        if (frame.evaluated_scene->materials.empty()) ImGui::TextDisabled("No resident materials");
+        for (const auto& material : frame.evaluated_scene->materials) {
+          const std::string id = std::to_string(material.id);
+          ImGui::PushID(id.c_str());
+          const char* model = material.material.model == ToonShadingModel::MToon ? "MToon" :
+              material.material.model == ToonShadingModel::MMD ? "MMD" : "PreviewSurface";
+          char label[80];
+          std::snprintf(label, sizeof(label), "Material %u (%s)", material.id, model);
+          if (ImGui::TreeNode(label)) {
+            ImGui::TextDisabled("%s", material.parameters_overridden ? "Override active" : "Following scene");
+            const auto mode = material.material.alpha_mode;
+            ImGui::Text("Alpha mode: %s; double sided: %s",
+                mode == ToonAlphaMode::Opaque ? "opaque" : mode == ToonAlphaMode::Mask ? "mask" : "blend",
+                material.material.double_sided ? "yes" : "no");
+            for (const auto& mesh : frame.evaluated_scene->meshes)
+              if (mesh.material == material.id) ImGui::Text("Bound mesh %u", mesh.id);
+            ImGui::BeginDisabled(!material.parameters_overridden);
+            const bool release = ImGui::Button("Release material override");
+            ImGui::EndDisabled();
+            if (material.material.model == ToonShadingModel::PreviewSurface)
+              ImGui::TextWrapped("PreviewSurface currently draws with mesh display colour.");
+            ToonMaterial values = material.material;
+            ImGui::BeginDisabled(material.material.model != ToonShadingModel::MToon);
+            const bool changed = MaterialValues(values);
+            ImGui::EndDisabled();
+            if (release) controls.material_edits.push_back({material.id, std::nullopt});
+            else if (changed) controls.material_edits.push_back({material.id, values});
+            ImGui::TreePop();
+          }
+          ImGui::PopID();
+        }
         ImGui::EndChild();
       }
     }

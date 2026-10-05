@@ -157,6 +157,17 @@ public:
     inputs_.expression = Toon::SteadyNanoseconds();
   }
 
+  bool SetMaterialParametersOverride(MaterialId material, const ToonMaterial& values) override {
+    if (!delegate_.SetMaterialParametersOverride(material, values)) return false;
+    inputs_.expression = Toon::SteadyNanoseconds();
+    return true;
+  }
+
+  void ClearMaterialParametersOverride(MaterialId material) override {
+    delegate_.ClearMaterialParametersOverride(material);
+    inputs_.expression = Toon::SteadyNanoseconds();
+  }
+
   std::vector<SkeletonDebug> ReadSkeletons() override {
     // Cache invalidation follows USD notices, including binding/animation edits.
     // No evaluation or traversal takes place while diagnostics are closed.

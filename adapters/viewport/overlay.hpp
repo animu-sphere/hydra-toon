@@ -78,7 +78,7 @@ struct OverlayFrame {
   bool deterministic_time = false;
   std::uint64_t hydra_syncs = 0;
   // Current effective values; the snapshot outlives Build.
-  const FrameSnapshot* morph_scene = nullptr;
+  const FrameSnapshot* evaluated_scene = nullptr;
   ToonView view;
   // Called only while the Skeleton panel or its screen display is active.
   std::function<std::vector<SkeletonDebug>()> read_skeletons;
@@ -88,6 +88,12 @@ struct MorphEdit {
   MeshId mesh = 0;
   // nullopt releases the override and resumes the latest scene evaluation.
   std::optional<std::vector<float>> weights;
+};
+
+struct MaterialEdit {
+  MaterialId material = 0;
+  // nullopt restores the latest scene values.
+  std::optional<ToonMaterial> values;
 };
 
 // What the overlay's controls asked for this frame.
@@ -103,6 +109,7 @@ struct OverlayControls {
   double playback_speed = 1.0;
   bool loop = true;
   std::vector<MorphEdit> morph_edits;
+  std::vector<MaterialEdit> material_edits;
 };
 
 class Overlay {
