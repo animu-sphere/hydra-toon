@@ -50,5 +50,6 @@ linked, never restated:
 | VRM / MToon material semantics (`VrmMaterialAPI`, `VrmMToonAPI`, `VrmTextureInfoAPI`) and the VRM stage | [`usd-vrm-plugins`](https://github.com/animu-sphere/usd-vrm-plugins/tree/main/docs) |
 | MMD material semantics (`MmdMaterialAPI`) and the MMD stage | [`usd-mmd-plugins`](https://github.com/animu-sphere/usd-mmd-plugins/tree/main/docs) |
 | Generic motion: `MotionPose`, `MotionStream`, sampling, retargeting, recording | [`usd-motion-plugins`](https://github.com/animu-sphere/usd-motion-plugins/tree/main/docs) |
+| Avatar evaluation composition, lifecycle and shared evaluated-state publication | [`usd-avatar-runtime`](https://github.com/animu-sphere/usd-avatar-runtime/tree/main/docs) |
 | Device and protocol input | [`motion-connectors`](https://github.com/animu-sphere/motion-connectors/tree/main/docs) |
 | Build, runtimes, renderer evidence and validation | [`open-strata`](https://github.com/animu-sphere/open-strata/tree/main/docs) |

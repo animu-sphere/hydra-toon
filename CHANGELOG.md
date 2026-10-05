@@ -59,6 +59,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Architecture policy: Hydra and an optional evaluated-state fast adapter feed
+  one renderer core. Avatar composition and shared output belong to
+  `usd-avatar-runtime`; format evaluators remain upstream. The v0.3.0 gate
+  requires runtime integration, Hydra/direct parity and producer-to-submit/
+  present-return evidence, with actual display instrumentation tracked later.
 - The viewport syncs Hydra only after time or scene-index changes; paused
   camera and diagnostic frames reuse scene state. The overlay and final log
   expose the sync count.

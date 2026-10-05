@@ -11,8 +11,10 @@ owner: hydra-toon
 
 ## 1. The rule
 
-> **The contract between `hydra-toon` and a format repository is the composed
-> USD stage and its schemas, and nothing else.**
+> **Authored assets and canonical format semantics cross through the composed
+> USD stage and its schemas. Evaluated avatar state crosses through
+> `usd-avatar-runtime`'s public output contract. Both routes feed one
+> renderer-private scene model.**
 
 `hydra-toon` never parses `.vrm`, `.vrma`, `.pmx` or `.vmd`, never links a
 format repository's file-format plugin or model library, and never reads a
@@ -20,7 +22,16 @@ realization graph (`/preview`, `/mtlx`) as the source of a toon look. It reads
 the canonical semantics those repositories author, through the names their
 schemas define.
 
-This is the same boundary the format repositories state from their side:
+The evaluated-state route supplements that authored-stage boundary; it does
+not add a link to format evaluators. `usd-avatar-runtime` owns composition,
+evaluation order, lifecycle and publication. Format repositories retain their
+expression, look-at, morph and IK semantics. `hydra-toon` consumes resolved
+effects and translates them into its own joint palettes, morph slots and
+material parameters. The shared result type belongs to the runtime, not to
+the renderer ([evaluated-state contract](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md),
+[output paths](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md)).
+
+The authored-stage boundary is also stated by the format repositories:
 [`usd-vrm-plugins` material policy §5.3.1](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/MATERIAL_ARCHITECTURE_POLICY.md#531-the-boundary-with-hydra-toon)
 and [`usd-mmd-plugins` material policy §12](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#12-rendering-and-integration-belong-elsewhere).
 
@@ -30,6 +41,9 @@ and [`usd-mmd-plugins` material policy §12](https://github.com/animu-sphere/usd
   WebGPU backend ([DESIGN_POLICY.md](DESIGN_POLICY.md) §4, §7).
 - The Hydra adapter (`hdToon`) and any scene index that normalizes input for
   it ([DESIGN_POLICY.md](DESIGN_POLICY.md) §5).
+- An optional fast adapter from public evaluated avatar state into the same
+  renderer-private representation. Neither adapter evaluates avatar behavior
+  ([DESIGN_POLICY.md §34](DESIGN_POLICY.md#34-evaluated-avatar-input-and-transport-parity)).
 - The full MToon realization: toon lighting, shade, shading shift and toony,
   GI equalization, rim, MatCap, outline, UV animation, MToon transparency and
   render ordering.
@@ -55,7 +69,7 @@ Each subject is linked to its owner and never restated here
 | `mmdImaging` — the Hydra view of `MmdMaterialAPI` (planned, does not exist yet) | `usd-mmd-plugins` | [package contract](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/architecture/PACKAGE_CONTRACT.md) |
 | `MotionPose`, `MotionStream`, the joint vocabulary, coordinates and time | `usd-motion-plugins` | [motion contract](https://github.com/animu-sphere/usd-motion-plugins/blob/main/docs/design/MOTION_CONTRACT.md) |
 | Device and protocol input (MediaPipe, mocap, OSC, XR) | `motion-connectors` | [docs](https://github.com/animu-sphere/motion-connectors/tree/main/docs) — reached only through `usd-motion-plugins`' types, never directly |
-| Per-frame composition of the avatar stack, and when rendering happens in it | `usd-avatar-runtime` | its own documentation |
+| Avatar evaluation composition, order, lifecycle and public evaluated state | `usd-avatar-runtime` | [dependency boundary](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/DEPENDENCIES.md) · [evaluated state](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md) · [publication](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md) |
 | Build, runtime adoption, renderer evidence and validation | `open-strata` (`ost`) | [adopting a renderer project](https://github.com/animu-sphere/open-strata/blob/main/docs/guides/adopt-a-renderer-project.md) |
 
 `hydra-merlin` is a reference for technique and is not a dependency; what it
@@ -72,15 +86,28 @@ is a reference for, and what is designed separately here, is
    source-preserving blob are never read; a value the typed schema lacks is a
    missing schema field, raised with its owner
    ([`usd-vrm-plugins` material policy §6.5](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/MATERIAL_ARCHITECTURE_POLICY.md#65-source-of-truth)).
-3. **Motion arrives as `usd-motion-plugins` types.** `hydra-toon` defines no
-   pose or stream type of its own at its boundary; what it does with a pose
-   inside the renderer (joint palettes, morph buffers) is its own.
+3. **Motion and evaluated state keep their upstream owners.** Generic motion
+   types and vocabulary belong to `usd-motion-plugins`; final avatar state
+   belongs to `usd-avatar-runtime`. The renderer defines no competing motion
+   vocabulary or shared avatar result type. Converting resolved rig values to
+   renderer-private joint palettes, morph buffers and material slots is its
+   adapter's responsibility. A semantic humanoid pose is not assumed to be a
+   complete final rig.
 4. **No USD-level `ToonMaterialAPI`.** The common representation is
    renderer-private. Both format repositories rule a shared USD schema out
    until two working concrete paths show common semantics
    ([`usd-mmd-plugins` material policy §12](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#12-rendering-and-integration-belong-elsewhere)).
-5. **The core stays host-neutral.** OpenUSD appears only under
-   `adapters/hydra2/` ([PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §4).
+5. **The core stays host-neutral.** OpenUSD and upstream runtime types stay
+   in their adapters, under the placement rules in
+   [PROJECT_LAYOUT.md §4](../architecture/PROJECT_LAYOUT.md#4-dependency-directions).
+   The core and backends have no dependency on avatar runtime orchestration,
+   registration or format evaluators.
+6. **Runtime integration is optional.** The fast adapter may consume the
+   runtime's minimal public state/ABI contract. Core, backend and Hydra-only
+   builds must remain usable without that package. Adapter code does not
+   invoke evaluator callbacks; it consumes published results with explicit
+   binding identity and lifetime. Runtime ABI details remain with their
+   [owner](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/ABI.md).
 
 ## 5. What this repository does not own
 
@@ -89,8 +116,12 @@ is a reference for, and what is designed separately here, is
 - The portable realizations (`/preview`, `/mtlx`) the format repositories
   author.
 - Motion semantics: retargeting, sampling, filtering, recording.
+- VRM expression arbitration and look-at evaluation; MMD morph and IK
+  evaluation. Their reusable algorithms stay with the format owners.
 - Device input.
-- Avatar runtime orchestration and physics.
+- Avatar runtime orchestration, evaluator scheduling, physics and the shared
+  evaluated-state contract. The runtime's evaluation Scene Index belongs
+  upstream; this repository owns consuming and normalizing its data sources.
 - General-purpose USD rendering; that is `hydra-merlin`'s role.
 
 ## 6. Cross-repository observations

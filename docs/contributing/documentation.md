@@ -48,7 +48,7 @@ not the roadmap, a design document, the root README or the changelog.
 ## Cross-repository contracts
 
 `hydra-toon` consumes contracts owned by `usd-vrm-plugins`, `usd-mmd-plugins`,
-`usd-motion-plugins` and `motion-connectors`
+`usd-motion-plugins`, `motion-connectors` and `usd-avatar-runtime`
 ([integration scope §3](../design/INTEGRATION_SCOPE_POLICY.md#3-what-it-consumes-and-from-whom)).
 
 > A repository may describe how it consumes a sibling repository's contract,
