@@ -106,6 +106,7 @@ std::uint32_t Type(AvatarMaterialField field) {
   case AvatarMaterialField::BaseColor:
     return AR_VALUE_VEC4;
   case AvatarMaterialField::Emissive:
+  case AvatarMaterialField::BaseColorRgb:
   case AvatarMaterialField::ShadeColor:
   case AvatarMaterialField::OutlineColor:
   case AvatarMaterialField::Matcap:
@@ -134,6 +135,9 @@ void Material(ToonMaterial& m, AvatarMaterialField f, const double* v) {
   case AvatarMaterialField::BaseColor:
     m.base_color = color;
     m.alpha = static_cast<float>(v[3]);
+    break;
+  case AvatarMaterialField::BaseColorRgb:
+    m.base_color = color;
     break;
   case AvatarMaterialField::Emissive:
     m.emissive = color;
@@ -307,8 +311,9 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
     materials[b.source] = true;
   }
   for (const auto& [id, field] : fields)
-    if (field == AvatarMaterialField::BaseColor && fields.contains({id, AvatarMaterialField::Alpha}))
-      return Fail(error, "base colour and alpha bindings overlap");
+    if (field == AvatarMaterialField::BaseColor &&
+        (fields.contains({id, AvatarMaterialField::Alpha}) || fields.contains({id, AvatarMaterialField::BaseColorRgb})))
+      return Fail(error, "base colour bindings overlap");
   std::set<MeshId> visible;
   for (const auto& b : next.bindings_.visibility) {
     if (b.source >= layout.visibility_count || !Find(next.bound_.meshes, b.mesh) || !visible.insert(b.mesh).second)
