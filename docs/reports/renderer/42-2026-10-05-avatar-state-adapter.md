@@ -109,6 +109,28 @@ header and export install only when the build option is enabled.
 
 ## Commands and limits
 
+### 2026-10-07 split RGB/alpha intake
+
+Real owner composition exposed an input-shape gap: the runtime VRM binding
+publishes base colour as canonical RGB plus a separate alpha input. The additive
+`AvatarMaterialField::BaseColorRgb` accepts a vec3 and changes only base RGB;
+`Alpha` independently accepts its scalar. Existing `BaseColor` retains its
+vec4/RGBA behavior and enum value. Combined RGBA cannot overlap either RGB or
+alpha on one destination. This introduces no format-name interpretation in the
+renderer; the external host selects each field explicitly.
+
+`toon-avatar-state` now checks combined RGB/scalar-alpha mapping, independent
+RGB and alpha override release, and RGB/RGBA overlap rejection with and without
+alpha. Installed-consumer, runtime-lifetime and existing GPU checks remain the
+renderer-owned regression gates. All 13 adapter/no-Vulkan tests and the four
+focused Vulkan adapter/installed/runtime/GPU tests pass on the same local
+Windows/MSVC environment. The runtime's optional motion-check host
+consumes the installed adapter and supplies separately recorded real-owner
+probe transport evidence in its
+[output documentation](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md#scoped-toon-transport-check).
+Its generated triangle resources do not establish representative avatar
+rendering, actual resident-resource binding, Hydra/direct parity or latency.
+
 The variables below stand for the locally resolved sibling source/header
 directories, built runtime DLL and Vulkan SDK root; machine-local paths are
 not recorded in this report.

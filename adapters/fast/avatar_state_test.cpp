@@ -146,6 +146,51 @@ void Slow(const Toon::FrameSnapshot& a, const Toon::FrameSnapshot& b) {
             a.materials[0].structure_revision == b.materials[0].structure_revision,
       "runtime update changed static resources");
 }
+void SplitBaseColor() {
+  Scene scene;
+  Values v;
+  v.materials[0] = {"surface", "owner:rgb", AR_VALUE_VEC3, 1, {.1, .2, .3, 0}};
+  v.materials[1] = {"surface", "owner:alpha", AR_VALUE_SCALAR, 1, {.4, 0, 0, 0}};
+  auto bindings = scene.Bindings();
+  bindings.materials = {{0, scene.material, Toon::AvatarMaterialField::BaseColorRgb},
+      {1, scene.material, Toon::AvatarMaterialField::Alpha}};
+  auto base = scene.world.Commit();
+  Toon::AvatarStateAdapter adapter;
+  std::string error;
+  Check(adapter.Bind(v.View(), base, 1, bindings, error), error.c_str());
+  auto retained = Fake::Snapshot(v.View());
+  Toon::FrameSnapshot output;
+  Check(adapter.Apply(retained, base, 1, output, error), error.c_str());
+  Check(output.materials[0].material.base_color == Toon::Float3{.1F, .2F, .3F} &&
+            output.materials[0].material.alpha == .4F,
+      "separate RGB/alpha mapping lost values");
+  v.materials[0].overridden = 0;
+  retained = Fake::Snapshot(v.View(2));
+  Check(adapter.Apply(retained, base, 1, output, error) &&
+            output.materials[0].material.base_color == scene.values.base_color &&
+            output.materials[0].material.alpha == .4F,
+      "RGB release cleared independently active alpha");
+  v.materials[0].overridden = 1;
+  v.materials[1].overridden = 0;
+  retained = Fake::Snapshot(v.View(3));
+  Check(adapter.Apply(retained, base, 1, output, error) &&
+            output.materials[0].material.base_color == Toon::Float3{.1F, .2F, .3F} &&
+            output.materials[0].material.alpha == scene.values.alpha,
+      "alpha release cleared independently active RGB");
+  auto layout = v.View();
+  ArMaterialInput overlapping[3]{v.materials[0], v.materials[1],
+      {"surface", "owner:rgba", AR_VALUE_VEC4, 1, {.2, .3, .4, .5}}};
+  layout.materials = overlapping;
+  layout.material_count = 3;
+  bindings.materials.push_back({2, scene.material, Toon::AvatarMaterialField::BaseColor});
+  Check(!adapter.Bind(layout, base, 2, bindings, error), "overlapping RGB/RGBA accepted");
+  bindings.materials.erase(bindings.materials.begin() + 1);
+  layout.materials = &overlapping[0];
+  overlapping[1] = overlapping[2];
+  layout.material_count = 2;
+  bindings.materials.back().source = 1;
+  Check(!adapter.Bind(layout, base, 2, bindings, error), "RGB/RGBA overlap accepted without alpha");
+}
 void State() {
   Scene scene;
   Values v;
@@ -497,6 +542,7 @@ void Gpu(const char* shaders) {
 } // namespace
 int main(int argc, char** argv) {
   try {
+    SplitBaseColor();
     State();
     if (argc == 3 && std::string(argv[1]) == "--runtime")
       Runtime(argv[2]);
