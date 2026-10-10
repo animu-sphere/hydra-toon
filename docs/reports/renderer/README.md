@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [44](44-2026-10-10-avatar-inbetween-subshapes.md) | Avatar-state morph bindings with inbetween slots, interpolated from the runtime's per-shape weight as usdSkelImaging does; hand-worked cases, refused positions and exact Hydra weight parity on the skinning fixture |
 | [43](43-2026-10-10-hydra-resident-targets.md) | Hydra delegate description of resident mesh/material paths, palette joint identities, inverse binds, placement and subshape slots; reordered-joint fixture and a rotated-rest avatar composing usdSkelImaging's palette |
 | [42](42-2026-10-05-avatar-state-adapter.md) | Optional revision-3 runtime consumer; retained snapshots and explicit resource mappings, reset/layout checks, controlled late Vulkan comparisons, release and independent installed consumers |
 | [41](41-2026-10-05-viewport-material-debug.md) | Evaluated material values, bindings and override activity; MToon value controls and release; late host-route state/GPU checks, diagnostic-only equal values and removal/replacement isolation |

@@ -39,10 +39,19 @@ struct AvatarSkinBinding {
   Matrix4 world_to_skeleton;
   Matrix4 skeleton_to_mesh;
 };
+// An inbetween's resident subshape slot and the shape weight at which it
+// applies fully, as the Hydra delegate describes it.
+struct AvatarInbetweenSlot {
+  std::uint32_t weight = 0;
+  float position = 0.5F;
+};
 struct AvatarMorphBinding {
-  std::uint32_t source = 0; // already resolved runtime blend-shape slot
+  std::uint32_t source = 0; // resolved runtime blend-shape weight
   MeshId mesh = 0;
-  std::uint32_t weight = 0; // resident evaluated subshape slot
+  std::uint32_t weight = 0; // resident subshape slot of the primary shape
+  // With inbetweens, the shape weight becomes subshape weights as
+  // usdSkelImaging computes them, so both paths fill the same slots.
+  std::vector<AvatarInbetweenSlot> inbetweens;
 };
 enum class AvatarMaterialField {
   BaseColor,
@@ -117,9 +126,16 @@ private:
     std::uint32_t type = 0;
     friend bool operator==(const Identity&, const Identity&) = default;
   };
+  // A shape's interpolation points in weight order: the rest at 0 with no
+  // slot, its inbetweens and the primary shape at 1.
+  struct Knot {
+    float position = 0;
+    std::int64_t slot = -1;
+  };
   bool CheckScene(const FrameSnapshot& scene, std::uint64_t epoch, std::string& error) const;
   void Publish(FrameSnapshot candidate, FrameSnapshot& output);
   std::vector<Identity> joints_, morphs_, materials_, visibility_;
+  std::vector<std::vector<Knot>> knots_; // per morph binding
   AvatarBindings bindings_;
   AvatarFrameIdentity identity_;
   std::vector<Identity> capabilities_;

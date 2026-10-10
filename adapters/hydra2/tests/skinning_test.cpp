@@ -10,7 +10,9 @@
 // next frame would draw; an optional shader directory also runs GPU image
 // comparisons against independently deformed rest geometry. The delegate
 // also describes the Hydra identities behind the resident palette, subshape
-// and material slots, which a host binds evaluated avatar targets with.
+// and material slots, which a host binds evaluated avatar targets with;
+// built with the optional runtime consumer, bindings made from them must
+// turn runtime shape weights into usdSkelImaging's subshape weights.
 // With --stage, a real stage's described identities are checked instead:
 // they must name every palette entry and morph weight slot, and compose the
 // palette usdSkelImaging computed, with every joint's rest rotated so a
@@ -36,11 +38,15 @@
 
 #include <toon/render_world.hpp>
 #include <toon/vulkan_backend.hpp>
+#ifdef TOON_HAS_AVATAR_STATE
+#include <toon/fast/avatar_state.hpp>
+#endif
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -431,6 +437,105 @@ int RunStage(const char* path) {
   return 0;
 }
 
+#ifdef TOON_HAS_AVATAR_STATE
+// Retained runtime views served from memory; the adapter only reads them.
+struct HeldViews {
+  static inline std::map<ArSnapshot, ArStateView> views;
+  static ArStatus AR_CALL Get(ArSnapshot handle, ArStateView* view) {
+    const auto found = views.find(handle);
+    if (found == views.end()) return AR_INVALID_HANDLE;
+    *view = found->second;
+    return AR_OK;
+  }
+  static ArStatus AR_CALL Hold(ArSnapshot handle) {
+    return views.contains(handle) ? AR_OK : AR_INVALID_HANDLE;
+  }
+};
+
+// The runtime publishes one weight per `skel:blendShapes` target. A host
+// binds each to the slots the delegate describes for that shape, and the
+// fast adapter must then fill exactly the subshape weights usdSkelImaging
+// computes when the same weights are authored (design policy §34).
+template <class Sync>
+bool AvatarInbetweenParity(HdToonRenderDelegate& delegate,
+    const UsdAttribute& weights, Sync sync) {
+  const Toon::FrameSnapshot baseline = sync(3.0);
+  const HdToonResidentTargets resident = delegate.DescribeResidentTargets();
+  const HdToonResidentMesh* target = Described(resident, "/Root/Linear");
+  if (!Check(target != nullptr, "the linear quad must be described")) {
+    return false;
+  }
+  const char* const names[] = {"lift", "tilt", "plain"};
+  ArBlendShape shapes[3];
+  Toon::AvatarBindings bindings;
+  for (std::uint32_t shape = 0; shape < 3; ++shape) {
+    // The runtime's USD identities: the mesh path and the shape token.
+    shapes[shape] = {"/Root/Linear", names[shape], 0};
+    Toon::AvatarMorphBinding binding{shape, target->mesh};
+    for (std::uint32_t slot = 0; slot < target->subshapes.size(); ++slot) {
+      const HdToonResidentSubshape& subshape = target->subshapes[slot];
+      if (subshape.blend_shape != names[shape]) continue;
+      if (subshape.weight == 1.0F) {
+        binding.weight = slot;
+      } else {
+        binding.inbetweens.push_back({slot, subshape.weight});
+      }
+    }
+    bindings.morphs.push_back(binding);
+  }
+  ArStateView view{AR_HEADER(ArStateView)};
+  view.instance = 1;
+  view.generation = 1;
+  view.blend_shapes = shapes;
+  view.blend_shape_count = 3;
+  view.layout_id = "skinning.usda";
+  view.layout_version = 1;
+  ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
+  api.get_snapshot = HeldViews::Get;
+  api.retain_snapshot = HeldViews::Hold;
+  api.release_snapshot = HeldViews::Hold;
+  Toon::AvatarStateAdapter adapter;
+  std::string error;
+  if (!Check(bindings.morphs[0].inbetweens.size() == 1 &&
+                 adapter.Bind(view, baseline, 1, bindings, error),
+          "described subshapes must bind lift's inbetween")) {
+    std::cerr << error << '\n';
+    return false;
+  }
+  // Around, on and beyond lift's knots at 0, 0.5 and 1.
+  const float lifts[] = {-1.0F, -0.5F, -0.25F, 0.0F, 0.25F, 0.4F, 0.5F,
+      0.6F, 0.75F, 1.0F, 1.25F, 2.0F};
+  ArSnapshot handle = 0;
+  for (const float lift : lifts) {
+    const VtFloatArray authored{lift, 0.3F, -0.7F};
+    weights.Set(authored, UsdTimeCode(3));
+    const Toon::FrameSnapshot hydra = sync(3.0);
+    for (std::size_t i = 0; i < 3; ++i) shapes[i].weight = authored[i];
+    view.frame_id = ++handle;
+    HeldViews::views[handle] = view;
+    Toon::RetainedAvatarSnapshot held;
+    Toon::FrameSnapshot direct;
+    // The dual quaternion quad's CPU kernel rewrites its points on every
+    // animation edit, which the adapter takes as a scene change, so the
+    // same bindings are rebound over each synced frame.
+    if (!held.Reset(api, handle, error) ||
+        !adapter.Bind(view, hydra, handle + 1, bindings, error) ||
+        !adapter.Apply(held, hydra, handle + 1, direct, error)) {
+      std::cerr << error << '\n';
+      return false;
+    }
+    if (!Check(*Find(direct).linear->morph_weights ==
+                *Find(hydra).linear->morph_weights,
+            "runtime shape weights must give usdSkelImaging's subshape weights")) {
+      std::cerr << "lift " << lift << '\n';
+      return false;
+    }
+  }
+  HeldViews::views.clear();
+  return true;
+}
+#endif
+
 int main(int argc, char** argv) {
   if (argc == 3 && std::strcmp(argv[1], "--stage") == 0) {
     TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
@@ -680,6 +785,9 @@ int main(int argc, char** argv) {
               {{0.8F, -0.0625F, 0.6F}, {0.6F, -0.0625F, 0.8F},
                   {0.6F, -0.0625F, 0.8F}, {0.6F, -0.0625F, 0.8F}}),
           "signed fractional weights must extrapolate position and normal inbetweens together")) return 1;
+#ifdef TOON_HAS_AVATAR_STATE
+  if (!AvatarInbetweenParity(delegate, weight_attr, sync)) return 1;
+#endif
   weight_attr.Set(VtFloatArray{1, 1, 1}, UsdTimeCode(3));
   stage->GetPrimAtPath(SdfPath("/Root/Linear/lift"))
       .GetAttribute(TfToken("inbetweens:half:normalOffsets")).Clear();

@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- `Toon::AvatarState` inbetween subshapes: a morph binding may list a shape's
+  inbetween slots and weight positions, and the adapter turns the runtime's
+  one weight per shape into subshape weights as usdSkelImaging computes them.
+  Bindings made from `DescribeResidentTargets` match the Hydra path's weights
+  exactly on the skinning fixture; positions usdSkelImaging would drop and
+  overlapping slots are refused. Existing primary-only bindings are unchanged.
 - `HdToonRenderDelegate::DescribeResidentTargets`: the Hydra identities behind
   resident meshes and materials, GPU skin palettes (joint tokens, skeleton
   indices, inverse binds, placement) and subshape slots, for a host binding

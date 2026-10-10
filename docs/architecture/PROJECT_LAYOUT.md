@@ -93,7 +93,11 @@ subshape identities behind the ids `CommitScene` publishes. Its plain structs
 use OpenUSD path and token types only; it is not a core or backend header, and
 the fast adapter does not depend on it. Each mesh reads these from the terminal
 scene index during its own sync, sharing the subshape numbering that packs its
-morph targets. The external host matches runtime identities to them.
+morph targets. The external host matches runtime identities to them and
+lists each shape's described subshape slots in its morph binding; the fast
+adapter turns the shape's runtime weight into those slots' weights with
+usdSkelImaging's inbetween interpolation, so neither the host nor core
+evaluates inbetweens.
 
 The sparse morph representation lives in `include/toon/render_world.hpp`:
 `ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,

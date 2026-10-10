@@ -21,7 +21,7 @@ void Check(bool value, const char* message) {
 struct Values {
   ArJoint joints[2]{{"rig", "root", -1, {{0, 0, 0}, {0, 0, 0, 1}, {1, 1, 1}}},
       {"rig", "eye", 0, {{0, .1, 0}, {0, 0, 0, 1}, {1, 1, 1}}}};
-  ArBlendShape morphs[2]{{"face", "resolved.a", 0}, {"face", "resolved.inbetween", 0}};
+  ArBlendShape morphs[2]{{"face", "resolved.a", 0}, {"face", "resolved.b", 0}};
   ArMaterialInput materials[2]{{"surface", "owner:base", AR_VALUE_VEC4, 0, {.7, .3, .2, 1}},
       {"surface", "owner:shade", AR_VALUE_VEC3, 0, {.2, .1, .05, 0}}};
   ArVisibility visibility{"face", 1};
@@ -190,6 +190,66 @@ void SplitBaseColor() {
   layout.material_count = 2;
   bindings.materials.back().source = 1;
   Check(!adapter.Bind(layout, base, 2, bindings, error), "RGB/RGBA overlap accepted without alpha");
+}
+// One shape with inbetweens at -0.5 and 0.5 fills three subshape slots the
+// way usdSkelImaging does; a plain shape keeps its one slot. Expected values
+// are worked by hand from the interpolation, not from the adapter.
+void Inbetweens() {
+  Toon::RenderWorld world;
+  const auto mesh = world.CreateMesh();
+  world.SetMeshPoints(mesh, {{-.4F, -.4F, 0}, {.4F, -.4F, 0}, {0, .4F, 0}});
+  world.SetMeshTopology(mesh, {0, 1, 2});
+  world.SetMeshMorph(mesh, {{{{.1F, 0, 0}, 0, {}, 0}, {{.2F, 0, 0}, 1, {}, 0}, {{.3F, 0, 0}, 2, {}, 0},
+                                {{0, .1F, 0}, 3, {}, 0}},
+                               {{0, 4}, {0, 4}, {0, 4}}});
+  world.SetMeshMorphWeights(mesh, {.9F, .9F, .9F, .4F});
+  const auto base = world.Commit();
+  ArBlendShape shapes[2]{{"face", "smile", 0}, {"face", "plain", 0}};
+  ArStateView view{AR_HEADER(ArStateView)};
+  view.instance = 3;
+  view.generation = 1;
+  view.blend_shapes = shapes;
+  view.blend_shape_count = 2;
+  view.layout_id = "test.inbetweens";
+  view.layout_version = 1;
+  Toon::AvatarBindings bindings;
+  // Slots follow usdSkelImaging's numbering: the shape's subshapes by weight.
+  bindings.morphs = {{0, mesh, 2, {{1, .5F}, {0, -.5F}}}, {1, mesh, 3}};
+  Toon::AvatarStateAdapter adapter;
+  std::string error;
+  Check(adapter.Bind(view, base, 1, bindings, error), error.c_str());
+  struct Case {
+    double smile;
+    std::vector<float> expected;
+  };
+  const Case cases[]{{.25, {0, .5F, 0, .7F}}, {.5, {0, 1, 0, .7F}}, {.75, {0, .5F, .5F, .7F}},
+      {1, {0, 0, 1, .7F}}, {1.5, {0, -1, 2, .7F}}, {0, {0, 0, 0, .7F}}, {-.25, {.5F, 0, 0, .7F}},
+      {-1, {2, 0, 0, .7F}}};
+  std::uint64_t frame = 0;
+  for (const auto& c : cases) {
+    shapes[0].weight = c.smile;
+    shapes[1].weight = .7;
+    view.frame_id = ++frame;
+    auto held = Fake::Snapshot(view);
+    Toon::FrameSnapshot output;
+    Check(adapter.Apply(held, base, 1, output, error), error.c_str());
+    Check(*output.meshes[0].morph_weights == c.expected, "inbetween subshape weights differ from usdSkelImaging's");
+  }
+  // Positions usdSkelImaging would drop, or slots another subshape owns, fail.
+  auto refuse = [&](std::vector<Toon::AvatarInbetweenSlot> inbetweens, const char* message) {
+    auto bad = bindings;
+    bad.morphs[0].inbetweens = std::move(inbetweens);
+    Check(!adapter.Bind(view, base, 2, bad, error) && !error.empty(), message);
+  };
+  refuse({{1, 0}}, "inbetween at the rest accepted");
+  refuse({{1, 1}}, "inbetween at the primary accepted");
+  refuse({{1, 1 + 5e-7F}}, "inbetween within 1e-6 of the primary accepted");
+  refuse({{1, .5F}, {0, .5F}}, "coincident inbetweens accepted");
+  refuse({{1, std::numeric_limits<float>::quiet_NaN()}}, "non-finite inbetween accepted");
+  refuse({{4, .5F}}, "inbetween slot beyond the weights accepted");
+  refuse({{2, .5F}}, "inbetween sharing the primary slot accepted");
+  refuse({{3, .5F}}, "inbetween sharing another shape's slot accepted");
+  Check(adapter.IdentityInfo().layout == "test.inbetweens", "failed rebind replaced the binding");
 }
 void State() {
   Scene scene;
@@ -543,6 +603,7 @@ void Gpu(const char* shaders) {
 int main(int argc, char** argv) {
   try {
     SplitBaseColor();
+    Inbetweens();
     State();
     if (argc == 3 && std::string(argv[1]) == "--runtime")
       Runtime(argv[2]);
