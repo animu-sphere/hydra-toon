@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- `HdToonMatchAvatarTargets` (`toon-hydra2-avatar-binding`, built only with
+  the optional runtime consumer): matches a runtime layout's skeleton/joint,
+  mesh/shape, material/input and visibility identities to the delegate's
+  resident description and returns `Toon::AvatarBindings` with per-identity
+  mismatch diagnostics. The skinning check's bindings come from it; with
+  `--stage`, a real avatar's UsdSkel-derived layout binds completely and
+  composes usdSkelImaging's palettes.
 - `Toon::AvatarState` inbetween subshapes: a morph binding may list a shape's
   inbetween slots and weight positions, and the adapter turns the runtime's
   one weight per shape into subshape weights as usdSkelImaging computes them.

@@ -93,8 +93,14 @@ subshape identities behind the ids `CommitScene` publishes. Its plain structs
 use OpenUSD path and token types only; it is not a core or backend header, and
 the fast adapter does not depend on it. Each mesh reads these from the terminal
 scene index during its own sync, sharing the subshape numbering that packs its
-morph targets. The external host matches runtime identities to them and
-lists each shape's described subshape slots in its morph binding; the fast
+morph targets. The host's matching lives beside it in
+`src/avatar_binding.*` as `toon-hydra2-avatar-binding`, built only when
+`Toon::AvatarState` exists and never installed or linked into `hdToon`:
+`HdToonMatchAvatarTargets` pairs runtime skeleton/joint, mesh/shape,
+material/input and visibility identities with the description, takes the
+canonical material input table from the host, and reports each runtime or
+resident identity it cannot bind. Each shape's morph binding lists its
+described subshape slots; the fast
 adapter turns the shape's runtime weight into those slots' weights with
 usdSkelImaging's inbetween interpolation, so neither the host nor core
 evaluates inbetweens.
