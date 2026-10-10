@@ -5,7 +5,7 @@
 #include <toon/extraction.hpp>
 
 namespace Toon {
-static_assert(AR_ABI_VERSION == 3, "AvatarState requires experimental runtime ABI revision 3");
+static_assert(AR_ABI_VERSION == 4, "AvatarState requires experimental runtime ABI revision 4");
 
 // The supplying library/function table must outlive all retained snapshots.
 // Reset retains before replacing; failure leaves the previous view alive.
@@ -96,7 +96,7 @@ struct AvatarFrameIdentity {
 };
 
 // Serialized by the external host. No evaluator calls or USD authoring.
-// Bind copies opaque channel identities and the revision-3 layout token;
+// Bind copies opaque channel identities and the revision-4 layout token;
 // every update checks both. Reset generations may advance with
 // the same layout; a new instance requires Bind. The nonzero host epoch must
 // change on scene replacement, even when numeric renderer ids are reused.
