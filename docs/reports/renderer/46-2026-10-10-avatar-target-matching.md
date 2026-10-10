@@ -1,5 +1,7 @@
 # Runtime-to-resident target matching
 
+> Followed by [report 47](47-2026-10-11-avatar-real-providers.md): the layouts the runtime's real VRM providers publish now match, through a host that links them.
+
 - Date: 2026-10-10
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev; local sibling working

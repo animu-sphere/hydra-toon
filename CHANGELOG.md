@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- `toon-hydra2-avatar-provider-test`, built only with the opt-in
+  `TOON_AVATAR_RUNTIME_PROVIDERS`: a host over `usd-avatar-runtime`'s real VRM
+  expression/LookAt providers that matches each published result through
+  `HdToonMatchAvatarTargets`, applies it with `Toon::AvatarState`, and compares
+  it with the same values composed by UsdImaging and usdSkelImaging: palettes,
+  subshape weights, MToon materials and, with `--shaders`, colour and depth.
+  `avatar-provider.usda` covers bone and expression gaze, an inbetween and
+  material colour binds.
 - `HdToonMatchAvatarTargets` (`toon-hydra2-avatar-binding`, built only with
   the optional runtime consumer): matches a runtime layout's skeleton/joint,
   mesh/shape, material/input and visibility identities to the delegate's
