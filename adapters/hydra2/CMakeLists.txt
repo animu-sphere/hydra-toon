@@ -27,6 +27,21 @@ target_compile_definitions(toon-hydra2-runtime PRIVATE
   _CRT_SECURE_NO_WARNINGS
   _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
+# With the optional runtime consumer, the host-side matching of runtime
+# target identities to the delegate's resident description. It is built with
+# the renderer because the description is not installed; the Hydra module
+# and its runtime never depend on it.
+if(TARGET Toon::AvatarState)
+  add_library(toon-hydra2-avatar-binding STATIC src/avatar_binding.cpp)
+  toon_configure_warnings(toon-hydra2-avatar-binding)
+  target_link_libraries(toon-hydra2-avatar-binding
+    PUBLIC toon-hydra2-runtime Toon::AvatarState)
+  target_compile_features(toon-hydra2-avatar-binding PUBLIC cxx_std_20)
+  target_compile_definitions(toon-hydra2-avatar-binding PRIVATE
+    NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+endif()
+
 include(ToonPlugin)
 toon_add_plugin(hdToon resources/plugInfo.json.in src/renderer_plugin.cpp)
 toon_configure_warnings(hdToon)
@@ -93,10 +108,12 @@ if(TOON_BUILD_TESTS)
   target_compile_definitions(toon-hydra2-skinning-test PRIVATE
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
-  # With the optional runtime consumer, the same stage also checks its
-  # subshape weights against usdSkelImaging's.
-  if(TARGET Toon::AvatarState)
-    target_link_libraries(toon-hydra2-skinning-test PRIVATE Toon::AvatarState)
+  # With the optional runtime consumer, bindings matched from the same
+  # stage's description must reproduce usdSkelImaging's palette and subshape
+  # weights from runtime values.
+  if(TARGET toon-hydra2-avatar-binding)
+    target_link_libraries(toon-hydra2-skinning-test
+      PRIVATE toon-hydra2-avatar-binding)
     target_compile_definitions(toon-hydra2-skinning-test PRIVATE
       TOON_HAS_AVATAR_STATE=1)
   endif()

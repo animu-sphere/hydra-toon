@@ -11,12 +11,15 @@
 // comparisons against independently deformed rest geometry. The delegate
 // also describes the Hydra identities behind the resident palette, subshape
 // and material slots, which a host binds evaluated avatar targets with;
-// built with the optional runtime consumer, bindings made from them must
-// turn runtime shape weights into usdSkelImaging's subshape weights.
+// built with the optional runtime consumer, bindings matched from them must
+// turn runtime shape weights into usdSkelImaging's subshape weights and
+// runtime joints into its palette, and unmatched identities are reported.
 // With --stage, a real stage's described identities are checked instead:
 // they must name every palette entry and morph weight slot, and compose the
 // palette usdSkelImaging computed, with every joint's rest rotated so a
-// mismatched joint cannot hide behind an identity palette.
+// mismatched joint cannot hide behind an identity palette. With the runtime
+// consumer, a layout read from the stage's UsdSkel prims must also bind
+// completely and compose the same palettes.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
@@ -39,12 +42,17 @@
 #include <toon/render_world.hpp>
 #include <toon/vulkan_backend.hpp>
 #ifdef TOON_HAS_AVATAR_STATE
-#include <toon/fast/avatar_state.hpp>
+#include "avatar_binding.hpp"
+
+#include <pxr/base/gf/transform.h>
+#include <pxr/usd/usdGeom/mesh.h>
+#include <pxr/usd/usdSkel/bindingAPI.h>
 #endif
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -345,6 +353,190 @@ bool GpuNormals(const std::vector<Toon::FrameSnapshot>& frames,
 
 } // namespace
 
+#ifdef TOON_HAS_AVATAR_STATE
+// Retained runtime views served from memory; the adapter only reads them.
+struct HeldViews {
+  static inline std::map<ArSnapshot, ArStateView> views;
+  static ArStatus AR_CALL Get(ArSnapshot handle, ArStateView* view) {
+    const auto found = views.find(handle);
+    if (found == views.end()) return AR_INVALID_HANDLE;
+    *view = found->second;
+    return AR_OK;
+  }
+  static ArStatus AR_CALL Hold(ArSnapshot handle) {
+    return views.contains(handle) ? AR_OK : AR_INVALID_HANDLE;
+  }
+};
+
+// A runtime layout with the identities its USD binders publish: skeleton
+// path and joint token, mesh path and `skel:blendShapes` token, material
+// path and canonical input, visibility target. The ids are owned here.
+struct RuntimeLayout {
+  std::deque<std::string> ids;
+  std::vector<ArJoint> joints;
+  std::vector<ArBlendShape> shapes;
+  std::vector<ArMaterialInput> materials;
+  std::vector<ArVisibility> visibility;
+  const char* Id(std::string id) {
+    return ids.emplace_back(std::move(id)).c_str();
+  }
+  ArStateView View(std::uint64_t frame) const {
+    ArStateView view{AR_HEADER(ArStateView)};
+    view.instance = 1;
+    view.frame_id = frame;
+    view.generation = 1;
+    view.joints = joints.data();
+    view.joint_count = static_cast<std::uint32_t>(joints.size());
+    view.blend_shapes = shapes.data();
+    view.blend_shape_count = static_cast<std::uint32_t>(shapes.size());
+    view.materials = materials.data();
+    view.material_count = static_cast<std::uint32_t>(materials.size());
+    view.visibility = visibility.data();
+    view.visibility_count = static_cast<std::uint32_t>(visibility.size());
+    view.layout_id = "skinning-test";
+    view.layout_version = 1;
+    return view;
+  }
+};
+
+// Parent-local translation in metres, as the runtime publishes it.
+ArTransform ToRuntime(const GfMatrix4d& matrix, double meters_per_unit) {
+  const GfTransform transform(matrix);
+  const GfVec3d translation = transform.GetTranslation() * meters_per_unit;
+  const GfQuatd rotation = transform.GetRotation().GetQuat().GetNormalized();
+  const GfVec3d scale = transform.GetScale();
+  ArTransform result{};
+  for (int k = 0; k < 3; ++k) {
+    result.translation[k] = translation[k];
+    result.rotation[k] = rotation.GetImaginary()[k];
+    result.scale[k] = scale[k];
+  }
+  result.rotation[3] = rotation.GetReal();
+  return result;
+}
+
+ArTransform Translated(double x, double y, double z) {
+  return {{x, y, z}, {0, 0, 0, 1}, {1, 1, 1}};
+}
+
+// Applies one runtime result to `scene` through freshly matched bindings.
+bool ApplyMatched(const RuntimeLayout& layout,
+    const HdToonResidentTargets& resident, const Toon::FrameSnapshot& scene,
+    Toon::FrameSnapshot& output, HdToonAvatarTargetMatch& match) {
+  const ArStateView view = layout.View(1);
+  match = HdToonMatchAvatarTargets(view, resident,
+      HdToonCanonicalMaterialInputs());
+  for (const HdToonAvatarMismatch& mismatch : match.mismatches) {
+    std::cerr << mismatch.subject << ": " << mismatch.reason << '\n';
+  }
+  if (!match.mismatches.empty()) return false;
+  HeldViews::views[1] = view;
+  ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
+  api.get_snapshot = HeldViews::Get;
+  api.retain_snapshot = HeldViews::Hold;
+  api.release_snapshot = HeldViews::Hold;
+  Toon::AvatarStateAdapter adapter;
+  Toon::RetainedAvatarSnapshot held;
+  std::string error;
+  const bool applied = adapter.Bind(view, scene, 1, match.bindings, error) &&
+      held.Reset(api, 1, error) && adapter.Apply(held, scene, 1, output, error);
+  held.Clear();
+  HeldViews::views.clear();
+  if (!applied) std::cerr << error << '\n';
+  return applied;
+}
+
+// Every matched skin's palette, composed from runtime joints by the fast
+// adapter, against the one usdSkelImaging computed.
+bool SamePalettes(const HdToonAvatarTargetMatch& match,
+    const Toon::FrameSnapshot& hydra, const Toon::FrameSnapshot& direct,
+    float tolerance) {
+  for (const Toon::AvatarSkinBinding& skin : match.bindings.skins) {
+    const auto by_id = [&](const Toon::FrameSnapshot& snapshot) {
+      return std::find_if(snapshot.meshes.begin(), snapshot.meshes.end(),
+          [&](const auto& mesh) { return mesh.id == skin.mesh; });
+    };
+    const auto a = by_id(hydra);
+    const auto b = by_id(direct);
+    if (a == hydra.meshes.end() || b == direct.meshes.end() ||
+        a->joints->size() != b->joints->size() ||
+        !Near(a->skeleton_to_mesh, b->skeleton_to_mesh, tolerance)) {
+      return false;
+    }
+    for (std::size_t i = 0; i < a->joints->size(); ++i) {
+      if (!Near((*a->joints)[i], (*b->joints)[i], tolerance)) {
+        std::cerr << "mesh " << skin.mesh << " palette entry " << i << '\n';
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// The stage's skeletons and blend shapes as the runtime's USD binders read
+// them, not from the delegate: joint locals in skeleton order, each root
+// carrying the skeleton's placement, and every skinned mesh's shape tokens.
+RuntimeLayout StageLayout(const UsdStageRefPtr& stage, UsdTimeCode time,
+    double meters_per_unit) {
+  RuntimeLayout layout;
+  UsdSkelCache cache;
+  for (const UsdPrim& prim : stage->Traverse()) {
+    if (const UsdSkelSkeleton skeleton{prim}) {
+      const UsdSkelSkeletonQuery query = cache.GetSkelQuery(skeleton);
+      VtMatrix4dArray local;
+      if (!query || !query.ComputeJointLocalTransforms(&local, time)) continue;
+      const GfMatrix4d placement =
+          UsdGeomXformable(prim).ComputeLocalToWorldTransform(time);
+      const VtTokenArray order = query.GetJointOrder();
+      const UsdSkelTopology& topology = query.GetTopology();
+      const char* path = layout.Id(prim.GetPath().GetString());
+      for (std::size_t i = 0; i < order.size(); ++i) {
+        const int parent = topology.GetParent(i);
+        layout.joints.push_back({path, layout.Id(order[i].GetString()), parent,
+            ToRuntime(parent < 0 ? local[i] * placement : local[i],
+                meters_per_unit)});
+      }
+    }
+    if (prim.IsA<UsdGeomMesh>() && prim.HasAPI<UsdSkelBindingAPI>()) {
+      VtTokenArray names;
+      UsdSkelBindingAPI(prim).GetBlendShapesAttr().Get(&names);
+      const char* path = layout.Id(prim.GetPath().GetString());
+      for (const TfToken& name : names) {
+        layout.shapes.push_back({path, layout.Id(name.GetString()), 0.0});
+      }
+    }
+  }
+  return layout;
+}
+
+// The stage's runtime layout must bind completely to the resident targets,
+// and its joints must compose usdSkelImaging's palettes.
+bool StageBindings(const UsdStageRefPtr& stage, UsdTimeCode time,
+    const Toon::FrameSnapshot& snapshot, const HdToonResidentTargets& resident,
+    const char* label) {
+  const RuntimeLayout layout =
+      StageLayout(stage, time, snapshot.meters_per_unit);
+  HdToonAvatarTargetMatch match;
+  Toon::FrameSnapshot direct;
+  std::size_t inbetweens = 0;
+  if (!Check(ApplyMatched(layout, resident, snapshot, direct, match),
+          "the stage's runtime layout must bind to its resident targets") ||
+      !Check(SamePalettes(match, snapshot, direct, 1e-4F),
+          "runtime joints must compose usdSkelImaging's palettes")) {
+    return false;
+  }
+  for (const auto& morph : match.bindings.morphs) {
+    inbetweens += morph.inbetweens.size();
+  }
+  std::cout << label << " runtime layout: " << layout.joints.size()
+            << " joints and " << layout.shapes.size()
+            << " blend shapes bound as " << match.bindings.skins.size()
+            << " skins and " << match.bindings.morphs.size() << " morphs ("
+            << inbetweens << " inbetween slots)\n";
+  return true;
+}
+#endif
+
 // Each skinned mesh's described identities against what usdSkelImaging
 // computed at the stage's start time code, before and after every joint's
 // rest is rotated in the session layer.
@@ -410,6 +602,9 @@ int RunStage(const char* path) {
           }));
       subshapes += target.subshapes.size();
     }
+#ifdef TOON_HAS_AVATAR_STATE
+    if (!StageBindings(stage, time, snapshot, targets, label)) return false;
+#endif
     std::cout << label << ": " << targets.meshes.size() << " meshes, " << skinned
               << " GPU-skinned with " << palette << " palette entries ("
               << posed << " not the identity) and "
@@ -438,20 +633,6 @@ int RunStage(const char* path) {
 }
 
 #ifdef TOON_HAS_AVATAR_STATE
-// Retained runtime views served from memory; the adapter only reads them.
-struct HeldViews {
-  static inline std::map<ArSnapshot, ArStateView> views;
-  static ArStatus AR_CALL Get(ArSnapshot handle, ArStateView* view) {
-    const auto found = views.find(handle);
-    if (found == views.end()) return AR_INVALID_HANDLE;
-    *view = found->second;
-    return AR_OK;
-  }
-  static ArStatus AR_CALL Hold(ArSnapshot handle) {
-    return views.contains(handle) ? AR_OK : AR_INVALID_HANDLE;
-  }
-};
-
 // The runtime publishes one weight per `skel:blendShapes` target. A host
 // binds each to the slots the delegate describes for that shape, and the
 // fast adapter must then fill exactly the subshape weights usdSkelImaging
@@ -465,40 +646,39 @@ bool AvatarInbetweenParity(HdToonRenderDelegate& delegate,
   if (!Check(target != nullptr, "the linear quad must be described")) {
     return false;
   }
-  const char* const names[] = {"lift", "tilt", "plain"};
-  ArBlendShape shapes[3];
-  Toon::AvatarBindings bindings;
-  for (std::uint32_t shape = 0; shape < 3; ++shape) {
-    // The runtime's USD identities: the mesh path and the shape token.
-    shapes[shape] = {"/Root/Linear", names[shape], 0};
-    Toon::AvatarMorphBinding binding{shape, target->mesh};
-    for (std::uint32_t slot = 0; slot < target->subshapes.size(); ++slot) {
-      const HdToonResidentSubshape& subshape = target->subshapes[slot];
-      if (subshape.blend_shape != names[shape]) continue;
-      if (subshape.weight == 1.0F) {
-        binding.weight = slot;
-      } else {
-        binding.inbetweens.push_back({slot, subshape.weight});
-      }
-    }
-    bindings.morphs.push_back(binding);
+  // The runtime's USD identities: the mesh path and the shape token.
+  RuntimeLayout layout;
+  for (const char* name : {"lift", "tilt", "plain"}) {
+    layout.shapes.push_back({"/Root/Linear", name, 0});
   }
-  ArStateView view{AR_HEADER(ArStateView)};
-  view.instance = 1;
-  view.generation = 1;
-  view.blend_shapes = shapes;
-  view.blend_shape_count = 3;
-  view.layout_id = "skinning.usda";
-  view.layout_version = 1;
+  ArStateView view = layout.View(0);
+  const HdToonAvatarTargetMatch match = HdToonMatchAvatarTargets(view,
+      resident, HdToonCanonicalMaterialInputs());
+  const Toon::AvatarBindings& bindings = match.bindings;
+  if (!Check(match.mismatches.empty() && bindings.morphs.size() == 3 &&
+                 bindings.skins.empty(),
+          "every runtime shape must match a described shape")) {
+    return false;
+  }
+  const Toon::AvatarMorphBinding& lifted = bindings.morphs[0];
+  if (!Check(lifted.source == 0 && lifted.mesh == target->mesh &&
+                 lifted.weight == 1 && lifted.inbetweens.size() == 1 &&
+                 lifted.inbetweens[0].weight == 0 &&
+                 lifted.inbetweens[0].position == 0.5F &&
+                 bindings.morphs[1].weight == 2 &&
+                 bindings.morphs[1].inbetweens.empty() &&
+                 bindings.morphs[2].weight == 3,
+          "matched shapes must take their described primary and inbetween slots")) {
+    return false;
+  }
   ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
   api.get_snapshot = HeldViews::Get;
   api.retain_snapshot = HeldViews::Hold;
   api.release_snapshot = HeldViews::Hold;
   Toon::AvatarStateAdapter adapter;
   std::string error;
-  if (!Check(bindings.morphs[0].inbetweens.size() == 1 &&
-                 adapter.Bind(view, baseline, 1, bindings, error),
-          "described subshapes must bind lift's inbetween")) {
+  if (!Check(adapter.Bind(view, baseline, 1, bindings, error),
+          "matched subshapes must bind lift's inbetween")) {
     std::cerr << error << '\n';
     return false;
   }
@@ -510,7 +690,7 @@ bool AvatarInbetweenParity(HdToonRenderDelegate& delegate,
     const VtFloatArray authored{lift, 0.3F, -0.7F};
     weights.Set(authored, UsdTimeCode(3));
     const Toon::FrameSnapshot hydra = sync(3.0);
-    for (std::size_t i = 0; i < 3; ++i) shapes[i].weight = authored[i];
+    for (std::size_t i = 0; i < 3; ++i) layout.shapes[i].weight = authored[i];
     view.frame_id = ++handle;
     HeldViews::views[handle] = view;
     Toon::RetainedAvatarSnapshot held;
@@ -533,6 +713,83 @@ bool AvatarInbetweenParity(HdToonRenderDelegate& delegate,
   }
   HeldViews::views.clear();
   return true;
+}
+
+// The runtime publishes the skeleton in its own joint order and roots in
+// runtime world, in metres. Matching must reorder the joints into the
+// mesh's reversed palette and keep the described inverse binds and
+// placement, so the fast adapter composes usdSkelImaging's palette at the
+// tip's pose at time 2, with the skeleton raised by `height` units.
+bool AvatarSkinParity(HdToonRenderDelegate& delegate,
+    const Toon::FrameSnapshot& hydra, double height) {
+  const HdToonResidentTargets resident = delegate.DescribeResidentTargets();
+  const double metres = hydra.meters_per_unit;
+  RuntimeLayout layout;
+  layout.joints.push_back({"/Root/Skel", "base", -1,
+      Translated(0, 0, height * metres)});
+  layout.joints.push_back({"/Root/Skel", "base/tip", 0,
+      Translated(1 * metres, 1 * metres, 0)});
+  HdToonAvatarTargetMatch match;
+  Toon::FrameSnapshot direct;
+  if (!Check(ApplyMatched(layout, resident, hydra, direct, match),
+          "runtime joints must bind to the described palette")) {
+    return false;
+  }
+  const HdToonResidentMesh* linear = Described(resident, "/Root/Linear");
+  return Check(match.bindings.skins.size() == 1 &&
+                   match.bindings.skins[0].mesh == linear->mesh &&
+                   match.bindings.skins[0].joints ==
+                       std::vector<std::uint32_t>{1, 0},
+             "only the GPU skin must bind, in its own palette order") &&
+      Check(SamePalettes(match, hydra, direct, 1e-5F),
+          "matched runtime joints must compose usdSkelImaging's palette");
+}
+
+// What has no resident target is reported by its runtime identity; what
+// does is still bound beside it.
+bool AvatarMismatches(const HdToonResidentTargets& resident) {
+  RuntimeLayout layout;
+  // The skeleton without the tip a palette entry needs, and one not there.
+  layout.joints.push_back({"/Root/Skel", "base", -1, Translated(0, 0, 0)});
+  layout.joints.push_back({"/Root/Other", "joint", -1, Translated(0, 0, 0)});
+  layout.shapes.push_back({"/Root/Linear", "lift", 0});
+  layout.shapes.push_back({"/Root/Linear", "missing", 0});
+  layout.shapes.push_back({"/Root/DualQuaternion", "lift", 0});
+  layout.materials.push_back({"/Root/Looks/Skin",
+      "inputs:vrm:mtoon:shadeColorFactor", AR_VALUE_VEC3, 0, {}});
+  layout.materials.push_back({"/Root/Looks/Skin",
+      "inputs:vrm:material:emissiveFactor", AR_VALUE_VEC3, 0, {}});
+  layout.materials.push_back({"/Root/Looks/None",
+      "inputs:vrm:material:baseColorFactor", AR_VALUE_VEC3, 0, {}});
+  layout.visibility.push_back({"/Root/Linear", 1});
+  layout.visibility.push_back({"/Root/Nowhere", 1});
+  const HdToonAvatarTargetMatch match = HdToonMatchAvatarTargets(
+      layout.View(0), resident, HdToonCanonicalMaterialInputs());
+  std::vector<std::string> subjects;
+  for (const auto& mismatch : match.mismatches) {
+    subjects.push_back(mismatch.subject);
+  }
+  const std::vector<std::string> expected{"/Root/Linear base/tip",
+      "/Root/Other", "/Root/Skel", "/Root/Linear missing",
+      "/Root/DualQuaternion lift", "/Root/Looks/Skin inputs:vrm:material:emissiveFactor",
+      "/Root/Looks/None inputs:vrm:material:baseColorFactor", "/Root/Nowhere"};
+  const HdToonResidentMesh* linear = Described(resident, "/Root/Linear");
+  const auto& b = match.bindings;
+  if (!Check(subjects == expected,
+          "every runtime output without a resident target must be reported")) {
+    for (const auto& mismatch : match.mismatches) {
+      std::cerr << mismatch.subject << ": " << mismatch.reason << '\n';
+    }
+    return false;
+  }
+  return Check(b.skins.empty() && b.morphs.size() == 1 &&
+                   b.morphs[0].source == 0 && b.materials.size() == 1 &&
+                   b.materials[0].source == 0 &&
+                   b.materials[0].material == resident.materials[0].material &&
+                   b.materials[0].field == Toon::AvatarMaterialField::ShadeColor &&
+                   b.visibility.size() == 1 && b.visibility[0].source == 0 &&
+                   b.visibility[0].mesh == linear->mesh,
+      "matched outputs must still bind beside the reported ones");
 }
 #endif
 
@@ -786,7 +1043,10 @@ int main(int argc, char** argv) {
                   {0.6F, -0.0625F, 0.8F}, {0.6F, -0.0625F, 0.8F}}),
           "signed fractional weights must extrapolate position and normal inbetweens together")) return 1;
 #ifdef TOON_HAS_AVATAR_STATE
-  if (!AvatarInbetweenParity(delegate, weight_attr, sync)) return 1;
+  if (!AvatarInbetweenParity(delegate, weight_attr, sync) ||
+      !AvatarMismatches(delegate.DescribeResidentTargets())) {
+    return 1;
+  }
 #endif
   weight_attr.Set(VtFloatArray{1, 1, 1}, UsdTimeCode(3));
   stage->GetPrimAtPath(SdfPath("/Root/Linear/lift"))
@@ -822,6 +1082,9 @@ int main(int argc, char** argv) {
   if (!Check(PaletteFromIdentities(described_skin, moved_pose, Toon::Matrix4{},
                  *Find(placed).linear),
           "described identities must compose the posed palette")) return 1;
+#ifdef TOON_HAS_AVATAR_STATE
+  if (!AvatarSkinParity(delegate, placed, 0)) return 1;
+#endif
   UsdGeomXformable(stage->GetPrimAtPath(SdfPath("/Root/Skel")))
       .AddTranslateOp().Set(GfVec3d(0, 0, 2));
   const auto moved_skeleton = sync(2.0);
@@ -836,6 +1099,9 @@ int main(int argc, char** argv) {
       !Check(PaletteFromIdentities(placed_skin, moved_pose, Translation(0, 0, 2),
                  *Find(moved_skeleton).linear),
           "a placed skeleton's identities must still compose the palette")) return 1;
+#ifdef TOON_HAS_AVATAR_STATE
+  if (!AvatarSkinParity(delegate, moved_skeleton, 2)) return 1;
+#endif
   index.reset();
   return 0;
 }
