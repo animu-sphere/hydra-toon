@@ -86,6 +86,15 @@ The runtime's evaluation Scene Index remains upstream, consumed through the
 Hydra adapter's data-source route. Both adapters normalize into renderer-private
 snapshot values and use the same extraction and backend paths.
 
+The Hydra side of binding preparation stays in `adapters/hydra2/src/`:
+`HdToonRenderDelegate::DescribeResidentTargets` (`adapter.hpp`) returns the
+prim paths, material paths, palette joint tokens, inverse binds, placement and
+subshape identities behind the ids `CommitScene` publishes. Its plain structs
+use OpenUSD path and token types only; it is not a core or backend header, and
+the fast adapter does not depend on it. Each mesh reads these from the terminal
+scene index during its own sync, sharing the subshape numbering that packs its
+morph targets. The external host matches runtime identities to them.
+
 The sparse morph representation lives in `include/toon/render_world.hpp`:
 `ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,
 while weights have an independent revision. `SetMeshMorphWeights` does not

@@ -3,6 +3,7 @@
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/matrix4f.h>
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/staticTokens.h>
@@ -46,6 +47,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -204,7 +206,10 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
     (skelLocalToWorld)
     (primWorldToLocal)
     (restNormals)
-    (hasFaceVaryingNormals));
+    (hasFaceVaryingNormals)
+    (skeleton)
+    (joints)
+    (bindTransforms));
 
 // The delegate's render settings.
 TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
@@ -247,15 +252,55 @@ double RequestedTimeSeconds(const HdRenderDelegate& delegate) {
 
 class HdToonAdapterState {
 public:
-  Toon::MeshId CreateMesh() {
+  Toon::MeshId CreateMesh(const SdfPath& path) {
     std::scoped_lock lock(mutex_);
-    return world_.CreateMesh();
+    const Toon::MeshId mesh = world_.CreateMesh();
+    auto& resident = resident_[mesh];
+    resident.mesh = mesh;
+    resident.path = path;
+    return mesh;
   }
 
   void RemoveMesh(Toon::MeshId mesh) {
     std::scoped_lock lock(mutex_);
     world_.RemoveMesh(mesh);
     bindings_.erase(mesh);
+    resident_.erase(mesh);
+  }
+
+  void SetMeshResidentSkin(Toon::MeshId mesh,
+      std::optional<HdToonResidentSkin> skin) {
+    std::scoped_lock lock(mutex_);
+    resident_[mesh].skin = std::move(skin);
+  }
+
+  void SetMeshResidentSubshapes(Toon::MeshId mesh,
+      std::vector<HdToonResidentSubshape> subshapes) {
+    std::scoped_lock lock(mutex_);
+    resident_[mesh].subshapes = std::move(subshapes);
+  }
+
+  HdToonResidentTargets DescribeResidentTargets() {
+    std::scoped_lock lock(mutex_);
+    HdToonResidentTargets targets;
+    targets.meshes.reserve(resident_.size());
+    for (const auto& [mesh, resident] : resident_) {
+      HdToonResidentMesh& described = targets.meshes.emplace_back(resident);
+      if (const auto bound = bindings_.find(mesh); bound != bindings_.end()) {
+        described.material_path = bound->second;
+        const auto found = materials_by_path_.find(bound->second);
+        described.material =
+            found == materials_by_path_.end() ? 0U : found->second;
+      }
+    }
+    for (const auto& [path, material] : materials_by_path_) {
+      targets.materials.push_back({material, path});
+    }
+    std::sort(targets.meshes.begin(), targets.meshes.end(),
+        [](const auto& a, const auto& b) { return a.mesh < b.mesh; });
+    std::sort(targets.materials.begin(), targets.materials.end(),
+        [](const auto& a, const auto& b) { return a.material < b.material; });
+    return targets;
   }
 
   void SetMeshTopology(Toon::MeshId mesh,
@@ -586,6 +631,8 @@ private:
   std::unordered_map<SdfPath, Toon::MaterialId, SdfPath::Hash>
       materials_by_path_;
   std::unordered_map<Toon::MeshId, SdfPath> bindings_;
+  // Each mesh's Hydra identities; its material is resolved when described.
+  std::unordered_map<Toon::MeshId, HdToonResidentMesh> resident_;
   std::map<HdToonTextureKey, SharedTexture> textures_;
   // Warned about once, and not decoded again.
   std::set<HdToonTextureKey> unreadable_;
@@ -647,7 +694,7 @@ bool ReadInput(HdSceneDelegate* delegate, const SdfPath& computation,
 class HdToonMesh final : public HdMesh {
 public:
   HdToonMesh(const SdfPath& id, std::shared_ptr<HdToonAdapterState> state)
-      : HdMesh(id), state_(std::move(state)), mesh_(state_->CreateMesh()) {
+      : HdMesh(id), state_(std::move(state)), mesh_(state_->CreateMesh(id)) {
   }
 
   ~HdToonMesh() override {
@@ -834,6 +881,7 @@ private:
     }
     // Row vectors: skeleton space, to world, to the mesh's own.
     pose.skeleton_to_mesh = ToToon(skeleton_to_world * world_to_mesh);
+    SyncResidentSkin(delegate, skeleton_to_world, pose.skeleton_to_mesh);
     state_->SetMeshSkinPose(mesh_, std::move(pose));
     return true;
   }
@@ -886,20 +934,38 @@ private:
       state_->SetMeshPoints(mesh_, ReadPoints(VtValue(points)));
     }
     rest_points_ = std::move(points);
-    state_->SetMeshMorph(mesh_, ReadMorph(delegate));
+    std::vector<Subshape> subshapes = ReadSubshapes(delegate);
+    state_->SetMeshMorph(mesh_, ReadMorph(subshapes));
+    std::vector<HdToonResidentSubshape> identities;
+    identities.reserve(subshapes.size());
+    for (Subshape& subshape : subshapes) {
+      identities.push_back(std::move(subshape.identity));
+    }
+    state_->SetMeshResidentSubshapes(mesh_, std::move(identities));
     skinned_ = true;
     return true;
   }
 
+  // One evaluated subshape slot, in the aggregator's numbering: binding
+  // order, then each shape's subshapes sorted by nonzero weight, the
+  // primary at 1. A name the binding repeats, or a target without a
+  // BlendShape, takes no slot.
+  struct Subshape {
+    HdToonResidentSubshape identity;
+    // The shape's point indices, which its inbetweens share.
+    VtIntArray points;
+    HdContainerDataSourceHandle source;
+  };
+
   // Normalize usdSkelImaging's per-point ranges into renderer-private sparse
   // targets once per aggregator edit, retaining its inbetween weight indices.
-  Toon::ToonMorph ReadMorph(HdSceneDelegate* delegate) const {
+  Toon::ToonMorph ReadMorph(const std::vector<Subshape>& subshapes) const {
     // OpenUSD 26.08's aggregator packs positions only. Read normal offsets
     // from the original Hydra schema, retaining the aggregator's subshape
     // numbering (binding order, then sorted nonzero inbetween weights).
     // Missing normal offsets deliberately retain the rest normals; deriving
     // normals from morphed positions would require a different GPU path.
-    const auto normal_offsets = ReadMorphNormals(delegate);
+    const auto normal_offsets = ReadMorphNormals(subshapes);
     Toon::ToonMorph morph;
     morph.ranges.resize(rest_points_.size());
     const std::size_t count = std::min(blend_ranges_.size(), rest_points_.size());
@@ -964,8 +1030,8 @@ private:
     return source ? source->GetTypedValue(0) : T{};
   }
 
-  MorphNormalMap ReadMorphNormals(HdSceneDelegate* delegate) const {
-    MorphNormalMap result;
+  std::vector<Subshape> ReadSubshapes(HdSceneDelegate* delegate) const {
+    std::vector<Subshape> result;
     const auto terminal = delegate->GetRenderIndex().GetTerminalSceneIndex();
     if (!terminal) {
       return result;
@@ -975,7 +1041,6 @@ private:
     const auto names = SchemaValue<VtTokenArray>(binding, SkinTokens->blendShapes);
     const auto paths = SchemaValue<VtArray<SdfPath>>(binding, SkinTokens->blendShapeTargets);
     std::set<TfToken> seen;
-    std::uint32_t target = 0;
     for (std::size_t shape = 0; shape < std::min(names.size(), paths.size()); ++shape) {
       const auto source = Container(terminal->GetPrim(paths[shape]).dataSource,
           SkinTokens->skelBlendShape);
@@ -1007,26 +1072,92 @@ private:
           continue;
         }
         previous = weight;
-        const auto normals = SchemaValue<VtVec3fArray>(subshape, SkinTokens->normalOffsets);
-        // A malformed sparse array supplies no normals for this subshape.
-        if (points.empty() || points.size() == normals.size()) {
-          for (std::size_t index = 0; index < normals.size(); ++index) {
-            if (!points.empty() && points[index] < 0) {
-              continue;
-            }
-            const std::size_t point = points.empty() ? index
-                : static_cast<std::size_t>(points[index]);
-            const auto& normal = normals[index];
-            if (point < rest_points_.size() && std::isfinite(normal[0]) &&
-                std::isfinite(normal[1]) && std::isfinite(normal[2])) {
-              result[{point, target}] = {normal[0], normal[1], normal[2]};
-            }
-          }
-        }
-        ++target;
+        result.push_back({{names[shape], paths[shape], weight}, points, subshape});
       }
     }
     return result;
+  }
+
+  MorphNormalMap ReadMorphNormals(const std::vector<Subshape>& subshapes) const {
+    MorphNormalMap result;
+    for (std::uint32_t target = 0; target < subshapes.size(); ++target) {
+      const VtIntArray& points = subshapes[target].points;
+      const auto normals = SchemaValue<VtVec3fArray>(subshapes[target].source,
+          SkinTokens->normalOffsets);
+      // A malformed sparse array supplies no normals for this subshape.
+      if (!points.empty() && points.size() != normals.size()) {
+        continue;
+      }
+      for (std::size_t index = 0; index < normals.size(); ++index) {
+        if (!points.empty() && points[index] < 0) {
+          continue;
+        }
+        const std::size_t point = points.empty() ? index
+            : static_cast<std::size_t>(points[index]);
+        const auto& normal = normals[index];
+        if (point < rest_points_.size() && std::isfinite(normal[0]) &&
+            std::isfinite(normal[1]) && std::isfinite(normal[2])) {
+          result[{point, target}] = {normal[0], normal[1], normal[2]};
+        }
+      }
+    }
+    return result;
+  }
+
+  // The skin's palette identities: which skeleton joint each palette entry
+  // is and the inverse of its bind transform, read from the terminal scene
+  // index usdSkelImaging resolves the skin from. Rebuilt only when the
+  // binding or the skeleton changes; the placement is refreshed on its own.
+  void SyncResidentSkin(HdSceneDelegate* delegate,
+      const GfMatrix4d& skeleton_to_world,
+      const Toon::Matrix4& skeleton_to_mesh) {
+    const auto terminal = delegate->GetRenderIndex().GetTerminalSceneIndex();
+    if (!terminal) {
+      return;
+    }
+    const auto binding = Container(terminal->GetPrim(GetId()).dataSource,
+        SkinTokens->skelBinding);
+    const auto skeleton = SchemaValue<SdfPath>(binding, SkinTokens->skeleton);
+    const auto mesh_joints = SchemaValue<VtTokenArray>(binding, SkinTokens->joints);
+    const auto definition = skeleton.IsEmpty() ? nullptr
+        : Container(terminal->GetPrim(skeleton).dataSource, SkinTokens->skeleton);
+    const auto skeleton_joints = SchemaValue<VtTokenArray>(definition, SkinTokens->joints);
+    const auto binds = SchemaValue<VtMatrix4dArray>(definition, SkinTokens->bindTransforms);
+    const bool layout_changed = !resident_skin_ ||
+        skeleton != resident_skin_->skeleton || mesh_joints != skin_mesh_joints_ ||
+        skeleton_joints != skin_skeleton_joints_ || binds != skin_binds_;
+    if (!layout_changed && skeleton_to_world == skin_to_world_ &&
+        skeleton_to_mesh == resident_skin_->skeleton_to_mesh) {
+      return;
+    }
+    if (layout_changed) {
+      HdToonResidentSkin skin;
+      skin.skeleton = skeleton;
+      skin.joints = mesh_joints.empty() ? skeleton_joints : mesh_joints;
+      std::unordered_map<TfToken, std::int32_t, TfToken::HashFunctor> index;
+      for (std::size_t joint = 0; joint < skeleton_joints.size(); ++joint) {
+        index.emplace(skeleton_joints[joint], static_cast<std::int32_t>(joint));
+      }
+      skin.skeleton_joints.reserve(skin.joints.size());
+      skin.inverse_bind.reserve(skin.joints.size());
+      for (const TfToken& joint : skin.joints) {
+        const auto found = index.find(joint);
+        const std::int32_t entry = found == index.end() ? -1 : found->second;
+        const bool bound = entry >= 0 && static_cast<std::size_t>(entry) < binds.size();
+        skin.skeleton_joints.push_back(bound ? entry : -1);
+        skin.inverse_bind.push_back(bound
+                ? ToToon(binds[static_cast<std::size_t>(entry)].GetInverse())
+                : Toon::Matrix4{});
+      }
+      resident_skin_ = std::move(skin);
+      skin_mesh_joints_ = mesh_joints;
+      skin_skeleton_joints_ = skeleton_joints;
+      skin_binds_ = binds;
+    }
+    skin_to_world_ = skeleton_to_world;
+    resident_skin_->world_to_skeleton = ToToon(skeleton_to_world.GetInverse());
+    resident_skin_->skeleton_to_mesh = skeleton_to_mesh;
+    state_->SetMeshResidentSkin(mesh_, resident_skin_);
   }
 
   void Unskin() {
@@ -1034,7 +1165,12 @@ private:
       state_->SetMeshSkin(mesh_, {});
       state_->SetMeshMorph(mesh_, {});
       state_->SetMeshMorphWeights(mesh_, {});
+      state_->SetMeshResidentSubshapes(mesh_, {});
       skinned_ = false;
+    }
+    if (resident_skin_) {
+      state_->SetMeshResidentSkin(mesh_, std::nullopt);
+      resident_skin_.reset();
     }
     rest_revision_ = 0;
     aggregator_ = SdfPath();
@@ -1176,6 +1312,12 @@ private:
   VtVec2iArray blend_ranges_;
   VtFloatArray weights_;
   bool skinned_ = false;
+  // The palette identities last published, and what they were built from.
+  std::optional<HdToonResidentSkin> resident_skin_;
+  VtTokenArray skin_mesh_joints_;
+  VtTokenArray skin_skeleton_joints_;
+  VtMatrix4dArray skin_binds_;
+  GfMatrix4d skin_to_world_{1.0};
   // The aggregator the rest normals were last read from, and as of which of
   // its revisions; 0 when they must be read again.
   SdfPath normals_aggregator_;
@@ -1821,6 +1963,10 @@ bool HdToonRenderDelegate::SetMaterialParametersOverride(Toon::MaterialId materi
 
 void HdToonRenderDelegate::ClearMaterialParametersOverride(Toon::MaterialId material) {
   impl_->state->ClearMaterialParametersOverride(material);
+}
+
+HdToonResidentTargets HdToonRenderDelegate::DescribeResidentTargets() const {
+  return impl_->state->DescribeResidentTargets();
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

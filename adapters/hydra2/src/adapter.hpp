@@ -8,6 +8,8 @@
 #include <pxr/imaging/hd/renderBuffer.h>
 #include <pxr/imaging/hd/renderDelegate.h>
 #include <pxr/imaging/hd/sceneIndex.h>
+#include <pxr/base/vt/types.h>
+#include <pxr/usd/sdf/path.h>
 
 #include <toon/render_world.hpp>
 
@@ -17,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -142,6 +145,64 @@ private:
   std::array<Toon::TextureId, kHdToonTextureRoles> textures_{};
 };
 
+// One evaluated subshape slot of a resident mesh, in the order of its morph
+// weights: the binding's shapes in order, each shape's subshapes by weight.
+struct HdToonResidentSubshape {
+  // The mesh's `skel:blendShapes` name and the BlendShape prim it targets.
+  TfToken blend_shape;
+  SdfPath target;
+  // 1 for the primary shape, otherwise the inbetween's weight.
+  float weight = 1.0F;
+
+  friend bool operator==(const HdToonResidentSubshape&,
+      const HdToonResidentSubshape&) = default;
+};
+
+// A resident linear blend skin's identities, in palette order.
+struct HdToonResidentSkin {
+  SdfPath skeleton;
+  // The mesh's `skel:joints`, or the skeleton's joints when it names none.
+  VtTokenArray joints;
+  // Per palette entry, the joint's index in the skeleton, or -1 when the
+  // skeleton does not name it and its palette entry stays the identity.
+  std::vector<std::int32_t> skeleton_joints;
+  // Per palette entry, the inverse of the skeleton's bind transform, in
+  // stage units; the identity where `skeleton_joints` is -1.
+  std::vector<Toon::Matrix4> inverse_bind;
+  // As of the last pose sync: stage world to skeleton space, and skeleton
+  // space to the mesh's own, as the mesh's skin pose uses it.
+  Toon::Matrix4 world_to_skeleton;
+  Toon::Matrix4 skeleton_to_mesh;
+};
+
+struct HdToonResidentMesh {
+  Toon::MeshId mesh = 0;
+  SdfPath path;
+  // The bound material's path and its renderer id; 0 when no material
+  // prim under that path exists and the mesh draws the fallback.
+  SdfPath material_path;
+  Toon::MaterialId material = 0;
+  // Present for a mesh skinned on the GPU; absent for a rigid mesh and for
+  // one whose points usdSkelImaging's CPU kernel computes.
+  std::optional<HdToonResidentSkin> skin;
+  std::vector<HdToonResidentSubshape> subshapes;
+};
+
+struct HdToonResidentMaterial {
+  Toon::MaterialId material = 0;
+  SdfPath path;
+};
+
+// The Hydra identities behind a committed scene's resident meshes and
+// materials, ordered by renderer id, for a host that binds evaluated avatar
+// targets to resident renderer slots (design policy §34). Read from the
+// terminal scene index alongside the values; no format, expression or
+// humanoid meaning is applied.
+struct HdToonResidentTargets {
+  std::vector<HdToonResidentMesh> meshes;
+  std::vector<HdToonResidentMaterial> materials;
+};
+
 class HdToonRenderDelegate final : public HdRenderDelegate {
 public:
   explicit HdToonRenderDelegate(const HdRenderSettingsMap& settings = {});
@@ -192,6 +253,11 @@ public:
   void ClearMeshMorphWeightsOverride(Toon::MeshId mesh);
   bool SetMaterialParametersOverride(Toon::MaterialId material, const Toon::ToonMaterial& values);
   void ClearMaterialParametersOverride(Toon::MaterialId material);
+
+  // What the last sync made resident, with the ids CommitScene publishes.
+  // Describe after the same sync as the commit a binding is prepared from;
+  // a later structural sync can change both.
+  HdToonResidentTargets DescribeResidentTargets() const;
 
 private:
   class Impl;
