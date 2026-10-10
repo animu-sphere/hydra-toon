@@ -105,6 +105,21 @@ adapter turns the shape's runtime weight into those slots' weights with
 usdSkelImaging's inbetween interpolation, so neither the host nor core
 evaluates inbetweens.
 
+A host over the runtime's real providers lives beside the Hydra checks as
+`adapters/hydra2/tests/avatar_provider_test.cpp`
+(`toon-hydra2-avatar-provider-test`). It is built only with
+`TOON_AVATAR_RUNTIME_PROVIDERS` (default `OFF`, requires
+`TOON_ENABLE_AVATAR_STATE`), which finds the runtime package's
+`vrm_expression_usd` and `vrm_lookat_usd` components. It links them, and
+through them the VRM and motion owners. It is never installed, and no
+library target links it. Its CTests also need `TOON_VRM_IMAGING_RESOURCES`,
+so the fixture's materials are MToon; `TOON_VRM_SCHEMA_RESOURCES` defaults to
+the schema package the providers link. `run_avatar_providers.cmake` puts the
+linked DLLs' directories on `PATH` and registers both plugins. The host
+states the stage's `metersPerUnit` on each commit, as the viewport does. Its
+oracle authors each result into the session layer for UsdImaging to compose;
+that authoring belongs to the check, not to a renderer path.
+
 The sparse morph representation lives in `include/toon/render_world.hpp`:
 `ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,
 while weights have an independent revision. `SetMeshMorphWeights` does not
@@ -307,7 +322,10 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    diagnostics only while its panel or screen display is active; neither the
    core nor the backend receives skeleton hierarchy or debug geometry.
 5. No target links a format repository
-   ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)).
+   ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)),
+   except the opt-in, uninstalled real-provider host check above. It reaches
+   the VRM owners only through the runtime's providers, and every build
+   without `TOON_AVATAR_RUNTIME_PROVIDERS` needs no VRM install.
 6. The optional evaluated-state consumer under `adapters/fast/` may depend on
    the runtime's minimal public state/ABI contract and renderer targets. That
    dependency never flows into core/backend headers or required package

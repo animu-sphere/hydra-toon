@@ -171,6 +171,75 @@ if(TOON_BUILD_TESTS)
     PROPERTIES ENVIRONMENT_MODIFICATION
       "${_toon_pxr_runtime_modifications}")
 
+  # A host over real usd-avatar-runtime providers: the runtime's VRM USD
+  # bindings and owner evaluator produce each result, matched to the
+  # delegate's description and compared with the same values composed by
+  # usdSkelImaging. It links the providers and, through them, the VRM and
+  # motion owners, which no renderer target does; it is opt-in, never
+  # installed, and its tests need the VRM schema and imaging plugins.
+  if(TOON_AVATAR_RUNTIME_PROVIDERS)
+    if(NOT TARGET toon-hydra2-avatar-binding)
+      message(FATAL_ERROR
+        "TOON_AVATAR_RUNTIME_PROVIDERS requires TOON_ENABLE_AVATAR_STATE")
+    endif()
+    find_package(AvatarRuntime CONFIG REQUIRED
+      COMPONENTS vrm_expression_usd vrm_lookat_usd)
+    add_executable(toon-hydra2-avatar-provider-test
+      tests/avatar_provider_test.cpp)
+    toon_configure_warnings(toon-hydra2-avatar-provider-test)
+    target_link_libraries(toon-hydra2-avatar-provider-test PRIVATE
+      toon-hydra2-avatar-binding
+      AvatarRuntime::avatarVrmExpressionUsdBinding
+      AvatarRuntime::avatarVrmLookAtUsdBinding
+      AvatarRuntime::avatarRuntime
+      usdImaging usdSkel usdGeom usd Toon::Vulkan)
+    target_compile_features(toon-hydra2-avatar-provider-test PRIVATE cxx_std_20)
+    target_compile_definitions(toon-hydra2-avatar-provider-test PRIVATE
+      NOMINMAX
+      _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+
+    get_filename_component(_toon_vrm_schema_root "${vrmSchema_DIR}/../../.."
+      ABSOLUTE)
+    set(TOON_VRM_SCHEMA_RESOURCES
+      "${_toon_vrm_schema_root}/plugin/resources/vrmSchema" CACHE PATH
+      "The vrmSchema plugin's resources, from the package the providers link")
+    set(TOON_VRM_IMAGING_RESOURCES "" CACHE PATH
+      "The vrmImaging plugin's resources, built for this OpenUSD")
+    if(TOON_VRM_IMAGING_RESOURCES)
+      set(_toon_provider_stage
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/avatar-provider.usda")
+      foreach(_toon_case IN ITEMS bone expression gpu)
+        set(_toon_arguments "--expect-materials")
+        if(_toon_case STREQUAL "gpu")
+          string(APPEND _toon_arguments
+            "|--expect-images|--lookat|/Avatar/LookAtBone|--shaders|${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+        else()
+          set(_toon_prim Bone)
+          if(_toon_case STREQUAL "expression")
+            set(_toon_prim Expression)
+          endif()
+          string(APPEND _toon_arguments
+            "|--lookat|/Avatar/LookAt${_toon_prim}|--expect-gaze|${_toon_case}")
+        endif()
+        add_test(NAME toon-renderer-hydra-avatar-providers-${_toon_case}
+          COMMAND "${CMAKE_COMMAND}"
+            "-DPROGRAM=$<TARGET_FILE:toon-hydra2-avatar-provider-test>"
+            "-DSTAGE=${_toon_provider_stage}"
+            "-DARGUMENTS=${_toon_arguments}"
+            "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-hydra2-avatar-provider-test>,|>"
+            "-DPLUGINS=${TOON_VRM_SCHEMA_RESOURCES}|${TOON_VRM_IMAGING_RESOURCES}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_avatar_providers.cmake")
+        set_tests_properties(toon-renderer-hydra-avatar-providers-${_toon_case}
+          PROPERTIES ENVIRONMENT_MODIFICATION "${_toon_pxr_runtime_modifications}")
+      endforeach()
+      set_tests_properties(toon-renderer-hydra-avatar-providers-gpu PROPERTIES
+        LABELS "gpu" SKIP_REGULAR_EXPRESSION "SKIP: no Vulkan device")
+    else()
+      message(STATUS
+        "TOON_VRM_IMAGING_RESOURCES is unset; the avatar provider host check is built without tests")
+    endif()
+  endif()
+
   find_package(Python3 COMPONENTS Interpreter QUIET)
   find_program(TOON_TESTUSDVIEW testusdview
     PATHS "${TOON_PXR_ROOT}/bin" NO_DEFAULT_PATH)

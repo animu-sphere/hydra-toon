@@ -1,0 +1,268 @@
+#usda 1.0
+(
+    doc = """hdToon's real-provider host check: a VRM-schema avatar in centimetres,
+    placed off the origin, that usd-avatar-runtime's VRM USD bindings read.
+    The face is skinned in its own joint order and carries a shape with an
+    inbetween; the eyes are skinned to their own joints for bone gaze; an
+    expression drives MToon colours. Two LookAt prims, bone and expression,
+    are selected by path. Hand-authored; the names are usd-vrm-plugins'
+    schema contract."""
+    defaultPrim = "Avatar"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def SkelRoot "Avatar" (
+    prepend apiSchemas = ["SkelBindingAPI"]
+)
+{
+    double3 xformOp:translate = (20, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+    rel skel:skeleton = </Avatar/Skel>
+
+    def Skeleton "Skel" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        uniform token[] joints = ["Hips", "Hips/Spine", "Hips/Spine/Head", "Hips/Spine/Head/LeftEye", "Hips/Spine/Head/RightEye"]
+        uniform matrix4d[] bindTransforms = [
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 100, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 120, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 150, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (3, 155, 8, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (-3, 155, 8, 1))]
+        uniform matrix4d[] restTransforms = [
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 100, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 20, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 30, 0, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (3, 5, 8, 1)),
+            ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (-3, 5, 8, 1))]
+    }
+
+    def Scope "Looks"
+    {
+        def Material "Face" (
+            prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI"]
+        )
+        {
+            color3f inputs:vrm:material:baseColorFactor = (0.9, 0.8, 0.7)
+            float inputs:vrm:material:baseColorAlphaFactor = 1
+            color3f inputs:vrm:mtoon:shadeColorFactor = (0.5, 0.4, 0.3)
+            token outputs:surface.connect = </Avatar/Looks/Face/surface.outputs:surface>
+
+            def Shader "surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.9, 0.8, 0.7)
+                token outputs:surface
+            }
+        }
+
+        def Material "Eye" (
+            prepend apiSchemas = ["VrmMaterialAPI", "VrmMToonAPI"]
+        )
+        {
+            color3f inputs:vrm:material:baseColorFactor = (0.1, 0.2, 0.6)
+            color3f inputs:vrm:mtoon:shadeColorFactor = (0.05, 0.1, 0.3)
+            token outputs:surface.connect = </Avatar/Looks/Eye/surface.outputs:surface>
+
+            def Shader "surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.1, 0.2, 0.6)
+                token outputs:surface
+            }
+        }
+    }
+
+    # Its joints are a subset of the skeleton's, reversed, so the palette
+    # follows skel:joints rather than the skeleton or the runtime.
+    def Mesh "Face" (
+        prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </Avatar/Looks/Face>
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-10, 140, 6), (10, 140, 6), (10, 165, 6), (-10, 165, 6)]
+        uniform token[] skel:joints = ["Hips/Spine/Head", "Hips/Spine"]
+        int[] primvars:skel:jointIndices = [0, 1, 0, 1, 0, 1, 0, 1] (
+            elementSize = 2
+            interpolation = "vertex"
+        )
+        float[] primvars:skel:jointWeights = [0.75, 0.25, 0.75, 0.25, 1, 0, 1, 0] (
+            elementSize = 2
+            interpolation = "vertex"
+        )
+        matrix4d primvars:skel:geomBindTransform = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
+        uniform token[] skel:blendShapes = ["smile", "blink", "lookLeft", "lookRight", "lookUp", "lookDown"]
+        rel skel:blendShapeTargets = [</Avatar/Face/smile>, </Avatar/Face/blink>, </Avatar/Face/lookLeft>, </Avatar/Face/lookRight>, </Avatar/Face/lookUp>, </Avatar/Face/lookDown>]
+        rel skel:skeleton = </Avatar/Skel>
+
+        def BlendShape "smile"
+        {
+            uniform vector3f[] offsets = [(0, 2, 0), (0, 2, 0)]
+            uniform int[] pointIndices = [0, 1]
+            uniform vector3f[] inbetweens:half = [(0, 1.5, 1), (0, 1.5, 1)] (
+                weight = 0.5
+            )
+        }
+
+        def BlendShape "blink"
+        {
+            uniform vector3f[] offsets = [(0, -3, 0), (0, -3, 0)]
+            uniform int[] pointIndices = [2, 3]
+        }
+
+        def BlendShape "lookLeft"
+        {
+            uniform vector3f[] offsets = [(2, 0, 0)]
+            uniform int[] pointIndices = [3]
+        }
+
+        def BlendShape "lookRight"
+        {
+            uniform vector3f[] offsets = [(-2, 0, 0)]
+            uniform int[] pointIndices = [2]
+        }
+
+        def BlendShape "lookUp"
+        {
+            uniform vector3f[] offsets = [(0, 2, 0)]
+            uniform int[] pointIndices = [2]
+        }
+
+        def BlendShape "lookDown"
+        {
+            uniform vector3f[] offsets = [(0, -2, 0)]
+            uniform int[] pointIndices = [3]
+        }
+    }
+
+    # One quad per eye, each rigid on its joint, in reversed joint order.
+    def Mesh "Eyes" (
+        prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </Avatar/Looks/Eye>
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7]
+        point3f[] points = [(1, 153, 9), (5, 153, 9), (5, 157, 9), (1, 157, 9), (-5, 153, 9), (-1, 153, 9), (-1, 157, 9), (-5, 157, 9)]
+        uniform token[] skel:joints = ["Hips/Spine/Head/RightEye", "Hips/Spine/Head/LeftEye"]
+        int[] primvars:skel:jointIndices = [1, 1, 1, 1, 0, 0, 0, 0] (
+            elementSize = 1
+            interpolation = "vertex"
+        )
+        float[] primvars:skel:jointWeights = [1, 1, 1, 1, 1, 1, 1, 1] (
+            elementSize = 1
+            interpolation = "vertex"
+        )
+        matrix4d primvars:skel:geomBindTransform = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
+        rel skel:skeleton = </Avatar/Skel>
+    }
+
+    def Scope "Humanoid" (
+        prepend apiSchemas = ["VrmHumanoidAPI"]
+    )
+    {
+        uniform token vrm:humanBones:hips = "Hips"
+        uniform token vrm:humanBones:spine = "Hips/Spine"
+        uniform token vrm:humanBones:head = "Hips/Spine/Head"
+        uniform token vrm:humanBones:leftEye = "Hips/Spine/Head/LeftEye"
+        uniform token vrm:humanBones:rightEye = "Hips/Spine/Head/RightEye"
+        rel vrm:skeleton = </Avatar/Skel>
+    }
+
+    def Scope "LookAtBone" (
+        prepend apiSchemas = ["VrmLookAtAPI"]
+    )
+    {
+        uniform token vrm:type = "bone"
+        uniform token vrm:leftEye = "Hips/Spine/Head/LeftEye"
+        uniform token vrm:rightEye = "Hips/Spine/Head/RightEye"
+        rel vrm:skeleton = </Avatar/Skel>
+    }
+
+    def Scope "LookAtExpression" (
+        prepend apiSchemas = ["VrmLookAtAPI"]
+    )
+    {
+        uniform token vrm:type = "expression"
+        rel vrm:skeleton = </Avatar/Skel>
+    }
+
+    def Scope "Expressions"
+    {
+        # Shade and base colour (RGB and alpha) of the face's MToon material.
+        def Scope "happy" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "happy"
+            rel vrm:morphTargets = </Avatar/Face/smile>
+            uniform float[] vrm:morphTargetWeights = [1]
+            uniform token vrm:overrideBlink = "blend"
+            rel vrm:materialColorTargets = </Avatar/Looks/Face>
+            uniform token[] vrm:materialColorTypes = ["shadeColor", "color"]
+            uniform float4[] vrm:materialColorValues = [(0.9, 0.3, 0.3, 1), (1, 0.8, 0.8, 0.5)]
+            uniform int[] vrm:materialColorTargetIndices = [0, 0]
+        }
+
+        # Halfway along smile, through its inbetween.
+        def Scope "aa" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "aa"
+            rel vrm:morphTargets = </Avatar/Face/smile>
+            uniform float[] vrm:morphTargetWeights = [0.5]
+        }
+
+        def Scope "blink" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "blink"
+            rel vrm:morphTargets = </Avatar/Face/blink>
+            uniform float[] vrm:morphTargetWeights = [1]
+        }
+
+        def Scope "lookLeft" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "lookLeft"
+            rel vrm:morphTargets = </Avatar/Face/lookLeft>
+            uniform float[] vrm:morphTargetWeights = [1]
+        }
+
+        def Scope "lookRight" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "lookRight"
+            rel vrm:morphTargets = </Avatar/Face/lookRight>
+            uniform float[] vrm:morphTargetWeights = [1]
+        }
+
+        def Scope "lookUp" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "lookUp"
+            rel vrm:morphTargets = </Avatar/Face/lookUp>
+            uniform float[] vrm:morphTargetWeights = [1]
+        }
+
+        def Scope "lookDown" (
+            prepend apiSchemas = ["VrmExpressionAPI"]
+        )
+        {
+            uniform token vrm:expressionName = "lookDown"
+            rel vrm:morphTargets = </Avatar/Face/lookDown>
+            uniform float[] vrm:morphTargetWeights = [1]
+        }
+    }
+}
