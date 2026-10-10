@@ -191,6 +191,38 @@ void SplitBaseColor() {
   bindings.materials.back().source = 1;
   Check(!adapter.Bind(layout, base, 2, bindings, error), "RGB/RGBA overlap accepted without alpha");
 }
+// Runtime revision 4 publishes two-component inputs as vec2; the former
+// vec3-with-zero-z convention is refused rather than accepted as an alias.
+void TextureTransform() {
+  Scene scene;
+  Values v;
+  v.materials[0] = {"surface", "owner:uvOffset", AR_VALUE_VEC2, 1, {.25, .5, 0, 0}};
+  v.materials[1] = {"surface", "owner:uvScale", AR_VALUE_VEC2, 1, {2, 3, 0, 0}};
+  auto bindings = scene.Bindings();
+  bindings.materials = {{0, scene.material, Toon::AvatarMaterialField::BaseTextureOffset},
+      {1, scene.material, Toon::AvatarMaterialField::BaseTextureScale}};
+  auto base = scene.world.Commit();
+  Toon::AvatarStateAdapter adapter;
+  std::string error;
+  Check(adapter.Bind(v.View(), base, 1, bindings, error), error.c_str());
+  auto retained = Fake::Snapshot(v.View());
+  Toon::FrameSnapshot output;
+  Check(adapter.Apply(retained, base, 1, output, error), error.c_str());
+  const auto& texture = output.materials[0].material.base_texture;
+  Check(texture.offset.x == .25F && texture.offset.y == .5F && texture.scale.x == 2 && texture.scale.y == 3,
+      "vec2 texture transform lost values");
+  v.materials[0].overridden = 0;
+  retained = Fake::Snapshot(v.View(2));
+  Check(adapter.Apply(retained, base, 1, output, error) &&
+            output.materials[0].material.base_texture.offset.x == scene.values.base_texture.offset.x &&
+            output.materials[0].material.base_texture.scale.y == 3,
+      "offset release cleared independently active scale");
+  auto legacy = v;
+  legacy.materials[0] = {"surface", "owner:uvOffset", AR_VALUE_VEC3, 1, {.25, .5, 0, 0}};
+  Check(!adapter.Bind(legacy.View(), base, 2, bindings, error), "vec3 texture offset accepted");
+  legacy.materials[0] = {"surface", "owner:uvOffset", AR_VALUE_VEC2, 1, {.25, .5, 1, 0}};
+  Check(!adapter.Bind(legacy.View(), base, 2, bindings, error), "nonzero unused vec2 component accepted");
+}
 // One shape with inbetweens at -0.5 and 0.5 fills three subshape slots the
 // way usdSkelImaging does; a plain shape keeps its one slot. Expected values
 // are worked by hand from the interpolation, not from the adapter.
@@ -603,6 +635,7 @@ void Gpu(const char* shaders) {
 int main(int argc, char** argv) {
   try {
     SplitBaseColor();
+    TextureTransform();
     Inbetweens();
     State();
     if (argc == 3 && std::string(argv[1]) == "--runtime")

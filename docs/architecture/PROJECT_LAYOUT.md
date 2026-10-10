@@ -37,7 +37,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
-| `adapters/fast/` | `toon-avatar-state` | `Toon::AvatarState` | optional revision-3 runtime state consumer (`TOON_ENABLE_AVATAR_STATE`); only the runtime C headers are required, with snapshot calls supplied by the host |
+| `adapters/fast/` | `toon-avatar-state` | `Toon::AvatarState` | optional revision-4 runtime state consumer (`TOON_ENABLE_AVATAR_STATE`); only the runtime C headers are required, with snapshot calls supplied by the host |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
 `formations/vrm-host-session/` builds nothing: it is an OpenStrata Formation

@@ -82,7 +82,8 @@ bool Valid(const ArStateView& s, std::string& error) {
   for (std::uint32_t i = 0; i < s.material_count; ++i) {
     const auto& m = s.materials[i];
     if (!Name(m.material_id) || !Name(m.input_id) || !ids.emplace(m.material_id, m.input_id).second ||
-        m.overridden > 1 || (m.value_type != AR_VALUE_SCALAR && m.value_type != AR_VALUE_VEC3 && m.value_type != AR_VALUE_VEC4))
+        m.overridden > 1 || (m.value_type != AR_VALUE_SCALAR && m.value_type != AR_VALUE_VEC2 &&
+                             m.value_type != AR_VALUE_VEC3 && m.value_type != AR_VALUE_VEC4))
       return Fail(error, "invalid runtime material identity or type");
     for (std::uint32_t k = 0; k < 4; ++k)
       if (!Float(m.value[k]) || (k >= m.value_type && m.value[k] != 0))
@@ -112,10 +113,9 @@ std::uint32_t Type(AvatarMaterialField field) {
   case AvatarMaterialField::Matcap:
   case AvatarMaterialField::RimColor:
     return AR_VALUE_VEC3;
-  // Runtime v3 has no vec2: offset/scale explicitly use vec3 with zero z.
   case AvatarMaterialField::BaseTextureOffset:
   case AvatarMaterialField::BaseTextureScale:
-    return AR_VALUE_VEC3;
+    return AR_VALUE_VEC2;
   case AvatarMaterialField::Alpha:
   case AvatarMaterialField::ShadingShift:
   case AvatarMaterialField::ShadingToony:
@@ -124,9 +124,6 @@ std::uint32_t Type(AvatarMaterialField field) {
     return AR_VALUE_SCALAR;
   }
   return 0;
-}
-bool TextureField(AvatarMaterialField f) {
-  return f == AvatarMaterialField::BaseTextureOffset || f == AvatarMaterialField::BaseTextureScale;
 }
 void Material(ToonMaterial& m, AvatarMaterialField f, const double* v) {
   const Float3 color{static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2])};
@@ -534,8 +531,6 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
         std::make_shared<const std::vector<float>>(std::move(values));
   for (const auto& b : bindings_.materials) {
     const auto& value = s->materials[b.source];
-    if (TextureField(b.field) && value.value[2] != 0)
-      return Fail(error, "texture transform vec3 must have zero z");
     if (!value.overridden)
       continue;
     auto& material = *Find(candidate.materials, b.material);

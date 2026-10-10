@@ -22,7 +22,7 @@ version has a record in [docs/releases/](docs/releases/README.md).
   evaluated avatar targets. The skinning check covers a reordered joint list
   and a bound material; `--stage` checks a real avatar's palette composition.
 - Optional `Toon::AvatarState` adapter for `usd-avatar-runtime` experimental
-  C ABI revision 3: retained results, explicit pose/subshape/MToon/visibility
+  C ABI revision 4: retained results, explicit pose/subshape/MToon/visibility
   mappings, layout and host binding checks, and release to the current scene.
   Controlled Vulkan late-input comparisons and real-runtime reset/destruction
   lifetime checks; independent core and installed component consumers.
@@ -80,6 +80,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- `Toon::AvatarState` follows the runtime's experimental C ABI revision 4 and
+  is rebuilt against its headers. Base texture offset and scale bindings take
+  the runtime's vec2 material values; the former vec3-with-zero-z convention
+  is refused, as is a nonzero unused component.
 - Architecture policy: Hydra and an optional evaluated-state fast adapter feed
   one renderer core. Avatar composition and shared output belong to
   `usd-avatar-runtime`; format evaluators remain upstream. The v0.3.0 gate
