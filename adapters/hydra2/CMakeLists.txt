@@ -88,7 +88,7 @@ if(TOON_BUILD_TESTS)
   add_executable(toon-hydra2-skinning-test tests/skinning_test.cpp)
   toon_configure_warnings(toon-hydra2-skinning-test)
   target_link_libraries(toon-hydra2-skinning-test
-    PRIVATE toon-hydra2-runtime usdImaging usd Toon::Vulkan)
+    PRIVATE toon-hydra2-runtime usdImaging usdSkel usdGeom usd Toon::Vulkan)
   target_compile_features(toon-hydra2-skinning-test PRIVATE cxx_std_20)
   target_compile_definitions(toon-hydra2-skinning-test PRIVATE
     NOMINMAX

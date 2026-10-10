@@ -1,6 +1,6 @@
 #usda 1.0
 (
-    doc = "hdToon's skinning check: a quad skinned linearly by two joints, with authored normals and a blend shape, and a second quad skinned by dual quaternions."
+    doc = "hdToon's skinning check: a quad skinned linearly by two joints in its own joint order, with authored normals, blend shapes and a material, and a second quad skinned by dual quaternions."
     startTimeCode = 1
     endTimeCode = 3
     upAxis = "Y"
@@ -46,10 +46,20 @@ def SkelRoot "Root" (
         }
     }
 
+    def Scope "Looks"
+    {
+        def Material "Skin"
+        {
+        }
+    }
+
+    # Its joint order is the skeleton's reversed, so the palette and its
+    # described identities follow skel:joints rather than the skeleton.
     def Mesh "Linear" (
-        prepend apiSchemas = ["SkelBindingAPI"]
+        prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"]
     )
     {
+        rel material:binding = </Root/Looks/Skin>
         int[] faceVertexCounts = [4]
         int[] faceVertexIndices = [0, 1, 2, 3]
         point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
@@ -60,7 +70,8 @@ def SkelRoot "Root" (
         normal3f[] primvars:normals = [(0.6, 0, 0.8), (0.6, 0, 0.8), (0.6, 0, 0.8), (0.6, 0, 0.8)] (
             interpolation = "vertex"
         )
-        int[] primvars:skel:jointIndices = [0, 0, 1, 1] (
+        uniform token[] skel:joints = ["base/tip", "base"]
+        int[] primvars:skel:jointIndices = [1, 1, 0, 0] (
             elementSize = 1
             interpolation = "vertex"
         )

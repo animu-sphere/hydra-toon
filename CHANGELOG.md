@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- `HdToonRenderDelegate::DescribeResidentTargets`: the Hydra identities behind
+  resident meshes and materials, GPU skin palettes (joint tokens, skeleton
+  indices, inverse binds, placement) and subshape slots, for a host binding
+  evaluated avatar targets. The skinning check covers a reordered joint list
+  and a bound material; `--stage` checks a real avatar's palette composition.
 - Optional `Toon::AvatarState` adapter for `usd-avatar-runtime` experimental
   C ABI revision 3: retained results, explicit pose/subshape/MToon/visibility
   mappings, layout and host binding checks, and release to the current scene.

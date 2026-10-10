@@ -8,24 +8,38 @@
 // which the pose does not touch. Its dual quaternion quad runs
 // usdSkelImaging's CPU kernel instead. The default check reads the scene the
 // next frame would draw; an optional shader directory also runs GPU image
-// comparisons against independently deformed rest geometry.
+// comparisons against independently deformed rest geometry. The delegate
+// also describes the Hydra identities behind the resident palette, subshape
+// and material slots, which a host binds evaluated avatar targets with.
+// With --stage, a real stage's described identities are checked instead:
+// they must name every palette entry and morph weight slot, and compose the
+// palette usdSkelImaging computed, with every joint's rest rotated so a
+// mismatched joint cannot hide behind an identity palette.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
 
+#include <pxr/base/gf/rotation.h>
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/attribute.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdSkel/cache.h>
+#include <pxr/usd/usdSkel/skeleton.h>
+#include <pxr/usd/usdSkel/skeletonQuery.h>
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
 #include <toon/render_world.hpp>
 #include <toon/vulkan_backend.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -113,6 +127,69 @@ std::vector<Toon::Float3> MorphedNormals(const Toon::MeshSnapshot& mesh) {
     }
   }
   return normals;
+}
+
+Toon::Matrix4 Translation(float x, float y, float z) {
+  Toon::Matrix4 matrix;
+  matrix.m[12] = x;
+  matrix.m[13] = y;
+  matrix.m[14] = z;
+  return matrix;
+}
+
+// Relative to the larger magnitude, so a stage of centimetres and one of
+// metres meet the same tolerance.
+bool Near(const Toon::Matrix4& a, const Toon::Matrix4& b, float tolerance = 1e-5F) {
+  for (std::size_t i = 0; i < a.m.size(); ++i) {
+    const float scale = std::max({1.0F, std::abs(a.m[i]), std::abs(b.m[i])});
+    if (!(std::abs(a.m[i] - b.m[i]) <= tolerance * scale)) return false;
+  }
+  return true;
+}
+
+Toon::Matrix4 ToToon(const GfMatrix4d& matrix) {
+  Toon::Matrix4 result;
+  for (std::size_t i = 0; i < result.m.size(); ++i) {
+    result.m[i] = static_cast<float>(matrix.data()[i]);
+  }
+  return result;
+}
+
+const HdToonResidentMesh* Described(const HdToonResidentTargets& targets,
+    const char* path) {
+  for (const HdToonResidentMesh& mesh : targets.meshes) {
+    if (mesh.path == SdfPath(path)) return &mesh;
+  }
+  return nullptr;
+}
+
+// Composes each palette entry from the described identities as the fast
+// adapter composes a binding: a skeleton-order joint transform taken to
+// world, back to skeleton space, after the inverse bind. It must give the
+// palette usdSkelImaging computed.
+bool PaletteFromIdentities(const HdToonResidentSkin& skin,
+    const std::vector<Toon::Matrix4>& skeleton_space,
+    const Toon::Matrix4& skeleton_to_world, const Toon::MeshSnapshot& mesh,
+    float tolerance = 1e-5F) {
+  if (skin.skeleton_joints.size() != mesh.joints->size() ||
+      skin.inverse_bind.size() != mesh.joints->size() ||
+      !Near(skin.skeleton_to_mesh, mesh.skeleton_to_mesh, tolerance)) {
+    return false;
+  }
+  for (std::size_t i = 0; i < skin.skeleton_joints.size(); ++i) {
+    const std::int32_t joint = skin.skeleton_joints[i];
+    if (joint < 0 || static_cast<std::size_t>(joint) >= skeleton_space.size()) {
+      return false;
+    }
+    const Toon::Matrix4 world = Toon::Multiply(skeleton_to_world,
+        skeleton_space[static_cast<std::size_t>(joint)]);
+    if (!Near(Toon::Multiply(Toon::Multiply(skin.world_to_skeleton, world),
+                  skin.inverse_bind[i]),
+            (*mesh.joints)[i], tolerance)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 struct Meshes {
@@ -262,9 +339,106 @@ bool GpuNormals(const std::vector<Toon::FrameSnapshot>& frames,
 
 } // namespace
 
+// Each skinned mesh's described identities against what usdSkelImaging
+// computed at the stage's start time code, before and after every joint's
+// rest is rotated in the session layer.
+int RunStage(const char* path) {
+  const UsdStageRefPtr stage = UsdStage::Open(path);
+  if (!Check(stage != nullptr, "cannot open the stage")) return 1;
+  UsdImagingCreateSceneIndicesInfo info;
+  info.stage = stage;
+  const UsdImagingSceneIndices indices = UsdImagingCreateSceneIndices(info);
+  HdToonRenderDelegate delegate;
+  std::unique_ptr<HdRenderIndex> index(HdRenderIndex::New(&delegate, {}));
+  index->InsertSceneIndex(indices.finalSceneIndex, SdfPath::AbsoluteRootPath());
+  HdTaskSharedPtrVector tasks;
+  HdTaskContext context;
+  const HdRprimCollection collection(HdTokens->geometry,
+      HdReprSelector(HdReprTokens->smoothHull));
+  const UsdTimeCode time(stage->GetStartTimeCode());
+  const auto sync = [&]() {
+    indices.stageSceneIndex->ApplyPendingUpdates();
+    indices.stageSceneIndex->SetTime(time);
+    index->EnqueueCollectionToSync(collection);
+    index->SyncAll(&tasks, &context);
+    return delegate.CommitScene();
+  };
+  // Rotated rests must leave no palette entry the identity, so a joint the
+  // identities mismatch cannot match by accident.
+  const auto check = [&](const char* label, bool posed_only) {
+    const Toon::FrameSnapshot snapshot = sync();
+    const HdToonResidentTargets targets = delegate.DescribeResidentTargets();
+    UsdSkelCache cache;
+    std::size_t skinned = 0, palette = 0, posed = 0, subshapes = 0, bound = 0;
+    for (const HdToonResidentMesh& target : targets.meshes) {
+      const auto mesh = std::find_if(snapshot.meshes.begin(), snapshot.meshes.end(),
+          [&](const auto& m) { return m.id == target.mesh; });
+      if (!Check(mesh != snapshot.meshes.end(), "a described mesh must be committed")) return false;
+      if (target.material != 0) ++bound;
+      if (!target.skin) continue;
+      const UsdSkelSkeletonQuery query = cache.GetSkelQuery(
+          UsdSkelSkeleton(stage->GetPrimAtPath(target.skin->skeleton)));
+      VtMatrix4dArray joints;
+      if (!Check(query && query.ComputeJointSkelTransforms(&joints, time),
+              "a described skeleton must evaluate")) return false;
+      std::vector<Toon::Matrix4> skeleton_space;
+      for (const GfMatrix4d& joint : joints) skeleton_space.push_back(ToToon(joint));
+      const Toon::Matrix4 skeleton_to_world = ToToon(UsdGeomXformable(
+          query.GetPrim()).ComputeLocalToWorldTransform(time));
+      if (!Check(std::find(target.skin->skeleton_joints.begin(),
+                     target.skin->skeleton_joints.end(), -1) ==
+                     target.skin->skeleton_joints.end(),
+              "every palette entry must name a skeleton joint") ||
+          !Check(PaletteFromIdentities(*target.skin, skeleton_space,
+                     skeleton_to_world, *mesh, 1e-4F),
+              (target.path.GetString() + ": described identities must compose the palette").c_str()) ||
+          !Check(target.subshapes.size() == mesh->morph_weights->size(),
+              (target.path.GetString() + ": every morph weight slot must be described").c_str())) {
+        return false;
+      }
+      ++skinned;
+      palette += target.skin->joints.size();
+      posed += static_cast<std::size_t>(std::count_if(mesh->joints->begin(),
+          mesh->joints->end(), [](const Toon::Matrix4& joint) {
+            return !Near(joint, Toon::Matrix4{}, 1e-4F);
+          }));
+      subshapes += target.subshapes.size();
+    }
+    std::cout << label << ": " << targets.meshes.size() << " meshes, " << skinned
+              << " GPU-skinned with " << palette << " palette entries ("
+              << posed << " not the identity) and "
+              << subshapes << " subshape slots, " << bound << " bound to "
+              << targets.materials.size() << " materials\n";
+    return Check(skinned > 0 && (!posed_only || posed == palette),
+        "the check needs GPU-skinned meshes, and rotated rests a posed palette");
+  };
+  if (!check("authored rest", false)) return 1;
+  for (const UsdPrim& prim : stage->Traverse()) {
+    UsdSkelSkeleton skeleton(prim);
+    if (!skeleton) continue;
+    VtMatrix4dArray rest;
+    skeleton.GetRestTransformsAttr().Get(&rest);
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+      GfMatrix4d turn;
+      turn.SetRotate(GfRotation(GfVec3d(1, 2, 3), 5.0 + 7.0 * static_cast<double>(i % 11)));
+      rest[i] = turn * rest[i];
+    }
+    stage->SetEditTarget(stage->GetSessionLayer());
+    skeleton.GetRestTransformsAttr().Set(rest);
+  }
+  if (!check("rotated rest", true)) return 1;
+  index.reset();
+  return 0;
+}
+
 int main(int argc, char** argv) {
+  if (argc == 3 && std::strcmp(argv[1], "--stage") == 0) {
+    TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
+    return RunStage(argv[2]);
+  }
   if (argc != 2 && argc != 3) {
-    std::cerr << "usage: toon-hydra2-skinning-test <skinning.usda> [shader-directory]\n";
+    std::cerr << "usage: toon-hydra2-skinning-test <skinning.usda> [shader-directory]\n"
+                 "       toon-hydra2-skinning-test --stage <file>\n";
     return 2;
   }
   // What toon-viewport sets, so usdSkelImaging hands over authored normals.
@@ -329,6 +503,47 @@ int main(int argc, char** argv) {
   }
   const Toon::MeshSnapshot linear_bind = *bind_meshes.linear;
   const Toon::MeshSnapshot dual_bind = *bind_meshes.dual;
+
+  const HdToonResidentTargets resident = delegate.DescribeResidentTargets();
+  const HdToonResidentMesh* linear_target = Described(resident, "/Root/Linear");
+  const HdToonResidentMesh* dual_target = Described(resident, "/Root/DualQuaternion");
+  const std::vector<HdToonResidentSubshape> subshapes{
+      {TfToken("lift"), SdfPath("/Root/Linear/lift"), 0.5F},
+      {TfToken("lift"), SdfPath("/Root/Linear/lift"), 1.0F},
+      {TfToken("tilt"), SdfPath("/Root/Linear/tilt"), 1.0F},
+      {TfToken("plain"), SdfPath("/Root/Linear/plain"), 1.0F}};
+  if (!Check(resident.meshes.size() == bind.meshes.size() &&
+                 linear_target != nullptr && dual_target != nullptr &&
+                 linear_target->mesh == linear_bind.id &&
+                 dual_target->mesh == dual_bind.id,
+          "every committed mesh must be described by its prim path and id") ||
+      !Check(linear_target->skin &&
+                 linear_target->skin->skeleton == SdfPath("/Root/Skel") &&
+                 linear_target->skin->joints ==
+                     VtTokenArray{TfToken("base/tip"), TfToken("base")} &&
+                 linear_target->skin->skeleton_joints ==
+                     std::vector<std::int32_t>{1, 0},
+          "the described palette must follow the mesh's own joint order") ||
+      !Check(Near(linear_target->skin->inverse_bind[0], Translation(0, -1, 0)) &&
+                 Near(linear_target->skin->inverse_bind[1], Toon::Matrix4{}) &&
+                 Near(linear_target->skin->world_to_skeleton, Toon::Matrix4{}) &&
+                 Near(linear_target->skin->skeleton_to_mesh,
+                     linear_bind.skeleton_to_mesh),
+          "the described skin must carry the skeleton's inverse binds and placement") ||
+      !Check(linear_target->subshapes == subshapes &&
+                 linear_bind.morph_weights->size() == subshapes.size(),
+          "described subshapes must name every morph weight slot in order") ||
+      !Check(!dual_target->skin && dual_target->subshapes.empty(),
+          "a mesh the CPU kernel skins must describe no resident palette") ||
+      !Check(resident.materials.size() == 1 &&
+                 resident.materials[0].path == SdfPath("/Root/Looks/Skin") &&
+                 linear_target->material_path == SdfPath("/Root/Looks/Skin") &&
+                 linear_target->material == resident.materials[0].material &&
+                 linear_bind.material == linear_target->material &&
+                 dual_target->material == 0,
+          "the bound material must be described by its path and committed id")) {
+    return 1;
+  }
 
   // Only the pose changes.
   const Toon::FrameSnapshot moved = sync(2.0);
@@ -489,6 +704,30 @@ int main(int argc, char** argv) {
             "position-only morphs must retain derived rest normals")) return 1;
   }
   if (argc == 3 && !GpuNormals(derived, argv[2], false, false)) return 1;
+
+  // Moving the skeleton changes only its placement: the described palette
+  // identities stay, and composing a pose from them still gives the palette.
+  const auto described_skin = *Described(delegate.DescribeResidentTargets(),
+      "/Root/Linear")->skin;
+  const std::vector<Toon::Matrix4> moved_pose{Toon::Matrix4{}, Translation(1, 1, 0)};
+  const auto placed = sync(2.0);
+  if (!Check(PaletteFromIdentities(described_skin, moved_pose, Toon::Matrix4{},
+                 *Find(placed).linear),
+          "described identities must compose the posed palette")) return 1;
+  UsdGeomXformable(stage->GetPrimAtPath(SdfPath("/Root/Skel")))
+      .AddTranslateOp().Set(GfVec3d(0, 0, 2));
+  const auto moved_skeleton = sync(2.0);
+  const auto placed_skin = *Described(delegate.DescribeResidentTargets(),
+      "/Root/Linear")->skin;
+  if (!Check(placed_skin.joints == described_skin.joints &&
+                 placed_skin.skeleton_joints == described_skin.skeleton_joints &&
+                 placed_skin.inverse_bind == described_skin.inverse_bind &&
+                 Near(placed_skin.world_to_skeleton, Translation(0, 0, -2)) &&
+                 Near(placed_skin.skeleton_to_mesh, Translation(0, 0, 2)),
+          "a skeleton placement change must refresh only the described placement") ||
+      !Check(PaletteFromIdentities(placed_skin, moved_pose, Translation(0, 0, 2),
+                 *Find(moved_skeleton).linear),
+          "a placed skeleton's identities must still compose the palette")) return 1;
   index.reset();
   return 0;
 }
