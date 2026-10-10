@@ -93,6 +93,13 @@ if(TOON_BUILD_TESTS)
   target_compile_definitions(toon-hydra2-skinning-test PRIVATE
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+  # With the optional runtime consumer, the same stage also checks its
+  # subshape weights against usdSkelImaging's.
+  if(TARGET Toon::AvatarState)
+    target_link_libraries(toon-hydra2-skinning-test PRIVATE Toon::AvatarState)
+    target_compile_definitions(toon-hydra2-skinning-test PRIVATE
+      TOON_HAS_AVATAR_STATE=1)
+  endif()
 
   add_executable(toon-hydra2-render-buffer-test
     tests/render_buffer_test.cpp)

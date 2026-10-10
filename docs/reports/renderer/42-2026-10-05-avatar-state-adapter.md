@@ -1,5 +1,7 @@
 # Experimental avatar-state consumer
 
+> Followed by [report 44](44-2026-10-10-avatar-inbetween-subshapes.md): morph bindings now carry inbetween slots, and the adapter interpolates them from the runtime's per-shape weight.
+
 - Date: 2026-10-05
 - Machine: Windows 11 x86_64, MSVC 14.51 / Visual Studio 18, NVIDIA RTX A5000
 - Backend: Vulkan SDK 1.4.350.0, device API 1.4.329, 96x96 RGBA8/D32, 4x MSAA

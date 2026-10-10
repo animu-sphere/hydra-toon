@@ -9,7 +9,7 @@ run("@CMAKE_COMMAND@" --install "@CMAKE_BINARY_DIR@" --config "${CONFIG}" --pref
 foreach(component IN ITEMS OFF ON)
   set(build "@CMAKE_CURRENT_BINARY_DIR@/consumer-${component}")
   run("@CMAKE_COMMAND@" -S "@CMAKE_CURRENT_SOURCE_DIR@/installed-consumer" -B "${build}"
-    -G "@CMAKE_GENERATOR@" "-DCMAKE_PREFIX_PATH=${prefix}" "-DAVATAR_COMPONENT=${component}"
+    -G "@CMAKE_GENERATOR@" "-DCMAKE_BUILD_TYPE=${CONFIG}" "-DCMAKE_PREFIX_PATH=${prefix}" "-DAVATAR_COMPONENT=${component}"
     "-DTOON_AVATAR_RUNTIME_INCLUDE_DIR=@TOON_AVATAR_RUNTIME_INCLUDE_DIR@"
     "-DVulkan_INCLUDE_DIR=@Vulkan_INCLUDE_DIR@" "-DVulkan_LIBRARY=@Vulkan_LIBRARY@")
   run("@CMAKE_COMMAND@" --build "${build}" --config "${CONFIG}")

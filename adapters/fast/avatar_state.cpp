@@ -190,6 +190,34 @@ Matrix4 Transform(const ArTransform& t, float units) {
     m.m[12 + k] = static_cast<float>(t.translation[k] / units);
   return m;
 }
+// GfIsClose with usdSkelImaging's blend-shape epsilon.
+bool Close(double a, double b) {
+  return std::abs(a - b) < 1e-6;
+}
+// Writes one shape's subshape weights as UsdSkelImagingComputeBlendShapeWeights
+// does, in its float arithmetic: the pair of knots around the weight, or the
+// outermost pair beyond them, interpolates; the shape's other slots are zero.
+template <class Knots>
+bool Subshapes(const Knots& knots, float weight, std::vector<float>& out) {
+  if (knots.size() == 2) {
+    out[static_cast<std::size_t>(knots[1].slot)] = weight;
+    return true;
+  }
+  for (const auto& k : knots)
+    if (k.slot >= 0)
+      out[static_cast<std::size_t>(k.slot)] = 0;
+  const auto upper = std::upper_bound(knots.begin() + 1, knots.end() - 1, weight,
+      [](float w, const auto& k) { return w < k.position; });
+  const auto lower = upper - 1;
+  const float alpha = (weight - lower->position) / (upper->position - lower->position);
+  if (!std::isfinite(alpha))
+    return false;
+  if (lower->slot >= 0 && !Close(alpha, 1.0))
+    out[static_cast<std::size_t>(lower->slot)] = static_cast<float>(1.0 - alpha);
+  if (upper->slot >= 0 && !Close(alpha, 0.0))
+    out[static_cast<std::size_t>(upper->slot)] = alpha;
+  return true;
+}
 std::uint64_t MaxRevision(const FrameSnapshot& s) {
   auto n = std::max(s.revision, s.view_revision);
   for (const auto& m : s.meshes)
@@ -297,9 +325,25 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
   std::set<std::pair<MeshId, std::uint32_t>> weights;
   for (const auto& b : next.bindings_.morphs) {
     const auto* mesh = Find(next.bound_.meshes, b.mesh);
-    if (b.source >= layout.blend_shape_count || !mesh || !IsMorphed(*mesh) || b.weight >= Size(mesh->morph_weights) ||
-        !weights.emplace(b.mesh, b.weight).second)
-      return Fail(error, "invalid or overlapping morph binding");
+    if (b.source >= layout.blend_shape_count || !mesh || !IsMorphed(*mesh))
+      return Fail(error, "invalid morph binding");
+    std::vector<Knot> knots{{0.0F, -1}, {1.0F, b.weight}};
+    for (const auto& inbetween : b.inbetweens) {
+      if (!std::isfinite(inbetween.position))
+        return Fail(error, "invalid inbetween position");
+      knots.push_back({inbetween.position, inbetween.weight});
+    }
+    std::sort(knots.begin(), knots.end(), [](const Knot& x, const Knot& y) { return x.position < y.position; });
+    for (std::size_t i = 0; i < knots.size(); ++i) {
+      const auto& k = knots[i];
+      // usdSkelImaging drops inbetweens at 0 or 1 or within 1e-6 of another.
+      if (i && Close(knots[i - 1].position, k.position))
+        return Fail(error, "coincident inbetween position");
+      if (k.slot >= 0 && (static_cast<std::size_t>(k.slot) >= Size(mesh->morph_weights) ||
+                             !weights.emplace(b.mesh, static_cast<std::uint32_t>(k.slot)).second))
+        return Fail(error, "invalid or overlapping morph binding");
+    }
+    next.knots_.push_back(std::move(knots));
     morphs[b.source] = true;
   }
   std::set<std::pair<MaterialId, AvatarMaterialField>> fields;
@@ -475,12 +519,14 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
   }
   // Multiple channels to one mesh share one weight array allocation.
   std::map<MeshId, std::vector<float>> weights;
-  for (const auto& b : bindings_.morphs) {
+  for (std::size_t i = 0; i < bindings_.morphs.size(); ++i) {
+    const auto& b = bindings_.morphs[i];
     auto& mesh = *Find(candidate.meshes, b.mesh);
     auto [it, inserted] = weights.try_emplace(b.mesh);
     if (inserted)
       it->second = *mesh.morph_weights;
-    it->second[b.weight] = static_cast<float>(s->blend_shapes[b.source].weight);
+    if (!Subshapes(knots_[i], static_cast<float>(s->blend_shapes[b.source].weight), it->second))
+      return Fail(error, "runtime inbetween conversion overflow");
     mesh.morph_weights_overridden = true;
   }
   for (auto& [id, values] : weights)
