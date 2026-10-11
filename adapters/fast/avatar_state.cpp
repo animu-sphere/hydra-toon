@@ -125,13 +125,14 @@ std::uint32_t Type(AvatarMaterialField field) {
   }
   return 0;
 }
-void Material(ToonMaterial& m, AvatarMaterialField f, const double* v) {
-  const Float3 color{static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2])};
-  const float x = static_cast<float>(v[0]);
+void Material(ToonMaterial& m, AvatarMaterialField f, const double* v, float scale) {
+  const Float3 color{static_cast<float>(v[0]) * scale, static_cast<float>(v[1]) * scale,
+      static_cast<float>(v[2]) * scale};
+  const float x = color.x;
   switch (f) {
   case AvatarMaterialField::BaseColor:
     m.base_color = color;
-    m.alpha = static_cast<float>(v[3]);
+    m.alpha = static_cast<float>(v[3]) * scale;
     break;
   case AvatarMaterialField::BaseColorRgb:
     m.base_color = color;
@@ -347,7 +348,7 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
   for (const auto& b : next.bindings_.materials) {
     const auto* material = Find(next.bound_.materials, b.material);
     if (b.source >= layout.material_count || !material || material->material.model != ToonShadingModel::MToon ||
-        Type(b.field) != layout.materials[b.source].value_type || !fields.emplace(b.material, b.field).second)
+        !std::isfinite(b.scale) || Type(b.field) != layout.materials[b.source].value_type || !fields.emplace(b.material, b.field).second)
       return Fail(error, "unsupported or overlapping material binding");
     materials[b.source] = true;
   }
@@ -534,7 +535,7 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
     if (!value.overridden)
       continue;
     auto& material = *Find(candidate.materials, b.material);
-    Material(material.material, b.field, value.value);
+    Material(material.material, b.field, value.value, b.scale);
     material.parameters_overridden = true;
   }
   for (const auto& b : bindings_.visibility)

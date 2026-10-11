@@ -19,9 +19,9 @@ struct HdToonAvatarMaterialInput {
 };
 
 // The canonical Material attributes the delegate's own VRM normalization
-// reads one-to-one (`material.cpp`), with the field each fills. Emission is
-// absent: the delegate scales `emissiveFactor` by `emissiveStrength`, so an
-// override written straight into the field would not match the Hydra path.
+// reads (`material.cpp`), with the field each fills. The delegate scales
+// `emissiveFactor` by `emissiveStrength`, so the matcher gives an `Emissive`
+// binding the resident material's strength as its scale.
 const std::vector<HdToonAvatarMaterialInput>& HdToonCanonicalMaterialInputs();
 
 // Why a runtime output, or a resident skin its runtime skeleton should

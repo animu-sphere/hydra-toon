@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- `emissiveFactor` in the avatar fast path: `Toon::AvatarMaterialBinding` has
+  a finite `scale` that multiplies what it writes, each
+  `HdToonResidentMaterial` describes its `emissive_strength`, and
+  `HdToonMatchAvatarTargets` maps `inputs:vrm:material:emissiveFactor` to
+  `Emissive` scaled by it, as the delegate scales the factor. The provider
+  fixture binds an `emissionColor` at strength 2.
 - `toon-hydra2-avatar-provider-test`, built only with the opt-in
   `TOON_AVATAR_RUNTIME_PROVIDERS`: a host over `usd-avatar-runtime`'s real VRM
   expression/LookAt providers that matches each published result through

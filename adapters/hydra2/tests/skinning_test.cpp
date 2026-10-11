@@ -758,7 +758,7 @@ bool AvatarMismatches(const HdToonResidentTargets& resident) {
   layout.materials.push_back({"/Root/Looks/Skin",
       "inputs:vrm:mtoon:shadeColorFactor", AR_VALUE_VEC3, 0, {}});
   layout.materials.push_back({"/Root/Looks/Skin",
-      "inputs:vrm:material:emissiveFactor", AR_VALUE_VEC3, 0, {}});
+      "inputs:vrm:material:emissiveStrength", AR_VALUE_SCALAR, 0, {}});
   layout.materials.push_back({"/Root/Looks/None",
       "inputs:vrm:material:baseColorFactor", AR_VALUE_VEC3, 0, {}});
   layout.visibility.push_back({"/Root/Linear", 1});
@@ -771,7 +771,7 @@ bool AvatarMismatches(const HdToonResidentTargets& resident) {
   }
   const std::vector<std::string> expected{"/Root/Linear base/tip",
       "/Root/Other", "/Root/Skel", "/Root/Linear missing",
-      "/Root/DualQuaternion lift", "/Root/Looks/Skin inputs:vrm:material:emissiveFactor",
+      "/Root/DualQuaternion lift", "/Root/Looks/Skin inputs:vrm:material:emissiveStrength",
       "/Root/Looks/None inputs:vrm:material:baseColorFactor", "/Root/Nowhere"};
   const HdToonResidentMesh* linear = Described(resident, "/Root/Linear");
   const auto& b = match.bindings;
@@ -790,6 +790,31 @@ bool AvatarMismatches(const HdToonResidentTargets& resident) {
                    b.visibility.size() == 1 && b.visibility[0].source == 0 &&
                    b.visibility[0].mesh == linear->mesh,
       "matched outputs must still bind beside the reported ones");
+}
+
+// Emission binds scaled by the resident material's strength, as the
+// delegate realizes `emissiveFactor`; other fields keep a scale of 1.
+bool AvatarEmissive(HdToonResidentTargets resident) {
+  if (!Check(resident.materials.size() == 1 &&
+                 resident.materials[0].emissive_strength == 1.0F,
+          "a material without vrm must describe an emissive strength of 1")) {
+    return false;
+  }
+  resident.materials[0].emissive_strength = 2.5F;
+  RuntimeLayout layout;
+  layout.materials.push_back({"/Root/Looks/Skin",
+      "inputs:vrm:material:emissiveFactor", AR_VALUE_VEC3, 0, {}});
+  layout.materials.push_back({"/Root/Looks/Skin",
+      "inputs:vrm:mtoon:shadeColorFactor", AR_VALUE_VEC3, 0, {}});
+  const HdToonAvatarTargetMatch match = HdToonMatchAvatarTargets(
+      layout.View(0), resident, HdToonCanonicalMaterialInputs());
+  const auto& m = match.bindings.materials;
+  return Check(match.mismatches.empty() && m.size() == 2 &&
+                   m[0].field == Toon::AvatarMaterialField::Emissive &&
+                   m[0].scale == 2.5F &&
+                   m[1].field == Toon::AvatarMaterialField::ShadeColor &&
+                   m[1].scale == 1.0F,
+      "emissiveFactor must bind scaled by the described strength");
 }
 #endif
 
@@ -1044,7 +1069,8 @@ int main(int argc, char** argv) {
           "signed fractional weights must extrapolate position and normal inbetweens together")) return 1;
 #ifdef TOON_HAS_AVATAR_STATE
   if (!AvatarInbetweenParity(delegate, weight_attr, sync) ||
-      !AvatarMismatches(delegate.DescribeResidentTargets())) {
+      !AvatarMismatches(delegate.DescribeResidentTargets()) ||
+      !AvatarEmissive(delegate.DescribeResidentTargets())) {
     return 1;
   }
 #endif

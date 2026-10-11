@@ -97,6 +97,8 @@ struct HdToonMaterialSource {
   Toon::ToonMaterial values;
   // In role order, as HdToonTextureRefs(values) lists the references.
   std::array<HdToonTextureKey, kHdToonTextureRoles> textures;
+  // The `emissiveStrength` that `values.emissive` was scaled by.
+  float emissive_strength = 1.0F;
 };
 
 // Selects a material's model and normalizes its values from its Hydra prim's
@@ -191,6 +193,9 @@ struct HdToonResidentMesh {
 struct HdToonResidentMaterial {
   Toon::MaterialId material = 0;
   SdfPath path;
+  // What the material's `emissiveFactor` is multiplied by to give its
+  // emissive colour, as of the last sync: its `emissiveStrength`, else 1.
+  float emissive_strength = 1.0F;
 };
 
 // The Hydra identities behind a committed scene's resident meshes and

@@ -401,6 +401,20 @@ int RunRetained() {
     return 1;
   }
 
+  // A host scales an `emissiveFactor` override by what the delegate
+  // multiplied the factor by, so each material describes its strength.
+  const auto strength = [&](const SdfPath& path) {
+    for (const auto& material : delegate.DescribeResidentTargets().materials) {
+      if (material.path == path) return material.emissive_strength;
+    }
+    return -1.0F;
+  };
+  if (!Check(strength(toon_id) == 2.0F && strength(gltf_only_id) == 1.0F &&
+                 strength(plain_id) == 1.0F,
+          "each material must describe the emissive strength it was read with")) {
+    return 1;
+  }
+
   // A value-only change dirties its `vrm` locator alone, as a time move
   // across a sample does (renderer report 02). Emulation leaves the Sprim
   // clean; the delegate's observer carries the value.

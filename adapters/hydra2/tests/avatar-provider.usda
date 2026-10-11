@@ -47,6 +47,10 @@ def SkelRoot "Avatar" (
         {
             color3f inputs:vrm:material:baseColorFactor = (0.9, 0.8, 0.7)
             float inputs:vrm:material:baseColorAlphaFactor = 1
+            # Emission the delegate scales by its strength, so a bound
+            # emissionColor must be scaled the same way.
+            color3f inputs:vrm:material:emissiveFactor = (0.1, 0.05, 0.02)
+            float inputs:vrm:material:emissiveStrength = 2
             color3f inputs:vrm:mtoon:shadeColorFactor = (0.5, 0.4, 0.3)
             token outputs:surface.connect = </Avatar/Looks/Face/surface.outputs:surface>
 
@@ -195,7 +199,8 @@ def SkelRoot "Avatar" (
 
     def Scope "Expressions"
     {
-        # Shade and base colour (RGB and alpha) of the face's MToon material.
+        # Shade, base colour (RGB and alpha) and emission of the face's MToon
+        # material.
         def Scope "happy" (
             prepend apiSchemas = ["VrmExpressionAPI"]
         )
@@ -205,9 +210,9 @@ def SkelRoot "Avatar" (
             uniform float[] vrm:morphTargetWeights = [1]
             uniform token vrm:overrideBlink = "blend"
             rel vrm:materialColorTargets = </Avatar/Looks/Face>
-            uniform token[] vrm:materialColorTypes = ["shadeColor", "color"]
-            uniform float4[] vrm:materialColorValues = [(0.9, 0.3, 0.3, 1), (1, 0.8, 0.8, 0.5)]
-            uniform int[] vrm:materialColorTargetIndices = [0, 0]
+            uniform token[] vrm:materialColorTypes = ["shadeColor", "color", "emissionColor"]
+            uniform float4[] vrm:materialColorValues = [(0.9, 0.3, 0.3, 1), (1, 0.8, 0.8, 0.5), (0.3, 0.1, 0.05, 1)]
+            uniform int[] vrm:materialColorTargetIndices = [0, 0, 0]
         }
 
         # Halfway along smile, through its inbetween.

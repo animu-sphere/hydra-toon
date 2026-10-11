@@ -179,7 +179,7 @@ void ReadTexture(const HdContainerDataSourceHandle& group,
 
 // VrmMaterialAPI: the glTF core MToon builds on.
 void ReadCommon(const HdContainerDataSourceHandle& group,
-    Toon::ToonMaterial& result) {
+    Toon::ToonMaterial& result, float& strength) {
   Read(group, _tokens->baseColorFactor, result.base_color);
   Read(group, _tokens->baseColorAlphaFactor, result.alpha);
   TfToken alpha_mode;
@@ -192,7 +192,6 @@ void ReadCommon(const HdContainerDataSourceHandle& group,
   Read(group, _tokens->alphaCutoff, result.alpha_cutoff);
   Read(group, _tokens->doubleSided, result.double_sided);
   Read(group, _tokens->emissiveFactor, result.emissive);
-  float strength = 1.0F;
   Read(group, _tokens->emissiveStrength, strength);
   result.emissive = {result.emissive.x * strength,
       result.emissive.y * strength, result.emissive.z * strength};
@@ -271,7 +270,7 @@ HdToonMaterialSource HdToonReadMaterial(
   result.model = Toon::ToonShadingModel::MToon;
   if (const HdContainerDataSourceHandle material =
           Group(vrm, _tokens->material)) {
-    ReadCommon(material, result);
+    ReadCommon(material, result, source.emissive_strength);
   }
   ReadMToon(mtoon, result);
   // Colour roles are sRGB; normal, shift (R), width (G) and mask (B) are
