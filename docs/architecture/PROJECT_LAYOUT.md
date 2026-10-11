@@ -110,13 +110,15 @@ A host over the runtime's real providers lives beside the Hydra checks as
 (`toon-hydra2-avatar-provider-test`). It is built only with
 `TOON_AVATAR_RUNTIME_PROVIDERS` (default `OFF`, requires
 `TOON_ENABLE_AVATAR_STATE`), which finds the runtime package's
-`vrm_expression_usd` and `vrm_lookat_usd` components. It links them, and
+`vrm_expression_usd`, `vrm_lookat_usd`, `vrm_usd`, `motion` and `motion_usd`
+components. It links them, and
 through them the VRM and motion owners. It is never installed, and no
 library target links it. Its CTests also need `TOON_VRM_IMAGING_RESOURCES`,
 so the fixture's materials are MToon; `TOON_VRM_SCHEMA_RESOURCES` defaults to
 the schema package the providers link. `run_avatar_providers.cmake` puts the
 linked DLLs' directories on `PATH` and registers both plugins. The host
-states the stage's `metersPerUnit` on each commit, as the viewport does. Its
+states the stage's `metersPerUnit` on each commit and syncs the drawn
+render tags, as the viewport does. Its
 oracle authors each result into the session layer for UsdImaging to compose;
 that authoring belongs to the check, not to a renderer path.
 

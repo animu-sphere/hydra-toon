@@ -395,7 +395,10 @@ toon-viewport-avatar --usd <avatar> --avatar-runtime --avatar-rate 120
 
 `--avatar-rate 0` publishes one result per frame after extraction, for
 repeatable runs; `--avatar-lookat <prim>` picks the LookAt and
-`--avatar-reset-every N` resets the runtime instance. The `Avatar runtime`
+`--avatar-reset-every N` resets the runtime instance.
+`--avatar-motion <stage>` poses the avatar with the runtime's motion clip
+provider from the stage's one skeleton; with `usdVrmaFileFormat` registered,
+that can be a `.vrma` clip. The `Avatar runtime`
 panel and the final `Avatar runtime:` lines show what was published, applied
 late and bound
 ([renderer report 49](../reports/renderer/49-2026-10-11-viewport-avatar-runtime.md)).
