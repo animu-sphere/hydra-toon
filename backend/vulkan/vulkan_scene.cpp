@@ -6,6 +6,7 @@
 #include <cstring>
 #include <limits>
 #include <span>
+#include <tuple>
 #include <utility>
 
 #include "vulkan_internal.hpp"
@@ -44,17 +45,18 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
              "shaderSampledImageArrayDynamicIndexing";
     return false;
   }
-  // Two material/frame buffers and five skin/morph buffers, plus the texture
-  // table and samplers. Each vertex stage counts the complete shared layout.
+  // Two material buffers, the frame buffer and five skin/morph buffers,
+  // plus the texture table and samplers. Each vertex stage counts the
+  // complete shared layout.
   const VkPhysicalDeviceLimits& limits = properties.limits;
   if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity ||
       limits.maxDescriptorSetSampledImages < kTextureCapacity ||
       limits.maxPerStageDescriptorSamplers < kSamplerCount ||
-      limits.maxPerStageDescriptorStorageBuffers < 7U ||
-      limits.maxDescriptorSetStorageBuffers < 7U ||
-      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 7U) {
+      limits.maxPerStageDescriptorStorageBuffers < 8U ||
+      limits.maxDescriptorSetStorageBuffers < 8U ||
+      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 8U) {
     detail = std::string(properties.deviceName) + " cannot bind a table of " +
-             std::to_string(kTextureCapacity) + " textures and seven scene storage buffers";
+             std::to_string(kTextureCapacity) + " textures and eight scene storage buffers";
     return false;
   }
   return true;
@@ -335,6 +337,16 @@ std::uint32_t OutlineMode(const ToonMaterial& material) {
 
 MaterialEntries EntriesOf(const ToonMaterial& material,
     const TextureCache& textures) {
+  // MMD's ramp is its own texture or the renderer's shared one; a material
+  // without one samples white.
+  std::uint32_t toon = 0;
+  if (material.model == ToonShadingModel::MMD) {
+    if (material.mmd.toon_source == ToonRampSource::Individual) {
+      toon = textures.Entry(material.mmd.toon_texture.texture);
+    } else if (material.mmd.toon_source == ToonRampSource::Shared) {
+      toon = TextureCache::SharedRampEntry(material.mmd.shared_toon_index);
+    }
+  }
   return {textures.Entry(material.base_texture.texture),
       textures.Entry(material.mtoon.shade_texture.texture),
       textures.Entry(material.mtoon.outline_width_texture.texture),
@@ -343,7 +355,8 @@ MaterialEntries EntriesOf(const ToonMaterial& material,
       textures.Entry(material.emissive_texture.texture),
       textures.Entry(material.normal_texture.texture),
       textures.Entry(material.mtoon.shading_shift_texture.texture),
-      textures.Entry(material.mtoon.uv_animation_mask_texture.texture)};
+      textures.Entry(material.mtoon.uv_animation_mask_texture.texture),
+      textures.Entry(material.mmd.sphere_texture.texture), toon};
 }
 
 void WriteParameters(const ToonMaterial& material,
@@ -412,6 +425,45 @@ void WriteParameters(const ToonMaterial& material,
   slot.animation[0] = material.mtoon.uv_scroll_x_speed;
   slot.animation[1] = material.mtoon.uv_scroll_y_speed;
   slot.animation[2] = material.mtoon.uv_rotation_speed;
+}
+
+std::uint32_t SphereMode(const ToonMaterial& material) {
+  switch (material.mmd.sphere_mode) {
+  case ToonSphereMode::Multiply:
+    return kSphereMultiply;
+  case ToonSphereMode::Add:
+    return kSphereAdd;
+  // A sub-texture samples the mesh's additional UV, which no draw carries
+  // yet, so it applies nothing.
+  case ToonSphereMode::SubTexture:
+  case ToonSphereMode::Disabled:
+    break;
+  }
+  return kSphereNone;
+}
+
+void WriteParameters(const ToonMaterial& material,
+    const MaterialEntries& entries, MmdParameters& slot) {
+  slot = {};
+  slot.diffuse[0] = material.base_color.x;
+  slot.diffuse[1] = material.base_color.y;
+  slot.diffuse[2] = material.base_color.z;
+  slot.diffuse[3] = material.alpha;
+  slot.specular[0] = material.mmd.specular_color.x;
+  slot.specular[1] = material.mmd.specular_color.y;
+  slot.specular[2] = material.mmd.specular_color.z;
+  slot.specular[3] = material.mmd.specular_power;
+  slot.ambient[0] = material.mmd.ambient_color.x;
+  slot.ambient[1] = material.mmd.ambient_color.y;
+  slot.ambient[2] = material.mmd.ambient_color.z;
+  slot.textures[0] = entries.base;
+  slot.textures[1] = SamplerIndex(material.base_texture);
+  const std::uint32_t sphere = SphereMode(material);
+  slot.textures[2] = sphere == kSphereNone ? 0U : entries.sphere;
+  slot.textures[3] = SamplerIndex(material.mmd.sphere_texture);
+  slot.modes[0] = entries.toon;
+  slot.modes[1] = sphere;
+  WriteUvRows(material.base_texture, slot.base_uv);
 }
 
 // Every level down to 1x1.
@@ -484,7 +536,13 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
          LoadSpirv(shaders.mtoon_outline_vertex, words.mtoon_outline_vertex,
              detail) &&
          LoadSpirv(shaders.mtoon_outline_fragment,
-             words.mtoon_outline_fragment, detail);
+             words.mtoon_outline_fragment, detail) &&
+         LoadSpirv(shaders.mmd_vertex, words.mmd_vertex, detail) &&
+         LoadSpirv(shaders.mmd_fragment, words.mmd_fragment, detail) &&
+         LoadSpirv(shaders.mmd_transparent_vertex,
+             words.mmd_transparent_vertex, detail) &&
+         LoadSpirv(shaders.mmd_transparent_fragment,
+             words.mmd_transparent_fragment, detail);
 }
 
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
@@ -510,10 +568,11 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   }
 
   // mtoon_outline's vertex stage reads the width, its mode and its texture
-  // from the same slot and table the fragment stages do.
+  // from the same slot and table the fragment stages do. Binding 0 is the
+  // MToon parameter buffer and 4 the MMD one.
   const VkShaderStageFlags material_stages =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding material_bindings[4]{};
+  VkDescriptorSetLayoutBinding material_bindings[5]{};
   material_bindings[0].binding = 0;
   material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[0].descriptorCount = 1;
@@ -531,9 +590,13 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   material_bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[3].descriptorCount = 1;
   material_bindings[3].stageFlags = material_stages;
+  material_bindings[4].binding = 4;
+  material_bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  material_bindings[4].descriptorCount = 1;
+  material_bindings[4].stageFlags = material_stages;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create.bindingCount = 4;
+  set_layout_create.bindingCount = 5;
   set_layout_create.pBindings = material_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.material_layout),
@@ -572,7 +635,7 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   PipelineDescription mtoon;
   mtoon.vertex_words = &words.mtoon_vertex;
   mtoon.fragment_words = &words.mtoon_fragment;
-  mtoon.push_constant_size = sizeof(MToonDrawConstants);
+  mtoon.push_constant_size = sizeof(SurfaceDrawConstants);
   mtoon.vertex_streams = 3;
   mtoon.dynamic_draw_state = true;
   // The same streams, constants and dynamic state; only the shaders,
@@ -593,6 +656,16 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   // faces are meant to lie behind it. The bias makes the surface win that tie
   // whichever draws first, instead of the outline colour showing across it.
   outline.depth_bias = true;
+  // MMD's pipelines share MToon's streams, constants and dynamic state.
+  // mmd_opaque blends nothing and covers every sample: what it draws has
+  // no alpha below 1.
+  PipelineDescription mmd = mtoon;
+  mmd.vertex_words = &words.mmd_vertex;
+  mmd.fragment_words = &words.mmd_fragment;
+  PipelineDescription mmd_transparent = mmd;
+  mmd_transparent.vertex_words = &words.mmd_transparent_vertex;
+  mmd_transparent.fragment_words = &words.mmd_transparent_fragment;
+  mmd_transparent.blend = true;
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
@@ -601,10 +674,16 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
          CreateScenePipeline(device, transparent, pipelines, color_format,
              depth_format, pipelines.mtoon_transparent, detail) &&
          CreateScenePipeline(device, outline, pipelines, color_format,
-             depth_format, pipelines.mtoon_outline, detail);
+             depth_format, pipelines.mtoon_outline, detail) &&
+         CreateScenePipeline(device, mmd, pipelines, color_format,
+             depth_format, pipelines.mmd, detail) &&
+         CreateScenePipeline(device, mmd_transparent, pipelines, color_format,
+             depth_format, pipelines.mmd_transparent, detail);
 }
 
 void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines) {
+  DestroyScenePipeline(device, pipelines.mmd_transparent);
+  DestroyScenePipeline(device, pipelines.mmd);
   DestroyScenePipeline(device, pipelines.mtoon_outline);
   DestroyScenePipeline(device, pipelines.mtoon_transparent);
   DestroyScenePipeline(device, pipelines.mtoon);
@@ -832,6 +911,21 @@ bool TextureCache::Initialize(VkPhysicalDevice physical_device,
   for (std::uint32_t entry = 0; entry < kTextureCapacity; ++entry) {
     Point(entry, placeholder_.view);
   }
+  // MMD's shared ramps, sampled as stored, as every MMD texture is; their
+  // rows grade in 32 steps, so they take no mipmaps.
+  for (std::uint32_t ramp = 0; ramp < kSharedToonRamps; ++ramp) {
+    const ToonTexture texture =
+        SharedToonRamp(static_cast<std::int32_t>(ramp));
+    if (!CreateDeviceImage(physical_device_, device_, VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT, texture.width, texture.height,
+            ramps_[ramp], detail) ||
+        !Stage(*texture.pixels, ramps_[ramp].image, texture.width,
+            texture.height, 1, detail)) {
+      return false;
+    }
+    Point(kFirstRampEntry + ramp, ramps_[ramp].view);
+  }
   return true;
 }
 
@@ -899,6 +993,13 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
     for (std::size_t pixel = 1; pixel < texture.pixels->size(); pixel += 4) {
       if ((*texture.pixels)[pixel] != 0) {
         resident.zero_green = false;
+        break;
+      }
+    }
+    resident.translucent = false;
+    for (std::size_t pixel = 3; pixel < texture.pixels->size(); pixel += 4) {
+      if ((*texture.pixels)[pixel] != 255) {
+        resident.translucent = true;
         break;
       }
     }
@@ -983,6 +1084,18 @@ std::uint32_t TextureCache::Entry(TextureId texture) const {
   return found == textures_.end() ? 0U : found->second.entry;
 }
 
+std::uint32_t TextureCache::SharedRampEntry(std::int32_t index) {
+  return index >= 0 && index < static_cast<std::int32_t>(kSharedToonRamps)
+             ? kFirstRampEntry + static_cast<std::uint32_t>(index)
+             : 0U;
+}
+
+bool TextureCache::Translucent(TextureId texture) const {
+  const auto found = textures_.find(texture);
+  return found != textures_.end() && found->second.entry != 0 &&
+         found->second.translucent;
+}
+
 bool TextureCache::ZeroGreen(TextureId texture) const {
   const auto found = textures_.find(texture);
   return found != textures_.end() && found->second.entry != 0 &&
@@ -1003,7 +1116,10 @@ void TextureCache::Destroy() {
   }
   recorded_.clear();
   free_entries_.clear();
-  next_entry_ = 1;
+  next_entry_ = kFirstRampEntry + kSharedToonRamps;
+  for (DeviceImage& ramp : ramps_) {
+    DestroyDeviceImage(device_, ramp);
+  }
   DestroyDeviceImage(device_, placeholder_);
 }
 
@@ -1054,7 +1170,7 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
   device_ = device;
   VkDescriptorPoolSize pool_sizes[3]{};
   pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_sizes[0].descriptorCount = 2;
+  pool_sizes[0].descriptorCount = 3;
   pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   pool_sizes[1].descriptorCount = kTextureCapacity;
   pool_sizes[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -1189,8 +1305,13 @@ bool MaterialCache::Update(const DrawList& draws,
     if (fast_values && (entry.parameters_revision != material.parameters_revision ||
         entry.entries != entries)) {
       const auto write_start = SteadyNanoseconds();
-      auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
-      WriteParameters(material.material, entries, slots[entry.slot]);
+      if (material.material.model == ToonShadingModel::MMD) {
+        auto* slots = static_cast<MmdParameters*>(mmd_buffer_.mapped);
+        WriteParameters(material.material, entries, slots[entry.slot]);
+      } else {
+        auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
+        WriteParameters(material.material, entries, slots[entry.slot]);
+      }
       entry.parameters_revision = material.parameters_revision;
       entry.entries = entries;
       entry.model = material.material.model;
@@ -1201,9 +1322,24 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.transparent = IsTransparent(material.material);
       entry.queue = RenderQueue(material.material);
       entry.depth_write = WritesDepth(material.material);
+      entry.draw_order = material.material.mmd.draw_order;
+      entry.mmd_translucent = material.material.alpha < 1.0F;
       ++writes_;
       written = true;
       parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
+    }
+    // Whether an MMD material can blend follows its textures' pixels as
+    // well as its diffuse alpha, so it is decided every frame; MMD blends
+    // every draw, and one that cannot blend draws with the opaque ones.
+    if (entry.model == ToonShadingModel::MMD) {
+      const ToonMaterial& values = material.material;
+      entry.transparent =
+          entry.mmd_translucent ||
+          textures.Translucent(values.base_texture.texture) ||
+          (SphereMode(values) != kSphereNone &&
+              textures.Translucent(values.mmd.sphere_texture.texture));
+      entry.queue = 3000;
+      entry.depth_write = true;
     }
     entry.generation = generation_;
   }
@@ -1217,7 +1353,8 @@ bool MaterialCache::Update(const DrawList& draws,
   }
   if (!written) return true;
   const auto flush_start = SteadyNanoseconds();
-  const bool flushed = FlushIfNeeded(device_, buffer_, detail);
+  const bool flushed = FlushIfNeeded(device_, buffer_, detail) &&
+                       FlushIfNeeded(device_, mmd_buffer_, detail);
   parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - flush_start) / 1e6;
   return flushed;
 }
@@ -1229,6 +1366,7 @@ const MaterialCache::Entry* MaterialCache::Find(MaterialId material) const {
 
 void MaterialCache::Destroy() {
   DestroyHostBuffer(device_, buffer_);
+  DestroyHostBuffer(device_, mmd_buffer_);
   DestroyHostBuffer(device_, frame_buffer_);
   // Frees the set with it.
   vkDestroyDescriptorPool(device_, pool_, nullptr);
@@ -1241,32 +1379,40 @@ void MaterialCache::Destroy() {
 }
 
 bool MaterialCache::Reserve(std::uint32_t slots, std::string& detail) {
-  HostBuffer grown;
-  if (!CreateHostBuffer(physical_device_, device_,
-          static_cast<VkDeviceSize>(slots) * sizeof(MToonParameters),
-          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, grown, detail)) {
-    DestroyHostBuffer(device_, grown);
+  // Every slot moves with its contents, so growing rewrites no material.
+  const auto grow = [&](HostBuffer& buffer, std::size_t slot_size,
+                        std::uint32_t binding) {
+    HostBuffer grown;
+    if (!CreateHostBuffer(physical_device_, device_,
+            static_cast<VkDeviceSize>(slots) * slot_size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, grown, detail)) {
+      DestroyHostBuffer(device_, grown);
+      return false;
+    }
+    if (buffer.mapped != nullptr) {
+      std::memcpy(grown.mapped, buffer.mapped,
+          static_cast<std::size_t>(capacity_) * slot_size);
+    }
+    DestroyHostBuffer(device_, buffer);
+    buffer = grown;
+    VkDescriptorBufferInfo buffer_info{};
+    buffer_info.buffer = buffer.buffer;
+    buffer_info.range = VK_WHOLE_SIZE;
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = set_;
+    write.dstBinding = binding;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.pBufferInfo = &buffer_info;
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+    return FlushIfNeeded(device_, buffer, detail);
+  };
+  if (!grow(buffer_, sizeof(MToonParameters), 0) ||
+      !grow(mmd_buffer_, sizeof(MmdParameters), 4)) {
     return false;
   }
-  // Every slot moves with its contents, so growing rewrites no material.
-  if (buffer_.mapped != nullptr) {
-    std::memcpy(grown.mapped, buffer_.mapped,
-        static_cast<std::size_t>(capacity_) * sizeof(MToonParameters));
-  }
-  DestroyHostBuffer(device_, buffer_);
-  buffer_ = grown;
   capacity_ = slots;
-  VkDescriptorBufferInfo buffer_info{};
-  buffer_info.buffer = buffer_.buffer;
-  buffer_info.range = VK_WHOLE_SIZE;
-  VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-  write.dstSet = set_;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  write.pBufferInfo = &buffer_info;
-  vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
-  return FlushIfNeeded(device_, buffer_, detail);
+  return true;
 }
 
 bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
@@ -1533,10 +1679,14 @@ void MeshCache::Record(VkCommandBuffer command,
     }
   };
   const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
-  const auto mtoon_material =
+  // A part draws through its model's pipelines when its material selected
+  // MToon or MMD, and unlit otherwise.
+  const auto surface_material =
       [&materials](const MeshPart& part) -> const MaterialCache::Entry* {
     const MaterialCache::Entry* material = materials.Find(part.material);
-    return material != nullptr && material->model == ToonShadingModel::MToon
+    return material != nullptr &&
+                   (material->model == ToonShadingModel::MToon ||
+                       material->model == ToonShadingModel::MMD)
                ? material
                : nullptr;
   };
@@ -1565,7 +1715,7 @@ void MeshCache::Record(VkCommandBuffer command,
     const std::span<const MeshPart> parts =
         PartsOf(mesh, entry.index_count, whole);
     if (std::none_of(parts.begin(), parts.end(), [&](const MeshPart& part) {
-          return mtoon_material(part) == nullptr;
+          return surface_material(part) == nullptr;
         })) {
       continue;
     }
@@ -1589,7 +1739,7 @@ void MeshCache::Record(VkCommandBuffer command,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
     for (const MeshPart& part : parts) {
-      if (mtoon_material(part) != nullptr ||
+      if (surface_material(part) != nullptr ||
           !Fits(part, entry.index_count)) {
         continue;
       }
@@ -1600,9 +1750,10 @@ void MeshCache::Record(VkCommandBuffer command,
   }
   mark(0);
 
-  // Every MToon pipeline shares the layout, the streams and the constants;
-  // they differ in shaders, blending and which faces they cull. Their
-  // layouts are identical, so the material set stays bound across them.
+  // Every MToon and MMD pipeline shares the layout, the streams and the
+  // constants; they differ in shaders, blending and which faces they cull.
+  // Their layouts are identical, so the material set stays bound across
+  // them.
   const VkDescriptorSet material_set = materials.descriptor_set();
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
   const float units_per_meter = 1.0F / draws.meters_per_unit;
@@ -1625,7 +1776,7 @@ void MeshCache::Record(VkCommandBuffer command,
     }
     bound = &pipeline;
   };
-  const auto draw_mtoon = [&](const ScenePipeline& pipeline,
+  const auto draw_surface = [&](const ScenePipeline& pipeline,
                               const MeshSnapshot& mesh, const Entry& entry,
                               const MeshPart& part,
                               const MaterialCache::Entry& material,
@@ -1644,7 +1795,7 @@ void MeshCache::Record(VkCommandBuffer command,
         (entry.skinned || entry.morphed) ? entry.skin_set : unskinned_set_;
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline.layout, 1, 1, &skin_set, 0, nullptr);
-    MToonDrawConstants constants{};
+    SurfaceDrawConstants constants{};
     const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
     std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
         sizeof(constants.clip_from_object));
@@ -1672,7 +1823,7 @@ void MeshCache::Record(VkCommandBuffer command,
 
   // The opaque pass, Mask included: every hull, then every surface. The
   // hull culls its front faces whether or not the material is double-sided,
-  // as MToon states.
+  // as MToon states. An MMD surface that cannot blend draws here too.
   transparent_scratch_.clear();
   for (const bool outline : {true, false}) {
     for (std::size_t index = 0; index < draws.draws.size(); ++index) {
@@ -1686,7 +1837,7 @@ void MeshCache::Record(VkCommandBuffer command,
           PartsOf(mesh, entry.index_count, whole);
       for (std::size_t at = 0; at < parts.size(); ++at) {
         const MeshPart& part = parts[at];
-        const MaterialCache::Entry* material = mtoon_material(part);
+        const MaterialCache::Entry* material = surface_material(part);
         if (material == nullptr || !Fits(part, entry.index_count)) {
           continue;
         }
@@ -1696,12 +1847,21 @@ void MeshCache::Record(VkCommandBuffer command,
           }
           continue;
         }
+        if (material->model == ToonShadingModel::MMD) {
+          if (!outline) {
+            draw_surface(pipelines.mmd, mesh, entry, part, *material,
+                material->double_sided ? VK_CULL_MODE_NONE
+                                       : VK_CULL_MODE_BACK_BIT);
+            ++counts.opaque;
+          }
+          continue;
+        }
         if (outline && (!draws.outlines || !material->outline ||
                            (entry.has_uvs && material->zero_width_texture) ||
                            hidden_outline(mesh, entry, *material))) {
           continue;
         }
-        draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
+        draw_surface(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
             entry, part, *material,
             outline                  ? VK_CULL_MODE_FRONT_BIT
             : material->double_sided ? VK_CULL_MODE_NONE
@@ -1714,10 +1874,12 @@ void MeshCache::Record(VkCommandBuffer command,
   }
 
   // The transparent pass, back to front by render queue and, within one
-  // queue, in the order `draws` lists them. A double-sided surface draws
-  // its back faces before its front ones, so its near side blends over its
-  // far side. Its hull follows it, as UniVRM and three-vrm draw MToon's
-  // outline, so a surface that writes depth hides the hull's far side.
+  // queue, in the order `draws` lists them, an MMD mesh's parts in MMD's
+  // material order. A double-sided MToon surface draws its back faces
+  // before its front ones, so its near side blends over its far side. Its
+  // hull follows it, as UniVRM and three-vrm draw MToon's outline, so a
+  // surface that writes depth hides the hull's far side. An MMD surface
+  // draws once, both sides together when double-sided, as MMD draws it.
   // A transparent draw's part. `whole` stands in for a mesh without parts,
   // so the part is copied before the next lookup reuses it.
   const auto transparent_part =
@@ -1726,28 +1888,46 @@ void MeshCache::Record(VkCommandBuffer command,
         return PartsOf(mesh, entries_.find(mesh.id)->second.index_count,
             whole)[draw.second];
       };
+  // The scratch lists draws in `draws` order. Ordered by queue, then mesh,
+  // then an MMD part's material order or any other part's place in its
+  // mesh, they keep that order wherever MMD's does not apply.
+  const auto transparent_key =
+      [&](const std::pair<std::size_t, std::size_t>& draw) {
+        const MaterialCache::Entry& material =
+            *surface_material(transparent_part(draw));
+        const std::int64_t place =
+            material.model == ToonShadingModel::MMD
+                ? material.draw_order
+                : static_cast<std::int64_t>(draw.second);
+        return std::make_tuple(material.queue, draw.first, place);
+      };
   std::stable_sort(transparent_scratch_.begin(), transparent_scratch_.end(),
       [&](const auto& left, const auto& right) {
-        return mtoon_material(transparent_part(left))->queue <
-               mtoon_material(transparent_part(right))->queue;
+        return transparent_key(left) < transparent_key(right);
       });
   for (const auto& draw : transparent_scratch_) {
     const MeshSnapshot& mesh = draws.draws[draw.first];
     const Entry& entry = entries_.find(mesh.id)->second;
     const MeshPart part = transparent_part(draw);
-    const MaterialCache::Entry& material = *mtoon_material(part);
+    const MaterialCache::Entry& material = *surface_material(part);
+    if (material.model == ToonShadingModel::MMD) {
+      draw_surface(pipelines.mmd_transparent, mesh, entry, part, material,
+          material.double_sided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+      ++counts.transparent;
+      continue;
+    }
     if (material.double_sided) {
-      draw_mtoon(pipelines.mtoon_transparent, mesh, entry, part, material,
+      draw_surface(pipelines.mtoon_transparent, mesh, entry, part, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;
     }
-    draw_mtoon(pipelines.mtoon_transparent, mesh, entry, part, material,
+    draw_surface(pipelines.mtoon_transparent, mesh, entry, part, material,
         VK_CULL_MODE_BACK_BIT);
     ++counts.transparent;
     if (draws.outlines && material.outline &&
         (!entry.has_uvs || !material.zero_width_texture) &&
         !hidden_outline(mesh, entry, material)) {
-      draw_mtoon(pipelines.mtoon_outline, mesh, entry, part, material,
+      draw_surface(pipelines.mtoon_outline, mesh, entry, part, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;
       ++counts.hulls;

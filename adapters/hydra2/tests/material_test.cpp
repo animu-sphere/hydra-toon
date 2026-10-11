@@ -488,6 +488,18 @@ int RunMmd() {
           "mmd/material must select MMD and read every field")) {
     return 1;
   }
+  // MMD shades its texels as stored (material policy MAT-Q3).
+  const Toon::FrameSnapshot mmd_snapshot = delegate.CommitScene();
+  if (!Check(std::any_of(mmd_snapshot.textures.begin(),
+                 mmd_snapshot.textures.end(),
+                 [&](const Toon::TextureSnapshot& snapshot) {
+                   return snapshot.id == texture &&
+                          snapshot.texture.encoding ==
+                              Toon::ToonTextureEncoding::Linear;
+                 }),
+          "an MMD texture must be read undecoded")) {
+    return 1;
+  }
   const Toon::ToonMaterial& toon = individual->GetToonMaterial();
   if (!Check(toon.model == Toon::ToonShadingModel::MMD &&
                  toon.base_texture.texture == 0 &&

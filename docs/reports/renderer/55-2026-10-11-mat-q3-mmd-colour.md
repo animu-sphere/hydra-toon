@@ -1,5 +1,7 @@
 # MAT-Q3 measured: MMD shades its colours as stored, with no decoding or encoding
 
+> Followed by [report 56](56-2026-10-11-mmd-surface.md): `mmd_opaque` and `mmd_transparent` draw on stored values, and the reader samples MMD's textures undecoded.
+
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64
 - Tooling: MikuMikuDance v9.32 x64 for the reference captures; Python 3

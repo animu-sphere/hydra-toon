@@ -10,12 +10,24 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MMD materials draw: `mmd_opaque` for a material that cannot blend and
+  `mmd_transparent`, after the opaque draws in MMD's material order and
+  writing depth, for the rest. MMD's shading is computed on stored values
+  and decoded to linear once (MAT-Q3), under the scene's first direct
+  light. MMD's slot is an `MmdParameters` in its own buffer; the scene
+  pipelines are six. The headless check `renderer.material.mmd`, and
+  `draws_mmd` in `TOON_HYDRA_EVIDENCE` and the viewport
+  ([renderer report 56](docs/reports/renderer/56-2026-10-11-mmd-surface.md)).
+- MAT-Q2 resolved: `Toon::SharedToonRamp` generates the renderer's own ten
+  shared toon ramps from the colours MMD's `toon01`–`toon10` show, resident
+  in texture-table entries 1–10; no MMD image is shipped.
+
 - MMD materials are selected and read: a material prim with `mmdImaging`'s
   `mmd/material` and no `vrm/mtoon` is MMD, its fields and `mmd/drawOrder`
   normalized into `ToonMaterial`'s common part and a new MMD block, with the
   sphere and individual toon textures as two more texture roles. A dirtied
   `mmd` locator is a value-only change. `TOON_HYDRA_EVIDENCE` and the
-  viewport count `materials_mmd`. Nothing draws through an MMD pipeline yet.
+  viewport count `materials_mmd`.
 - `GeomSubset` material bindings: a mesh draws once per face subset that
   binds a material, with that material, and once for the faces none binds,
   with its own. `RenderWorld::SetMeshSubsets` and `MeshSnapshot::parts`
@@ -30,6 +42,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- MMD's textures are read undecoded, as MMD shades them.
+- What every surface pipeline shares moved from `mtoon_common.slang` into
+  `surface_common.slang`.
 - Draw counts in `TOON_HYDRA_EVIDENCE` and the viewport's scene summary
   count parts: a mesh divided by its face subsets is one draw per part.
 

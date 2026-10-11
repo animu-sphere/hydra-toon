@@ -123,7 +123,12 @@ semantics, and both models' ordering below applies to draws.
   orders it. Multisampled, Mask's cut is by alpha to coverage rather than
   whole fragments ([DESIGN_POLICY.md](DESIGN_POLICY.md) §16).
 - **MMD** draws in material-table order (`mmd:sourceIndex`) with alpha
-  blending, because models are authored against that order.
+  blending, because models are authored against that order. A material
+  that cannot blend — its diffuse alpha 1 and its base and sphere textures
+  opaque — draws with the opaque draws instead; the rest draw after them,
+  writing depth as MMD does, in material-table order within a mesh. That
+  differs from MMD only where an earlier translucent material covers a
+  later opaque one.
 
 The sort key is computed once, when the material is normalized, and is part
 of the persistent draw packet ([DESIGN_POLICY.md](DESIGN_POLICY.md) §15).
@@ -178,5 +183,5 @@ structural.
 | Id | Question | Proposed answer | Resolve by |
 | --- | --- | --- | --- |
 | MAT-Q1 | How `inputs:mmd:material:*` reaches the render delegate. For MToon this is answered by §2 and §8 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)) | resolved 2026-10-11: the same shape for both models, a container on the Hydra material prim read from the terminal scene index. `usd-mmd-plugins` froze `mmdImaging`'s view on 2026-10-04, and every material of 41 local MMD stages selects MMD through it (§2, §3; [report 53](../reports/renderer/53-2026-10-11-mmd-material-read.md)) | agreed with `usd-mmd-plugins` before v0.4.0 |
-| MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | `hydra-toon` ships its own ramp set whose terms allow redistribution, mapped by index | v0.4.0 |
+| MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | resolved 2026-10-11: `hydra-toon` generates its own ten ramps, under its own licence, from the colours MMD's `toon01`–`toon10` show, and maps the index to them; no MMD image is copied or shipped ([report 56](../reports/renderer/56-2026-10-11-mmd-surface.md)) | v0.4.0 |
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | resolved 2026-10-11: MMD computes its terms on the values as stored and writes them undecoded and unencoded; lowering its light colour scales a model's pixels by the factor its lighting term computes on stored values, flat across brightness ([report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md)). The MMD path samples its textures without sRGB decoding, computes MMD's terms on them and the factors as authored, and converts the result from sRGB to linear once, so the host's encoding writes MMD's values. Blending stays in the linear target, so a partly transparent material approximates MMD's | v0.4.0 |

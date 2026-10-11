@@ -294,8 +294,9 @@ void ReadMmdTexture(const HdContainerDataSourceHandle& group,
   }
   key.path = file.GetResolvedPath();
   // MMD's images are 8-bit sRGB colour images (`usd-mmd-plugins` material
-  // policy §4.1); how MMD's unmanaged shading reads them is MAT-Q3.
-  key.encoding = Toon::ToonTextureEncoding::Srgb;
+  // policy §4.1), but MMD shades their values as stored, undecoded, and
+  // the MMD path does the same (material policy MAT-Q3).
+  key.encoding = Toon::ToonTextureEncoding::Linear;
 }
 
 // MmdMaterialAPI, from `mmdImaging`'s `mmd/material`. Every field is

@@ -20,7 +20,10 @@ if(TOON_WITH_VULKAN)
     shaders/mtoon.slang
     shaders/mtoon_transparent.slang
     shaders/mtoon_outline.slang
+    shaders/mmd.slang
+    shaders/mmd_transparent.slang
     shaders/overlay.slang
-    INCLUDES shaders/skinning.slang shaders/mtoon_common.slang)
+    INCLUDES shaders/skinning.slang shaders/surface_common.slang
+      shaders/mtoon_common.slang shaders/mmd_common.slang)
   set(TOON_SHADER_SPVS "${TOON_SHADER_SPVS}" PARENT_SCOPE)
 endif()

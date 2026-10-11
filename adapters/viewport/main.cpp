@@ -417,7 +417,7 @@ std::uint32_t SamplesForKey(Toon::viewport::Key key) {
 
 // What the last frame drew, as the Hydra host evidence counts it: which
 // model each material selected, and how many draws selected MToon, blended,
-// added a hull, were skinned and drew authored normals.
+// added a hull, selected MMD, were skinned and drew authored normals.
 Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
   Toon::viewport::SceneCounts counts;
   counts.textures = draws.textures.size();
@@ -446,6 +446,9 @@ Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
             return entry.id < id;
           });
       if (material != draws.materials.end() && material->id == part.material &&
+          material->material.model == Toon::ToonShadingModel::MMD) {
+        ++counts.mmd;
+      } else if (material != draws.materials.end() && material->id == part.material &&
           material->material.model == Toon::ToonShadingModel::MToon) {
         ++counts.mtoon;
         counts.transparent += Toon::IsTransparent(material->material) ? 1U : 0U;
@@ -462,6 +465,7 @@ std::string SceneSummary(const Toon::DrawList& draws) {
   summary << "draws=" << counts.draws << " draws_mtoon=" << counts.mtoon
           << " draws_transparent=" << counts.transparent
           << " draws_outline=" << counts.outline
+          << " draws_mmd=" << counts.mmd
           << " draws_skinned=" << counts.skinned
           << " draws_authored_normals=" << counts.authored_normals
           << " materials_preview=" << counts.preview_materials

@@ -250,6 +250,14 @@ struct ToonTexture {
   PixelArray pixels;
 };
 
+// MMD's shared toon ramp `index`, 0-9, from the renderer's own set
+// (material policy MAT-Q2): 32 x 32, its rows running from the lit side at
+// the top to the shaded side at the bottom, each ramp's colours those of
+// MMD's toon01-toon10 as measured, generated here rather than copied.
+// Linear, since the MMD path reads its textures as stored (MAT-Q3). Any
+// other index is white, as a material without a ramp samples.
+[[nodiscard]] ToonTexture SharedToonRamp(std::int32_t index);
+
 // One texture as of a commit. `revision` advances when its pixels do.
 struct TextureSnapshot {
   TextureId id = 0;

@@ -257,7 +257,9 @@ jobs:
           for path in lib/usd/hdToon/hdToon.dll lib/usd/hdToon/resources/plugInfo.json \
                       lib/usd/hdToon/shaders/mesh.vert.spv lib/usd/hdToon/shaders/mesh.frag.spv \
                       lib/usd/hdToon/shaders/mtoon.vert.spv lib/usd/hdToon/shaders/mtoon.frag.spv                       lib/usd/hdToon/shaders/mtoon_transparent.vert.spv lib/usd/hdToon/shaders/mtoon_transparent.frag.spv \
-                      lib/usd/hdToon/shaders/mtoon_outline.vert.spv lib/usd/hdToon/shaders/mtoon_outline.frag.spv; do
+                      lib/usd/hdToon/shaders/mtoon_outline.vert.spv lib/usd/hdToon/shaders/mtoon_outline.frag.spv \
+                      lib/usd/hdToon/shaders/mmd.vert.spv lib/usd/hdToon/shaders/mmd.frag.spv \
+                      lib/usd/hdToon/shaders/mmd_transparent.vert.spv lib/usd/hdToon/shaders/mmd_transparent.frag.spv; do
             if ! jq -e --arg p "$path" 'any(.files[]; .path == $p)' "$dist_dir/manifest.json" > /dev/null; then
               echo "::error title=release packaging::$stem carries no $path" ; exit 1
             fi
