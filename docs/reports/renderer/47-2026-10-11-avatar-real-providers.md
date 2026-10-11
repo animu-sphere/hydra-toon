@@ -14,7 +14,7 @@ render tags, so the images here also held usdSkelImaging's skeleton guide.
   0.10.0 lookdev package; `usdVrmFileFormat` 0.10.0 for the `.vrm` avatar
 - Scope: the external host's real-provider matching and the Hydra/direct
   comparison in
-  [v0.3.0](../../roadmap/v0.3.0.md#evaluated-state-adapter-and-representative-avatar-evidence)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## The gap
 

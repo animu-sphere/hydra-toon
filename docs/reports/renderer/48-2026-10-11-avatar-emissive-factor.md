@@ -10,7 +10,7 @@ results in the dedicated viewport, applied after extraction.
   [report 47](47-2026-10-11-avatar-real-providers.md); `vrmSchema` 0.10.0;
   `vrmImaging` 0.10.0 lookdev package
 - Scope: `emissiveFactor` in the optional adapter's material mappings, in
-  [v0.3.0](../../roadmap/v0.3.0.md#evaluated-state-adapter-and-representative-avatar-evidence)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## The gap
 

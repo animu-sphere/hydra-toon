@@ -17,8 +17,7 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.3.0 | Avatar animation fast path: evaluated-state runtime integration, Hydra/direct parity, late latching and producer-to-present-return evidence | [v0.3.0.md](v0.3.0.md) |
-| v0.4.0 | MMD realization | [later.md](later.md#v040--mmd-realization) |
+| v0.4.0 | MMD realization | [v0.4.0.md](v0.4.0.md) |
 | v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
 | v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
 | later | Platform and GPU coverage: Linux, and AMD and Intel Vulkan | [later.md](later.md#platform-and-gpu-coverage) |
@@ -28,14 +27,10 @@ repositories' work is planned in their own roadmaps.
 
 Work is taken in this order, across milestones:
 
-1. GPU morphs
-2. The expression fast path
-3. Late motion latching
-4. Latency telemetry
-5. MMD
-6. `UsdPreviewSurface`
-7. WebGPU
-8. Linux and multi-vendor Vulkan
+1. MMD
+2. `UsdPreviewSurface`
+3. WebGPU
+4. Linux and multi-vendor Vulkan
 
 The current milestone is finished before a new feature family is added, and
 platform coverage is not widened before the renderer core, the viewport and
@@ -65,19 +60,19 @@ to that milestone's page.
   which source-produced sample reached the display. Scanout/photon timing is
   distinct from submit and API return
   ([design policy §23](../design/DESIGN_POLICY.md#23-performance-kpis)).
-  v0.3.0 closes at submit/present API return; actual motion-to-photon evidence
+  v0.3.0 closed at submit/present API return; actual motion-to-photon evidence
   remains a separate measurement task.
 - **Parity with the runtime's Hydra publication.** Compare the fast path
   with `usd-avatar-runtime`'s own Hydra publication, once its Scene Index
   adapter exists
   ([runtime roadmap](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/roadmap/current.md),
-  Runtime Phase C), instead of the session-layer oracle v0.3.0 closes on.
+  Runtime Phase C), instead of the session-layer oracle v0.3.0 closed on.
 - **Material binds on a real avatar.** Exercise runtime material outputs on
   an avatar whose expressions bind material colours or texture transforms.
   No local avatar binds colours, and `vrmSchema` keeps texture-transform
   binds in its raw block rather than the typed expression contract
   ([schema contract](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/plugins/vrmSchema/docs/SCHEMA_CONTRACT.md)),
-  so the runtime publishes none. v0.3.0 establishes them on a committed
+  so the runtime publishes none. v0.3.0 established them on a committed
   fixture.
 - **Off-thread asset upload.** Geometry, textures and morph targets decoded
   and staged off the render thread and copied on a transfer queue, with a

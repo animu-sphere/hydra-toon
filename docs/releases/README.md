@@ -7,6 +7,7 @@ link resolving. What comes next is the [roadmap](../roadmap/).
 
 | Version | Record | Milestone |
 | --- | --- | --- |
+| v0.3.0 | [v0.3.0.md](v0.3.0.md) | Avatar animation fast path: GPU morphs, late input, the evaluated-state consumer, real runtime providers with oracle parity, and the viewport as the runtime host with latency to present API return |
 | v0.2.0 | [v0.2.0.md](v0.2.0.md) | MToon quality, the Hydra-fed viewport, measured 4x AA and VRM reproduction; published package GPU-verified in [report 33](../reports/renderer/33-2026-10-04-published-v020.md) |
 | v0.1.0 | [v0.1.0.md](v0.1.0.md) | Foundation: the render world, the persistent Vulkan renderer, `hdToon`, opaque MToon with textures, GPU skinning and the inverted-hull outline, and the release lane |
 

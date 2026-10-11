@@ -11,7 +11,7 @@ rebinding with the oracle and ages input at every endpoint.
   `vrmImaging` 0.10.0 lookdev package; `usdVrmFileFormat` and
   `usdVrmaFileFormat` 0.10.0 for the `.vrm` avatar and the `.vrma` clips
 - Scope: real motion providers in the composition, in
-  [v0.3.0](../../roadmap/v0.3.0.md#evaluated-state-adapter-and-representative-avatar-evidence)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## The gap
 

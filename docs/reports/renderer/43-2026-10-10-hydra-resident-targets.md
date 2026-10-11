@@ -5,7 +5,7 @@
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev
 - Scope: the renderer side of preparing runtime-to-resident bindings from an
   actual avatar's static asset in
-  [v0.3.0](../../roadmap/v0.3.0.md#evaluated-state-adapter-and-representative-avatar-evidence)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## Description
 

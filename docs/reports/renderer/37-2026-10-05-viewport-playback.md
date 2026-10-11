@@ -4,7 +4,7 @@
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev
 - Scope: the animation playback controls and camera-only idle path of
-  [v0.3.0](../../roadmap/v0.3.0.md)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## Transport and scene boundary
 

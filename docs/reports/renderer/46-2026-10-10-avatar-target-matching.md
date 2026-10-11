@@ -8,7 +8,7 @@
   tree's experimental runtime C ABI revision 4 headers
 - Scope: the host-side matching of runtime target identities to the
   delegate's resident description in
-  [v0.3.0](../../roadmap/v0.3.0.md#evaluated-state-adapter-and-representative-avatar-evidence)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## The gap
 
