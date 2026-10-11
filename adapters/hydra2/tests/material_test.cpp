@@ -7,8 +7,9 @@
 // policy §28.1, usd-mmd-plugins' material policy §12.1), so the check
 // needs no format plugin and no GPU. With --stage, a stage runs through
 // UsdImaging instead and each material's selection is printed at the start
-// and end time codes; what it shows depends on the schema and imaging
-// plugins the session registers.
+// and end time codes, with each mesh's parts and the materials they bind;
+// what it shows depends on the schema and imaging plugins the session
+// registers.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
@@ -21,6 +22,7 @@
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/retainedDataSource.h>
 #include <pxr/imaging/hd/retainedSceneIndex.h>
+#include <pxr/imaging/hd/rprimCollection.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/imaging/hio/image.h>
 #include <pxr/usd/sdf/assetPath.h>
@@ -754,6 +756,46 @@ void PrintMaterials(HdRenderIndex& index, double time) {
             << " mtoon=" << mtoon << " mmd=" << mmd << '\n';
 }
 
+// Each mesh's parts, one per face subset that binds a material and one for
+// the faces none binds, and how many of them bind an MMD material.
+void PrintMeshes(HdToonRenderDelegate& delegate, double time) {
+  const Toon::FrameSnapshot snapshot = delegate.CommitScene();
+  const HdToonResidentTargets targets = delegate.DescribeResidentTargets();
+  std::size_t parts = 0;
+  for (const Toon::MeshSnapshot& mesh : snapshot.meshes) {
+    std::size_t mmd = 0;
+    std::size_t unbound = 0;
+    const std::size_t count = mesh.parts == nullptr ? 0U : mesh.parts->size();
+    for (std::size_t at = 0; at < count; ++at) {
+      const Toon::MaterialId material = (*mesh.parts)[at].material;
+      const auto found = std::find_if(snapshot.materials.begin(),
+          snapshot.materials.end(),
+          [material](const Toon::MaterialSnapshot& entry) {
+            return entry.id == material;
+          });
+      unbound += found == snapshot.materials.end() ? 1U : 0U;
+      mmd += found != snapshot.materials.end() &&
+                     found->material.model == Toon::ToonShadingModel::MMD
+                 ? 1U
+                 : 0U;
+    }
+    parts += count;
+    const auto resident = std::find_if(targets.meshes.begin(),
+        targets.meshes.end(), [&mesh](const HdToonResidentMesh& entry) {
+          return entry.mesh == mesh.id;
+        });
+    std::cout << "time=" << time << ' '
+              << (resident == targets.meshes.end() ? SdfPath()
+                                                   : resident->path)
+              << " triangles="
+              << (mesh.indices == nullptr ? 0U : mesh.indices->size() / 3U)
+              << " parts=" << count << " parts_mmd=" << mmd
+              << " parts_unbound=" << unbound << '\n';
+  }
+  std::cout << "time=" << time << " meshes=" << snapshot.meshes.size()
+            << " parts=" << parts << '\n';
+}
+
 // Populates at the start time code, then moves to the end one: a
 // time-sampled canonical value changes by the value-only route alone.
 int RunStage(const char* path) {
@@ -772,11 +814,16 @@ int RunStage(const char* path) {
       SdfPath::AbsoluteRootPath());
   HdTaskSharedPtrVector tasks;
   HdTaskContext context;
+  // Rprims sync only for a collection a render pass would draw.
+  const HdRprimCollection collection(HdTokens->geometry,
+      HdReprSelector(HdReprTokens->smoothHull));
   for (const double time :
       {stage->GetStartTimeCode(), stage->GetEndTimeCode()}) {
     indices.stageSceneIndex->SetTime(UsdTimeCode(time));
+    index->EnqueueCollectionToSync(collection);
     index->SyncAll(&tasks, &context);
     PrintMaterials(*index, time);
+    PrintMeshes(delegate, time);
   }
   index.reset();
   return 0;

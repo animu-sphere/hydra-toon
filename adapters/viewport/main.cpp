@@ -420,7 +420,6 @@ std::uint32_t SamplesForKey(Toon::viewport::Key key) {
 // added a hull, were skinned and drew authored normals.
 Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
   Toon::viewport::SceneCounts counts;
-  counts.draws = draws.draws.size();
   counts.textures = draws.textures.size();
   for (const Toon::MaterialSnapshot& material : draws.materials) {
     if (material.material.model == Toon::ToonShadingModel::PreviewSurface) {
@@ -431,19 +430,27 @@ Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
       ++counts.mmd_materials;
     }
   }
+  // A draw is one part of a mesh its face subsets divide it into.
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
-    counts.skinned += Toon::IsSkinned(mesh) ? 1U : 0U;
-    counts.authored_normals += mesh.authored_normals ? 1U : 0U;
-    const auto material = std::lower_bound(draws.materials.begin(),
-        draws.materials.end(), mesh.material,
-        [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
-          return entry.id < id;
-        });
-    if (material != draws.materials.end() && material->id == mesh.material &&
-        material->material.model == Toon::ToonShadingModel::MToon) {
-      ++counts.mtoon;
-      counts.transparent += Toon::IsTransparent(material->material) ? 1U : 0U;
-      counts.outline += draws.outlines && Toon::HasOutline(material->material) ? 1U : 0U;
+    if (mesh.parts == nullptr) {
+      continue;
+    }
+    const std::size_t parts = mesh.parts->size();
+    counts.draws += parts;
+    counts.skinned += Toon::IsSkinned(mesh) ? parts : 0U;
+    counts.authored_normals += mesh.authored_normals ? parts : 0U;
+    for (const Toon::MeshPart& part : *mesh.parts) {
+      const auto material = std::lower_bound(draws.materials.begin(),
+          draws.materials.end(), part.material,
+          [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
+            return entry.id < id;
+          });
+      if (material != draws.materials.end() && material->id == part.material &&
+          material->material.model == Toon::ToonShadingModel::MToon) {
+        ++counts.mtoon;
+        counts.transparent += Toon::IsTransparent(material->material) ? 1U : 0U;
+        counts.outline += draws.outlines && Toon::HasOutline(material->material) ? 1U : 0U;
+      }
     }
   }
   return counts;

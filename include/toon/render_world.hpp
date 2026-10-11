@@ -118,6 +118,17 @@ using MorphOffsetArray = std::shared_ptr<const std::vector<ToonMorphOffset>>;
 using MorphRangeArray = std::shared_ptr<const std::vector<ToonMorphRange>>;
 using WeightArray = std::shared_ptr<const std::vector<float>>;
 
+// One draw of a mesh: a range of its triangle list, in indices, and the
+// material that range binds.
+struct MeshPart {
+  std::uint32_t first_index = 0;
+  std::uint32_t index_count = 0;
+  MaterialId material = 0;
+
+  friend bool operator==(const MeshPart&, const MeshPart&) = default;
+};
+using PartArray = std::shared_ptr<const std::vector<MeshPart>>;
+
 // How a mesh's points follow a skeleton, as UsdSkel's linear blend skinning
 // states it. Structural: it changes when the binding does, not with a pose.
 struct ToonSkin {
@@ -196,6 +207,11 @@ struct MeshSnapshot {
   Float3 color{0.5F, 0.5F, 0.5F};
   // 0 when the mesh binds no material; it then draws its colour, unlit.
   MaterialId material = 0;
+  // The draws the mesh makes, in triangle-list order: each face subset's
+  // range with the material it binds, and every run of triangles no subset
+  // covers with `material`, adjacent runs of one material merged. Together
+  // they cover the triangle list once. A new array only when they change.
+  PartArray parts;
   bool visible = true;
 };
 
@@ -446,6 +462,12 @@ public:
   void SetMeshVisible(MeshId mesh, bool visible);
   // Binds a material by id; 0, or an id no material has, draws unlit.
   void SetMeshMaterial(MeshId mesh, MaterialId material);
+  // Face subsets that bind their own material, as ranges of the triangle
+  // list (UsdGeomSubset's material binding); triangles none covers draw
+  // with the mesh's material. A range that is empty, not whole triangles,
+  // past the triangle list or overlapping an earlier one is ignored, as of
+  // the commit, so subsets and topology can be set in either order.
+  void SetMeshSubsets(MeshId mesh, std::vector<MeshPart> subsets);
   // A skin without influences per point unskins the mesh. Setting the skin
   // or pose a mesh already has changes nothing.
   void SetMeshSkin(MeshId mesh, ToonSkin skin);
@@ -507,6 +529,10 @@ private:
     // Set by a points, topology or normals edit; the next commit chooses the
     // normals again, deriving them unless the authored ones serve.
     bool normals_stale = true;
+    std::vector<MeshPart> subsets;
+    // Set by a topology, material or subsets edit; the next commit divides
+    // the triangle list into parts again.
+    bool parts_stale = true;
   };
 
   MeshRecord* Find(MeshId mesh);

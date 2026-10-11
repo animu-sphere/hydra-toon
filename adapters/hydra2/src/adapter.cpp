@@ -111,28 +111,38 @@ void AppendHostEvidence(std::uint64_t frame_index,
       ++mmd_materials;
     }
   }
-  // And how many of this frame's draws selected MToon, how many of those
-  // went through mtoon_transparent, how many added mtoon_outline's hull,
-  // how many were skinned on the GPU, and how many drew authored normals.
+  // And how many draws this frame made, one per part of a mesh its face
+  // subsets divide it into; how many of those selected MToon, went through
+  // mtoon_transparent, added mtoon_outline's hull, were skinned on the GPU
+  // and drew authored normals.
+  std::size_t part_draws{};
   std::size_t mtoon_draws{};
   std::size_t transparent_draws{};
   std::size_t outline_draws{};
   std::size_t skinned_draws{};
   std::size_t authored_normal_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
-    skinned_draws += Toon::IsSkinned(mesh) ? 1U : 0U;
-    authored_normal_draws += mesh.authored_normals ? 1U : 0U;
-    const auto material = std::lower_bound(snapshot.materials.begin(),
-        snapshot.materials.end(), mesh.material,
-        [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
-          return entry.id < id;
-        });
-    if (material != snapshot.materials.end() &&
-        material->id == mesh.material &&
-        material->material.model == Toon::ToonShadingModel::MToon) {
-      ++mtoon_draws;
-      transparent_draws += Toon::IsTransparent(material->material) ? 1U : 0U;
-      outline_draws += Toon::HasOutline(material->material) ? 1U : 0U;
+    if (mesh.parts == nullptr) {
+      continue;
+    }
+    const std::size_t parts = mesh.parts->size();
+    part_draws += parts;
+    skinned_draws += Toon::IsSkinned(mesh) ? parts : 0U;
+    authored_normal_draws += mesh.authored_normals ? parts : 0U;
+    for (const Toon::MeshPart& part : *mesh.parts) {
+      const auto material = std::lower_bound(snapshot.materials.begin(),
+          snapshot.materials.end(), part.material,
+          [](const Toon::MaterialSnapshot& entry, Toon::MaterialId id) {
+            return entry.id < id;
+          });
+      if (material != snapshot.materials.end() &&
+          material->id == part.material &&
+          material->material.model == Toon::ToonShadingModel::MToon) {
+        ++mtoon_draws;
+        transparent_draws +=
+            Toon::IsTransparent(material->material) ? 1U : 0U;
+        outline_draws += Toon::HasOutline(material->material) ? 1U : 0U;
+      }
     }
   }
   std::ofstream output(path, std::ios::binary | std::ios::app);
@@ -161,7 +171,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " materials_preview=" << preview_materials
          << " materials_mtoon=" << mtoon_materials
          << " materials_mmd=" << mmd_materials
-         << " draws=" << draws.draws.size()
+         << " draws=" << part_draws
          << " draws_mtoon=" << mtoon_draws
          << " draws_transparent=" << transparent_draws
          << " draws_outline=" << outline_draws
@@ -254,6 +264,20 @@ double RequestedTimeSeconds(const HdRenderDelegate& delegate) {
 
 } // namespace
 
+// A face subset's range of its mesh's triangle list, in indices, and the
+// material it binds by path.
+struct HdToonSubsetRange {
+  SdfPath material;
+  std::uint32_t first_index = 0;
+  std::uint32_t index_count = 0;
+};
+
+// A mesh's triangle list, grouped by the face subsets that bind a material.
+struct HdToonTriangulation {
+  std::vector<std::uint32_t> indices;
+  std::vector<HdToonSubsetRange> subsets;
+};
+
 class HdToonAdapterState {
 public:
   Toon::MeshId CreateMesh(const SdfPath& path) {
@@ -269,6 +293,7 @@ public:
     std::scoped_lock lock(mutex_);
     world_.RemoveMesh(mesh);
     bindings_.erase(mesh);
+    subset_bindings_.erase(mesh);
     resident_.erase(mesh);
   }
 
@@ -309,10 +334,17 @@ public:
     return targets;
   }
 
-  void SetMeshTopology(Toon::MeshId mesh,
-      std::vector<std::uint32_t> triangles) {
+  // The subsets come with the topology, as Hydra's mesh topology carries
+  // them, and bind their materials by path as the mesh does.
+  void SetMeshTopology(Toon::MeshId mesh, HdToonTriangulation triangulation) {
     std::scoped_lock lock(mutex_);
-    world_.SetMeshTopology(mesh, std::move(triangles));
+    world_.SetMeshTopology(mesh, std::move(triangulation.indices));
+    if (triangulation.subsets.empty()) {
+      subset_bindings_.erase(mesh);
+    } else {
+      subset_bindings_[mesh] = std::move(triangulation.subsets);
+    }
+    ResolveSubsetsLocked(mesh);
   }
 
   void SetMeshPoints(Toon::MeshId mesh, std::vector<Toon::Float3> points) {
@@ -583,14 +615,36 @@ private:
     return found->second.texture;
   }
 
-  // Linear in the meshes; it runs when a material prim is added or removed,
-  // not per frame.
+  // Linear in the meshes and their subsets; it runs when a material prim is
+  // added or removed, not per frame.
   void RebindLocked(const SdfPath& path, Toon::MaterialId material) {
     for (const auto& [mesh, bound] : bindings_) {
       if (bound == path) {
         world_.SetMeshMaterial(mesh, material);
       }
     }
+    for (const auto& [mesh, subsets] : subset_bindings_) {
+      if (std::any_of(subsets.begin(), subsets.end(),
+              [&path](const HdToonSubsetRange& subset) {
+                return subset.material == path;
+              })) {
+        ResolveSubsetsLocked(mesh);
+      }
+    }
+  }
+
+  void ResolveSubsetsLocked(Toon::MeshId mesh) {
+    std::vector<Toon::MeshPart> parts;
+    if (const auto found = subset_bindings_.find(mesh);
+        found != subset_bindings_.end()) {
+      parts.reserve(found->second.size());
+      for (const HdToonSubsetRange& subset : found->second) {
+        const auto material = materials_by_path_.find(subset.material);
+        parts.push_back({subset.first_index, subset.index_count,
+            material == materials_by_path_.end() ? 0U : material->second});
+      }
+    }
+    world_.SetMeshSubsets(mesh, std::move(parts));
   }
 
   // The renderer is created on the first frame, not with the delegate, so a
@@ -639,6 +693,9 @@ private:
   std::unordered_map<SdfPath, Toon::MaterialId, SdfPath::Hash>
       materials_by_path_;
   std::unordered_map<Toon::MeshId, SdfPath> bindings_;
+  // Each mesh's face subsets that bind a material, absent when it has none.
+  std::unordered_map<Toon::MeshId, std::vector<HdToonSubsetRange>>
+      subset_bindings_;
   // Each mesh's Hydra identities; its material is resolved when described.
   std::unordered_map<Toon::MeshId, HdToonResidentMesh> resident_;
   // Each material's `emissiveStrength`, described with its path.
@@ -771,27 +828,79 @@ protected:
 
 private:
   // The core takes triangles counter-clockwise from the front, so a
-  // left-handed mesh's are reversed here.
-  std::vector<std::uint32_t> Triangulate(const HdMeshTopology& topology) const {
+  // left-handed mesh's are reversed here. The triangles of each face subset
+  // that binds a material are grouped, in the subsets' order, into one
+  // range of the list, and the triangles of faces no such subset names
+  // follow them, drawn with the mesh's own binding, as Storm draws them. A
+  // face two subsets name stays with the first.
+  HdToonTriangulation Triangulate(const HdMeshTopology& topology) const {
     HdMeshUtil util(&topology, GetId());
     VtVec3iArray triangles;
     VtIntArray primitive_params;
     util.ComputeTriangleIndices(&triangles, &primitive_params);
     const bool left_handed =
         topology.GetOrientation() == HdTokens->leftHanded;
-    std::vector<std::uint32_t> indices;
-    indices.reserve(triangles.size() * 3U);
-    for (const GfVec3i& triangle : triangles) {
+
+    // Each face's subset, or `rest` for none.
+    const HdGeomSubsets& subsets = topology.GetGeomSubsets();
+    const std::size_t rest = subsets.size();
+    const auto faces = static_cast<std::size_t>(
+        std::max(topology.GetNumFaces(), 0));
+    std::vector<std::size_t> owner(subsets.empty() ? 0U : faces, rest);
+    for (std::size_t subset = 0; subset < subsets.size(); ++subset) {
+      if (subsets[subset].type != HdGeomSubset::TypeFaceSet ||
+          subsets[subset].materialId.IsEmpty()) {
+        continue;
+      }
+      for (const int face : subsets[subset].indices) {
+        if (face >= 0 && static_cast<std::size_t>(face) < faces &&
+            owner[static_cast<std::size_t>(face)] == rest) {
+          owner[static_cast<std::size_t>(face)] = subset;
+        }
+      }
+    }
+
+    std::vector<std::vector<std::uint32_t>> groups(subsets.size() + 1U);
+    for (std::size_t index = 0; index < triangles.size(); ++index) {
+      const GfVec3i& triangle = triangles[index];
       if (triangle[0] < 0 || triangle[1] < 0 || triangle[2] < 0) {
         continue;
       }
+      std::size_t group = rest;
+      if (!owner.empty() && index < primitive_params.size()) {
+        const int face = HdMeshUtil::DecodeFaceIndexFromCoarseFaceParam(
+            primitive_params[index]);
+        if (face >= 0 && static_cast<std::size_t>(face) < faces) {
+          group = owner[static_cast<std::size_t>(face)];
+        }
+      }
+      std::vector<std::uint32_t>& indices = groups[group];
       indices.push_back(static_cast<std::uint32_t>(triangle[0]));
       indices.push_back(
           static_cast<std::uint32_t>(triangle[left_handed ? 2 : 1]));
       indices.push_back(
           static_cast<std::uint32_t>(triangle[left_handed ? 1 : 2]));
     }
-    return indices;
+
+    HdToonTriangulation result;
+    if (subsets.empty()) {
+      result.indices = std::move(groups[rest]);
+      return result;
+    }
+    result.indices.reserve(triangles.size() * 3U);
+    for (std::size_t group = 0; group < groups.size(); ++group) {
+      if (groups[group].empty()) {
+        continue;
+      }
+      if (group != rest) {
+        result.subsets.push_back({subsets[group].materialId,
+            static_cast<std::uint32_t>(result.indices.size()),
+            static_cast<std::uint32_t>(groups[group].size())});
+      }
+      result.indices.insert(result.indices.end(), groups[group].begin(),
+          groups[group].end());
+    }
+    return result;
   }
 
   // A mesh UsdSkel skins has its points computed: usdSkelImaging gives it an

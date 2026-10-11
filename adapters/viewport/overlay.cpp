@@ -641,6 +641,9 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
                 material.material.double_sided ? "yes" : "no");
             for (const auto& mesh : frame.evaluated_scene->meshes)
               if (mesh.material == material.id) ImGui::Text("Bound mesh %u", mesh.id);
+              else if (mesh.parts && std::any_of(mesh.parts->begin(), mesh.parts->end(),
+                           [&](const MeshPart& part) { return part.material == material.id; }))
+                ImGui::Text("Bound mesh %u (face subset)", mesh.id);
             ImGui::BeginDisabled(!material.parameters_overridden);
             const bool release = ImGui::Button("Release material override");
             ImGui::EndDisabled();

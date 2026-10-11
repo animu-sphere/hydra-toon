@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <utility>
 
 #include "vulkan_internal.hpp"
@@ -449,6 +450,23 @@ void Barrier(VkCommandBuffer command, const VkImageMemoryBarrier2& barrier) {
   dependency.imageMemoryBarrierCount = 1;
   dependency.pImageMemoryBarriers = &barrier;
   vkCmdPipelineBarrier2(command, &dependency);
+}
+
+// The parts a mesh draws in. One a RenderWorld did not commit has none,
+// and draws whole with its own material.
+std::span<const MeshPart> PartsOf(const MeshSnapshot& mesh,
+    std::uint32_t index_count, MeshPart& whole) {
+  if (mesh.parts != nullptr && !mesh.parts->empty()) {
+    return *mesh.parts;
+  }
+  whole = {0, index_count, mesh.material};
+  return {&whole, 1};
+}
+
+// Whether a part lies within the triangle list a mesh's entry uploaded.
+bool Fits(const MeshPart& part, std::uint32_t index_count) {
+  return part.index_count != 0 && part.first_index <= index_count &&
+         part.index_count <= index_count - part.first_index;
 }
 
 } // namespace
@@ -1516,12 +1534,13 @@ void MeshCache::Record(VkCommandBuffer command,
   };
   const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
   const auto mtoon_material =
-      [&materials](const MeshSnapshot& mesh) -> const MaterialCache::Entry* {
-    const MaterialCache::Entry* material = materials.Find(mesh.material);
+      [&materials](const MeshPart& part) -> const MaterialCache::Entry* {
+    const MaterialCache::Entry* material = materials.Find(part.material);
     return material != nullptr && material->model == ToonShadingModel::MToon
                ? material
                : nullptr;
   };
+  MeshPart whole;
   if (draws.outlines && draws.outline_occlusion_culling)
     outline_occlusion_.Update(draws, extent.width, extent.height);
   const auto hidden_outline = [&](const MeshSnapshot& mesh, const Entry& entry,
@@ -1539,10 +1558,17 @@ void MeshCache::Record(VkCommandBuffer command,
   ++counts.pipeline_binds;
   for (const MeshSnapshot& mesh : draws.draws) {
     const auto found = entries_.find(mesh.id);
-    if (found == entries_.end() || mtoon_material(mesh) != nullptr) {
+    if (found == entries_.end()) {
       continue;
     }
     const Entry& entry = found->second;
+    const std::span<const MeshPart> parts =
+        PartsOf(mesh, entry.index_count, whole);
+    if (std::none_of(parts.begin(), parts.end(), [&](const MeshPart& part) {
+          return mtoon_material(part) == nullptr;
+        })) {
+      continue;
+    }
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(command, 0, 1, &entry.vertices.buffer, &offset);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1562,9 +1588,15 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdPushConstants(command, pipelines.mesh.layout,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
-    vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
-    ++counts.unlit;
-    counts.triangles += entry.index_count / 3U;
+    for (const MeshPart& part : parts) {
+      if (mtoon_material(part) != nullptr ||
+          !Fits(part, entry.index_count)) {
+        continue;
+      }
+      vkCmdDrawIndexed(command, part.index_count, 1, part.first_index, 0, 0);
+      ++counts.unlit;
+      counts.triangles += part.index_count / 3U;
+    }
   }
   mark(0);
 
@@ -1595,6 +1627,7 @@ void MeshCache::Record(VkCommandBuffer command,
   };
   const auto draw_mtoon = [&](const ScenePipeline& pipeline,
                               const MeshSnapshot& mesh, const Entry& entry,
+                              const MeshPart& part,
                               const MaterialCache::Entry& material,
                               VkCullModeFlags cull) {
     bind(pipeline);
@@ -1633,8 +1666,8 @@ void MeshCache::Record(VkCommandBuffer command,
     vkCmdPushConstants(command, pipeline.layout,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(constants), &constants);
-    vkCmdDrawIndexed(command, entry.index_count, 1, 0, 0, 0);
-    counts.triangles += entry.index_count / 3U;
+    vkCmdDrawIndexed(command, part.index_count, 1, part.first_index, 0, 0);
+    counts.triangles += part.index_count / 3U;
   };
 
   // The opaque pass, Mask included: every hull, then every surface. The
@@ -1645,28 +1678,37 @@ void MeshCache::Record(VkCommandBuffer command,
     for (std::size_t index = 0; index < draws.draws.size(); ++index) {
       const MeshSnapshot& mesh = draws.draws[index];
       const auto found = entries_.find(mesh.id);
-      const MaterialCache::Entry* material = mtoon_material(mesh);
-      if (found == entries_.end() || material == nullptr) {
+      if (found == entries_.end()) {
         continue;
       }
-      if (material->transparent) {
-        if (!outline) {
-          transparent_scratch_.push_back(index);
+      const Entry& entry = found->second;
+      const std::span<const MeshPart> parts =
+          PartsOf(mesh, entry.index_count, whole);
+      for (std::size_t at = 0; at < parts.size(); ++at) {
+        const MeshPart& part = parts[at];
+        const MaterialCache::Entry* material = mtoon_material(part);
+        if (material == nullptr || !Fits(part, entry.index_count)) {
+          continue;
         }
-        continue;
+        if (material->transparent) {
+          if (!outline) {
+            transparent_scratch_.emplace_back(index, at);
+          }
+          continue;
+        }
+        if (outline && (!draws.outlines || !material->outline ||
+                           (entry.has_uvs && material->zero_width_texture) ||
+                           hidden_outline(mesh, entry, *material))) {
+          continue;
+        }
+        draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
+            entry, part, *material,
+            outline                  ? VK_CULL_MODE_FRONT_BIT
+            : material->double_sided ? VK_CULL_MODE_NONE
+                                     : VK_CULL_MODE_BACK_BIT);
+        ++(outline ? counts.outline : counts.opaque);
+        counts.hulls += outline ? 1U : 0U;
       }
-      if (outline && (!draws.outlines || !material->outline ||
-                         (found->second.has_uvs && material->zero_width_texture) ||
-                         hidden_outline(mesh, found->second, *material))) {
-        continue;
-      }
-      draw_mtoon(outline ? pipelines.mtoon_outline : pipelines.mtoon, mesh,
-          found->second, *material,
-          outline                  ? VK_CULL_MODE_FRONT_BIT
-          : material->double_sided ? VK_CULL_MODE_NONE
-                                   : VK_CULL_MODE_BACK_BIT);
-      ++(outline ? counts.outline : counts.opaque);
-      counts.hulls += outline ? 1U : 0U;
     }
     mark(outline ? 1U : 2U);
   }
@@ -1676,27 +1718,36 @@ void MeshCache::Record(VkCommandBuffer command,
   // its back faces before its front ones, so its near side blends over its
   // far side. Its hull follows it, as UniVRM and three-vrm draw MToon's
   // outline, so a surface that writes depth hides the hull's far side.
+  // A transparent draw's part. `whole` stands in for a mesh without parts,
+  // so the part is copied before the next lookup reuses it.
+  const auto transparent_part =
+      [&](const std::pair<std::size_t, std::size_t>& draw) {
+        const MeshSnapshot& mesh = draws.draws[draw.first];
+        return PartsOf(mesh, entries_.find(mesh.id)->second.index_count,
+            whole)[draw.second];
+      };
   std::stable_sort(transparent_scratch_.begin(), transparent_scratch_.end(),
-      [&](std::size_t left, std::size_t right) {
-        return mtoon_material(draws.draws[left])->queue <
-               mtoon_material(draws.draws[right])->queue;
+      [&](const auto& left, const auto& right) {
+        return mtoon_material(transparent_part(left))->queue <
+               mtoon_material(transparent_part(right))->queue;
       });
-  for (const std::size_t index : transparent_scratch_) {
-    const MeshSnapshot& mesh = draws.draws[index];
+  for (const auto& draw : transparent_scratch_) {
+    const MeshSnapshot& mesh = draws.draws[draw.first];
     const Entry& entry = entries_.find(mesh.id)->second;
-    const MaterialCache::Entry& material = *mtoon_material(mesh);
+    const MeshPart part = transparent_part(draw);
+    const MaterialCache::Entry& material = *mtoon_material(part);
     if (material.double_sided) {
-      draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
+      draw_mtoon(pipelines.mtoon_transparent, mesh, entry, part, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;
     }
-    draw_mtoon(pipelines.mtoon_transparent, mesh, entry, material,
+    draw_mtoon(pipelines.mtoon_transparent, mesh, entry, part, material,
         VK_CULL_MODE_BACK_BIT);
     ++counts.transparent;
     if (draws.outlines && material.outline &&
         (!entry.has_uvs || !material.zero_width_texture) &&
         !hidden_outline(mesh, entry, material)) {
-      draw_mtoon(pipelines.mtoon_outline, mesh, entry, material,
+      draw_mtoon(pipelines.mtoon_outline, mesh, entry, part, material,
           VK_CULL_MODE_FRONT_BIT);
       ++counts.transparent;
       ++counts.hulls;

@@ -16,6 +16,18 @@ version has a record in [docs/releases/](docs/releases/README.md).
   sphere and individual toon textures as two more texture roles. A dirtied
   `mmd` locator is a value-only change. `TOON_HYDRA_EVIDENCE` and the
   viewport count `materials_mmd`. Nothing draws through an MMD pipeline yet.
+- `GeomSubset` material bindings: a mesh draws once per face subset that
+  binds a material, with that material, and once for the faces none binds,
+  with its own. `RenderWorld::SetMeshSubsets` and `MeshSnapshot::parts`
+  carry the division in the core; the Vulkan backend issues one indexed
+  draw per part over the mesh's buffers. CTests `toon-render-world`,
+  `toon-subset-gpu` and `toon-renderer-hydra-geom-subsets`;
+  `toon-hydra2-material-test --stage` prints each mesh's parts.
+
+### Changed
+
+- Draw counts in `TOON_HYDRA_EVIDENCE` and the viewport's scene summary
+  count parts: a mesh divided by its face subsets is one draw per part.
 
 ## [0.3.0] - 2026-10-11
 
