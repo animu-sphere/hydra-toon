@@ -448,6 +448,8 @@ Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
       if (material != draws.materials.end() && material->id == part.material &&
           material->material.model == Toon::ToonShadingModel::MMD) {
         ++counts.mmd;
+        counts.mmd_outline +=
+            draws.outlines && Toon::HasOutline(material->material) ? 1U : 0U;
       } else if (material != draws.materials.end() && material->id == part.material &&
           material->material.model == Toon::ToonShadingModel::MToon) {
         ++counts.mtoon;
@@ -466,6 +468,7 @@ std::string SceneSummary(const Toon::DrawList& draws) {
           << " draws_transparent=" << counts.transparent
           << " draws_outline=" << counts.outline
           << " draws_mmd=" << counts.mmd
+          << " draws_mmd_outline=" << counts.mmd_outline
           << " draws_skinned=" << counts.skinned
           << " draws_authored_normals=" << counts.authored_normals
           << " materials_preview=" << counts.preview_materials

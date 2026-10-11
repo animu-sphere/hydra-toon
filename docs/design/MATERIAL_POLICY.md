@@ -100,6 +100,14 @@ it by the stage's `metersPerUnit`. That is stage metadata Hydra does not
 carry, so the host states it as the render setting `toon:metersPerUnit`,
 which is 1, VRM's unit, until it does.
 
+MMD states its edge's size and no unit. MMD's own frames show a width that
+is neither a constant length nor a constant number of pixels, and the edge
+is unlit: its colour does not follow the light
+([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)). The MMD
+edge's width is MAT-Q4. Its colour is a stored value, decoded once, as
+MAT-Q3 decodes MMD's surface. A model's edges draw after its surfaces, as
+MMD draws them.
+
 ## 6. Transparency and draw order
 
 A draw is one material's part of a mesh. A mesh whose `GeomSubset`s bind
@@ -185,3 +193,4 @@ structural.
 | MAT-Q1 | How `inputs:mmd:material:*` reaches the render delegate. For MToon this is answered by §2 and §8 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)) | resolved 2026-10-11: the same shape for both models, a container on the Hydra material prim read from the terminal scene index. `usd-mmd-plugins` froze `mmdImaging`'s view on 2026-10-04, and every material of 41 local MMD stages selects MMD through it (§2, §3; [report 53](../reports/renderer/53-2026-10-11-mmd-material-read.md)) | agreed with `usd-mmd-plugins` before v0.4.0 |
 | MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | resolved 2026-10-11: `hydra-toon` generates its own ten ramps, under its own licence, from the colours MMD's `toon01`–`toon10` show, and maps the index to them; no MMD image is copied or shipped ([report 56](../reports/renderer/56-2026-10-11-mmd-surface.md)) | v0.4.0 |
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | resolved 2026-10-11: MMD computes its terms on the values as stored and writes them undecoded and unencoded; lowering its light colour scales a model's pixels by the factor its lighting term computes on stored values, flat across brightness ([report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md)). The MMD path samples its textures without sRGB decoding, computes MMD's terms on them and the factors as authored, and converts the result from sRGB to linear once, so the host's encoding writes MMD's values. Blending stays in the linear target, so a partly transparent material approximates MMD's | v0.4.0 |
+| MAT-Q4 | How wide MMD draws an edge of a given `edgeSize` × `edgeScale`: MMD states no unit, and on its own frames an edge of size 0.4 is 0.6 pixels wide from 45 MMD units and 1.57 from 9 at a 30° field of view and 1,080 pixels, neither a constant length nor a constant number of pixels ([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)) | a length in MMD units plus a width in pixels, `edgeSize` × `edgeScale` × (0.0135 MMD units + 0.89 pixels), fitted to those two distances; settled against captures from MMD at more distances, another field of view and another output size | v0.4.0 |

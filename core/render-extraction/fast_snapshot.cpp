@@ -54,10 +54,12 @@ bool ApplyFastSnapshot(const FrameSnapshot& latest, DrawList& draws, std::string
     const auto& old = draws.draws[index++];
     if (mesh.id != old.id || mesh.material != old.material || mesh.parts != old.parts ||
         mesh.points != old.points || mesh.normals != old.normals || mesh.indices != old.indices ||
-        mesh.uvs != old.uvs || mesh.influences != old.influences ||
+        mesh.uvs != old.uvs || mesh.edge_scales != old.edge_scales ||
+        mesh.influences != old.influences ||
         mesh.morph_offsets != old.morph_offsets || mesh.morph_ranges != old.morph_ranges ||
         mesh.points_revision != old.points_revision || mesh.normals_revision != old.normals_revision ||
         mesh.topology_revision != old.topology_revision || mesh.uvs_revision != old.uvs_revision ||
+        mesh.edge_scales_revision != old.edge_scales_revision ||
         mesh.skin_revision != old.skin_revision || mesh.morph_revision != old.morph_revision ||
         mesh.geom_bind != old.geom_bind || mesh.influences_per_point != old.influences_per_point ||
         mesh.constant_influences != old.constant_influences || mesh.joint_bound != old.joint_bound ||

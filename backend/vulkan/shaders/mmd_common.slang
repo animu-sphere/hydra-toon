@@ -26,6 +26,10 @@ struct MmdParameters {
   // mode, kSphereNone, kSphereMultiply or kSphereAdd; zw unused.
   uint4 modes;
   float4 base_uv[2];
+  // rgb the edge colour, as stored; a its alpha.
+  float4 edge_color;
+  // x the edge size, in pixels at an edge scale of 1; yzw unused.
+  float4 edge;
 };
 
 // Must match vulkan_internal::kSphere*.

@@ -107,7 +107,8 @@ struct PipelineDescription {
   const std::vector<std::uint32_t>* vertex_words = nullptr;
   const std::vector<std::uint32_t>* fragment_words = nullptr;
   std::uint32_t push_constant_size = 0;
-  // Position, then normal and UV when there are three.
+  // Position, then normal and UV when there are three, and MMD's edge
+  // scale when there are four.
   std::uint32_t vertex_streams = 1;
   // Cull mode, front face, depth writes and vertex strides set per draw
   // rather than baked in.
@@ -164,12 +165,13 @@ bool CreateScenePipeline(VkDevice device,
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = fragment_module;
   stages[1].pName = "main";
-  const VkFormat stream_formats[3] = {VK_FORMAT_R32G32B32_SFLOAT,
-      VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32_SFLOAT};
-  const std::uint32_t stream_strides[3] = {sizeof(Float3), sizeof(Float3),
-      sizeof(Float2)};
-  VkVertexInputBindingDescription bindings[3]{};
-  VkVertexInputAttributeDescription attributes[3]{};
+  const VkFormat stream_formats[4] = {VK_FORMAT_R32G32B32_SFLOAT,
+      VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32_SFLOAT,
+      VK_FORMAT_R32_SFLOAT};
+  const std::uint32_t stream_strides[4] = {sizeof(Float3), sizeof(Float3),
+      sizeof(Float2), sizeof(float)};
+  VkVertexInputBindingDescription bindings[4]{};
+  VkVertexInputAttributeDescription attributes[4]{};
   for (std::uint32_t stream = 0; stream < description.vertex_streams;
       ++stream) {
     bindings[stream].binding = stream;
@@ -238,7 +240,8 @@ bool CreateScenePipeline(VkDevice device,
   blend.attachmentCount = 1;
   blend.pAttachments = &blend_attachment;
   // Cull mode, front face, depth writes and vertex strides are core dynamic
-  // state in Vulkan 1.3; a stride of 0 stands in for a mesh's missing UVs.
+  // state in Vulkan 1.3; a stride of 0 stands in for a mesh's missing UVs
+  // or edge scales.
   const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT,
       VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE,
       VK_DYNAMIC_STATE_FRONT_FACE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
@@ -464,6 +467,11 @@ void WriteParameters(const ToonMaterial& material,
   slot.modes[0] = entries.toon;
   slot.modes[1] = sphere;
   WriteUvRows(material.base_texture, slot.base_uv);
+  slot.edge_color[0] = material.outline_color.x;
+  slot.edge_color[1] = material.outline_color.y;
+  slot.edge_color[2] = material.outline_color.z;
+  slot.edge_color[3] = material.mmd.edge_alpha;
+  slot.edge[0] = material.outline_width;
 }
 
 // Every level down to 1x1.
@@ -542,7 +550,11 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
          LoadSpirv(shaders.mmd_transparent_vertex,
              words.mmd_transparent_vertex, detail) &&
          LoadSpirv(shaders.mmd_transparent_fragment,
-             words.mmd_transparent_fragment, detail);
+             words.mmd_transparent_fragment, detail) &&
+         LoadSpirv(shaders.mmd_outline_vertex, words.mmd_outline_vertex,
+             detail) &&
+         LoadSpirv(shaders.mmd_outline_fragment, words.mmd_outline_fragment,
+             detail);
 }
 
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
@@ -666,6 +678,12 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd_transparent.vertex_words = &words.mmd_transparent_vertex;
   mmd_transparent.fragment_words = &words.mmd_transparent_fragment;
   mmd_transparent.blend = true;
+  // mmd_outline's hull is mtoon_outline's, blended and biased alike, and
+  // also reads the mesh's edge scale.
+  PipelineDescription mmd_outline = outline;
+  mmd_outline.vertex_words = &words.mmd_outline_vertex;
+  mmd_outline.fragment_words = &words.mmd_outline_fragment;
+  mmd_outline.vertex_streams = 4;
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
@@ -678,10 +696,13 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
          CreateScenePipeline(device, mmd, pipelines, color_format,
              depth_format, pipelines.mmd, detail) &&
          CreateScenePipeline(device, mmd_transparent, pipelines, color_format,
-             depth_format, pipelines.mmd_transparent, detail);
+             depth_format, pipelines.mmd_transparent, detail) &&
+         CreateScenePipeline(device, mmd_outline, pipelines, color_format,
+             depth_format, pipelines.mmd_outline, detail);
 }
 
 void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines) {
+  DestroyScenePipeline(device, pipelines.mmd_outline);
   DestroyScenePipeline(device, pipelines.mmd_transparent);
   DestroyScenePipeline(device, pipelines.mmd);
   DestroyScenePipeline(device, pipelines.mtoon_outline);
@@ -1421,10 +1442,13 @@ bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
   device_ = device;
   skin_layout_ = skin_layout;
   const Float2 zero;
+  const float unit = 1.0F;
   const Matrix4 identity;
   std::size_t pool = 0;
   if (!Upload(zero_uv_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &zero,
           sizeof(zero), detail) ||
+      !Upload(unit_edge_scale_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &unit,
+          sizeof(unit), detail) ||
       !Upload(zero_skin_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &identity,
           sizeof(identity), detail) ||
       !AllocateSkinSet(unskinned_set_, pool, detail)) {
@@ -1480,6 +1504,20 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail, bool fast_val
     // Against this frame's topology, which can reach past UVs that were
     // long enough before, or come back within them.
     entry.has_uvs = uvs_present && mesh.uvs->size() >= mesh.index_bound;
+    // Edge scales are counted with the points too.
+    const bool edge_scales_present =
+        mesh.edge_scales != nullptr && !mesh.edge_scales->empty();
+    if (entry.edge_scales_revision != mesh.edge_scales_revision) {
+      if (edge_scales_present &&
+          !Upload(entry.edge_scales, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+              mesh.edge_scales->data(),
+              mesh.edge_scales->size() * sizeof(float), detail)) {
+        return false;
+      }
+      entry.edge_scales_revision = mesh.edge_scales_revision;
+    }
+    entry.has_edge_scales = edge_scales_present &&
+                            mesh.edge_scales->size() >= mesh.index_bound;
     if (!UpdateSkin(mesh, entry, detail, fast_values)) {
       return false;
     }
@@ -1654,6 +1692,7 @@ void MeshCache::Release(Entry& entry) {
   DestroyHostBuffer(device_, entry.vertices);
   DestroyHostBuffer(device_, entry.normals);
   DestroyHostBuffer(device_, entry.uvs);
+  DestroyHostBuffer(device_, entry.edge_scales);
   DestroyHostBuffer(device_, entry.indices);
   DestroyHostBuffer(device_, entry.influences);
   DestroyHostBuffer(device_, entry.joints);
@@ -1757,6 +1796,9 @@ void MeshCache::Record(VkCommandBuffer command,
   const VkDescriptorSet material_set = materials.descriptor_set();
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
   const float units_per_meter = 1.0F / draws.meters_per_unit;
+  // MMD's edge is a width in pixels: that share of the target's height.
+  const float pixel_height =
+      extent.height == 0 ? 0.0F : 1.0F / static_cast<float>(extent.height);
   // A perspective projection puts -z into w; an orthographic one keeps w 1.
   const bool orthographic = draws.view.projection.m[11] == 0.0F;
   // Only mtoon_opaque turns alpha into coverage, and only multisampled.
@@ -1782,13 +1824,17 @@ void MeshCache::Record(VkCommandBuffer command,
                               const MaterialCache::Entry& material,
                               VkCullModeFlags cull) {
     bind(pipeline);
+    const bool edge = &pipeline == &pipelines.mmd_outline;
     const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
-        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
-    const VkDeviceSize offsets[] = {0, 0, 0};
+        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer,
+        entry.has_edge_scales ? entry.edge_scales.buffer
+                              : unit_edge_scale_.buffer};
+    const VkDeviceSize offsets[] = {0, 0, 0, 0};
     const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
-        entry.has_uvs ? sizeof(Float2) : 0U};
-    vkCmdBindVertexBuffers2(command, 0, 3, streams, offsets, nullptr,
-        strides);
+        entry.has_uvs ? sizeof(Float2) : 0U,
+        entry.has_edge_scales ? sizeof(float) : 0U};
+    vkCmdBindVertexBuffers2(command, 0, edge ? 4U : 3U, streams, offsets,
+        nullptr, strides);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
         VK_INDEX_TYPE_UINT32);
     const VkDescriptorSet skin_set =
@@ -1808,7 +1854,7 @@ void MeshCache::Record(VkCommandBuffer command,
                       (&pipeline == &pipelines.mtoon ? coverage : 0U) |
                       entry.skin_flags;
     constants.projection_scale = projection_scale;
-    constants.units_per_meter = units_per_meter;
+    constants.outline_scale = edge ? pixel_height : units_per_meter;
     vkCmdSetCullMode(command, cull);
     vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
                                         : VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -1933,6 +1979,47 @@ void MeshCache::Record(VkCommandBuffer command,
       ++counts.hulls;
     }
   }
+
+  // MMD's edges, after every surface, as MMD draws a model's edge after
+  // its materials, each mesh's in MMD's material order. A surface in front
+  // of an edge has written its depth and hides it, whether or not it
+  // blends. The hull culls its front faces, double-sided or not.
+  if (!draws.outlines) {
+    return;
+  }
+  transparent_scratch_.clear();
+  for (std::size_t index = 0; index < draws.draws.size(); ++index) {
+    const MeshSnapshot& mesh = draws.draws[index];
+    const auto found = entries_.find(mesh.id);
+    if (found == entries_.end()) {
+      continue;
+    }
+    const std::span<const MeshPart> parts =
+        PartsOf(mesh, found->second.index_count, whole);
+    for (std::size_t at = 0; at < parts.size(); ++at) {
+      const MaterialCache::Entry* material = surface_material(parts[at]);
+      if (material != nullptr && material->model == ToonShadingModel::MMD &&
+          material->outline && Fits(parts[at], found->second.index_count)) {
+        transparent_scratch_.emplace_back(index, at);
+      }
+    }
+  }
+  const auto edge_key = [&](const std::pair<std::size_t, std::size_t>& draw) {
+    return std::make_pair(draw.first,
+        surface_material(transparent_part(draw))->draw_order);
+  };
+  std::stable_sort(transparent_scratch_.begin(), transparent_scratch_.end(),
+      [&](const auto& left, const auto& right) {
+        return edge_key(left) < edge_key(right);
+      });
+  for (const auto& draw : transparent_scratch_) {
+    const MeshSnapshot& mesh = draws.draws[draw.first];
+    const MeshPart part = transparent_part(draw);
+    draw_surface(pipelines.mmd_outline, mesh, entries_.find(mesh.id)->second,
+        part, *surface_material(part), VK_CULL_MODE_FRONT_BIT);
+    ++counts.transparent;
+    ++counts.hulls;
+  }
 }
 
 void MeshCache::Destroy() {
@@ -1941,6 +2028,7 @@ void MeshCache::Destroy() {
   }
   entries_.clear();
   DestroyHostBuffer(device_, zero_uv_);
+  DestroyHostBuffer(device_, unit_edge_scale_);
   DestroyHostBuffer(device_, zero_skin_);
   // Frees every set with its pool.
   for (VkDescriptorPool pool : skin_pools_) {

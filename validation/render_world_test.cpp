@@ -409,6 +409,30 @@ int main() {
     return 1;
   }
 
+  world.SetMeshUVs(quad, {{0, 0}, {1, 0}, {1, 1}, {0, 1}});
+  if (!Check(world.Commit().meshes[0].uvs_revision == mapped.uvs_revision,
+          "setting the same texture coordinates must change nothing")) {
+    return 1;
+  }
+
+  // MMD's edge scales have their own revision too, and setting the ones a
+  // mesh already has changes nothing.
+  world.SetMeshEdgeScales(quad, {1.0F, 0.5F, 0.5F, 1.0F});
+  const Toon::MeshSnapshot scaled = world.Commit().meshes[0];
+  world.SetMeshEdgeScales(quad, {1.0F, 0.5F, 0.5F, 1.0F});
+  const Toon::MeshSnapshot rescaled = world.Commit().meshes[0];
+  if (!Check(mapped.edge_scales != nullptr && mapped.edge_scales->empty(),
+          "a mesh without edge scales must carry none") ||
+      !Check(scaled.edge_scales_revision != mapped.edge_scales_revision &&
+                 scaled.edge_scales->size() == 4 &&
+                 scaled.uvs_revision == mapped.uvs_revision &&
+                 scaled.points_revision == mapped.points_revision,
+          "an edge scale edit must advance its own revision alone") ||
+      !Check(rescaled.edge_scales_revision == scaled.edge_scales_revision,
+          "setting the same edge scales must change nothing")) {
+    return 1;
+  }
+
   // A texture's pixels have their own revision; a material that starts or
   // stops sampling one changes structurally, one that only moves its UV
   // transform does not (material policy §8).
@@ -495,6 +519,30 @@ int main() {
   const Toon::MaterialSnapshot width_textured = world.Commit().materials[0];
   if (!Check(width_textured.structure_revision != outlined.structure_revision,
           "sampling an outline width texture must be structural")) {
+    return 1;
+  }
+  // MMD's edge is its outline request, drawn whatever MToon's width mode
+  // says, as long as it has a finite width above zero.
+  Toon::ToonMaterial edged;
+  edged.model = Toon::ToonShadingModel::MMD;
+  edged.outline = true;
+  edged.outline_width = 0.4F;
+  if (!Check(Toon::HasOutline(edged), "an MMD edge must draw a hull")) {
+    return 1;
+  }
+  for (float invalid_width : {0.0F, -1.0F,
+           std::numeric_limits<float>::infinity(),
+           std::numeric_limits<float>::quiet_NaN()}) {
+    auto invalid_edge = edged;
+    invalid_edge.outline_width = invalid_width;
+    if (!Check(!Toon::HasOutline(invalid_edge),
+            "a zero, negative or non-finite edge size must draw no hull")) {
+      return 1;
+    }
+  }
+  edged.outline = false;
+  if (!Check(!Toon::HasOutline(edged),
+          "an MMD material that draws no edge must draw no hull")) {
     return 1;
   }
   // The rim's colour, shape and mix are values; its MatCap and multiply

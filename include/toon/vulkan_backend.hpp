@@ -72,6 +72,10 @@ struct SceneShaders {
   // order after every opaque draw (material policy §6).
   std::string mmd_transparent_vertex;
   std::string mmd_transparent_fragment;
+  // mmd_outline: the inverted hull of an MMD material that draws its edge,
+  // after every surface (material policy §5).
+  std::string mmd_outline_vertex;
+  std::string mmd_outline_fragment;
   // overlay: a present session's 2D overlay (OverlayDrawList). The offscreen
   // renderer draws none and does not read these.
   std::string overlay_vertex;
