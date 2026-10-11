@@ -67,6 +67,18 @@ to that milestone's page.
   ([design policy §23](../design/DESIGN_POLICY.md#23-performance-kpis)).
   v0.3.0 closes at submit/present API return; actual motion-to-photon evidence
   remains a separate measurement task.
+- **Parity with the runtime's Hydra publication.** Compare the fast path
+  with `usd-avatar-runtime`'s own Hydra publication, once its Scene Index
+  adapter exists
+  ([runtime roadmap](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/roadmap/current.md),
+  Runtime Phase C), instead of the session-layer oracle v0.3.0 closes on.
+- **Material binds on a real avatar.** Exercise runtime material outputs on
+  an avatar whose expressions bind material colours or texture transforms.
+  No local avatar binds colours, and `vrmSchema` keeps texture-transform
+  binds in its raw block rather than the typed expression contract
+  ([schema contract](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/plugins/vrmSchema/docs/SCHEMA_CONTRACT.md)),
+  so the runtime publishes none. v0.3.0 establishes them on a committed
+  fixture.
 - **Off-thread asset upload.** Geometry, textures and morph targets decoded
   and staged off the render thread and copied on a transfer queue, with a
   placeholder until they arrive, so asset loading never stalls a playing
