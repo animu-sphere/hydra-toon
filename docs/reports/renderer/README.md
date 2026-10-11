@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [56](56-2026-10-11-mmd-surface.md) | MMD draws through `mmd_opaque` and `mmd_transparent` on stored values, with the renderer's own shared toon ramps (MAT-Q2 resolved); the 20-material model from MMD's camera and light differs from MMD's captures by 1–4 levels where the pose agrees, and its frames scale by 0.844–0.847 from light 255 to 77 against MMD's 0.842; no edges yet |
 | [55](55-2026-10-11-mat-q3-mmd-colour.md) | MAT-Q3 against MMD's own captures: lowering the light colour from 255 to 77 scales a model's pixels by 0.842, flat across brightness, as MMD's lighting term on stored values predicts and neither linear reading does; the MMD path computes on stored values and converts to linear once, and MAT-Q3 is resolved |
 | [54](54-2026-10-11-geom-subset-bindings.md) | `GeomSubset` material bindings: a mesh draws once per bound face subset and once for its unbound faces, over one set of buffers; a divided mesh renders identically to separate meshes, all 495 materials of 41 local MMD stages become one part each, and `usdview` shows 20 draws on a 20-material model; still drawn unlit |
 | [53](53-2026-10-11-mmd-material-read.md) | MMD selected from `mmdImaging`'s Hydra view and normalized into an MMD block; all 495 materials of 41 local MMD stages read as MMD with `mmdImaging` and none with `mmdSchema` alone, and `usdview` reports 20 MMD materials; MAT-Q1 resolved, nothing drawn through MMD yet and no `GeomSubset` bindings |

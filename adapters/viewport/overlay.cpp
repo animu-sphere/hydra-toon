@@ -780,8 +780,8 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
     }
     if (ImGui::CollapsingHeader("Draws")) {
       const SceneCounts& counts = frame.counts;
-      ImGui::Text("meshes %zu  MToon %zu  skinned %zu", counts.draws,
-          counts.mtoon, counts.skinned);
+      ImGui::Text("meshes %zu  MToon %zu  MMD %zu  skinned %zu", counts.draws,
+          counts.mtoon, counts.mmd, counts.skinned);
       ImGui::Text("materials %zu MToon, %zu MMD, %zu preview  textures %zu",
           counts.mtoon_materials, counts.mmd_materials,
           counts.preview_materials, counts.textures);

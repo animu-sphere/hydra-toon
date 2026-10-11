@@ -113,12 +113,13 @@ void AppendHostEvidence(std::uint64_t frame_index,
   }
   // And how many draws this frame made, one per part of a mesh its face
   // subsets divide it into; how many of those selected MToon, went through
-  // mtoon_transparent, added mtoon_outline's hull, were skinned on the GPU
-  // and drew authored normals.
+  // mtoon_transparent, added mtoon_outline's hull, selected MMD, were
+  // skinned on the GPU and drew authored normals.
   std::size_t part_draws{};
   std::size_t mtoon_draws{};
   std::size_t transparent_draws{};
   std::size_t outline_draws{};
+  std::size_t mmd_draws{};
   std::size_t skinned_draws{};
   std::size_t authored_normal_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
@@ -136,6 +137,10 @@ void AppendHostEvidence(std::uint64_t frame_index,
             return entry.id < id;
           });
       if (material != snapshot.materials.end() &&
+          material->id == part.material &&
+          material->material.model == Toon::ToonShadingModel::MMD) {
+        ++mmd_draws;
+      } else if (material != snapshot.materials.end() &&
           material->id == part.material &&
           material->material.model == Toon::ToonShadingModel::MToon) {
         ++mtoon_draws;
@@ -175,6 +180,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " draws_mtoon=" << mtoon_draws
          << " draws_transparent=" << transparent_draws
          << " draws_outline=" << outline_draws
+         << " draws_mmd=" << mmd_draws
          << " draws_skinned=" << skinned_draws
          << " draws_authored_normals=" << authored_normal_draws << '\n';
 }

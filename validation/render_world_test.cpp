@@ -4,6 +4,8 @@
 #include <toon/extraction.hpp>
 #include <toon/render_world.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -105,10 +107,54 @@ int CheckSubsets() {
   return 0;
 }
 
+// MMD's shared toon ramps (material policy MAT-Q2): the renderer's own,
+// 32 x 32 and linear, toon01 white above its middle row and 205 grey
+// below it, toon05 graded, and toon07-toon10 or an index outside 0-9 white.
+int CheckSharedToonRamps() {
+  const auto pixel = [](const Toon::ToonTexture& ramp, std::uint32_t column,
+                         std::uint32_t row) {
+    const std::size_t at = (row * ramp.width + column) * 4U;
+    return std::array<std::uint8_t, 4>{(*ramp.pixels)[at],
+        (*ramp.pixels)[at + 1U], (*ramp.pixels)[at + 2U],
+        (*ramp.pixels)[at + 3U]};
+  };
+  using Pixel = std::array<std::uint8_t, 4>;
+  const Toon::ToonTexture toon01 = Toon::SharedToonRamp(0);
+  if (!Check(toon01.width == 32 && toon01.height == 32 &&
+                 toon01.encoding == Toon::ToonTextureEncoding::Linear &&
+                 toon01.pixels != nullptr &&
+                 toon01.pixels->size() == 32U * 32U * 4U,
+          "a shared ramp must be 32 x 32 linear RGBA8")) {
+    return 1;
+  }
+  if (!Check(pixel(toon01, 0, 15) == Pixel{255, 255, 255, 255} &&
+                 pixel(toon01, 31, 16) == Pixel{205, 205, 205, 255} &&
+                 pixel(toon01, 7, 31) == Pixel{205, 205, 205, 255},
+          "toon01 must be white above its middle row and 205 below it")) {
+    return 1;
+  }
+  const Toon::ToonTexture toon05 = Toon::SharedToonRamp(4);
+  if (!Check(pixel(toon05, 0, 17) == Pixel{255, 255, 255, 255} &&
+                 pixel(toon05, 0, 24) == Pixel{255, 231, 221, 255} &&
+                 pixel(toon05, 0, 20)[1] < 255 && pixel(toon05, 0, 20)[1] > 231,
+          "toon05 must grade from white into its shade")) {
+    return 1;
+  }
+  for (const std::int32_t index : {-1, 6, 9, 10}) {
+    const Toon::ToonTexture white = Toon::SharedToonRamp(index);
+    if (!Check(std::all_of(white.pixels->begin(), white.pixels->end(),
+                   [](std::uint8_t value) { return value == 255; }),
+            "toon07-toon10 and an index outside 0-9 must be white")) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
-  if (CheckSubsets() != 0) {
+  if (CheckSubsets() != 0 || CheckSharedToonRamps() != 0) {
     return 1;
   }
   Toon::RenderWorld world;

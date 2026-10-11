@@ -2188,6 +2188,198 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// mmd_opaque and mmd_transparent (material policy §6, §7, MAT-Q2, MAT-Q3),
+// through SetOrthographicView, under one directional light toward the
+// camera. MMD computes on stored values and the result is decoded to the
+// linear UNORM target once, so a stored 0.8416 reads 173. A light of 0.302,
+// MMD's 77, on diffuse 0.8 and ambient 0.6 is MMD's 0.8416; at 1 it
+// saturates. Lit from behind, toon01 from the renderer's shared set shades
+// by 205 / 255, to 156, while a material without a ramp stays 255. A grey
+// base texel of 128, sampled undecoded, reads 55 rather than 10. A sphere
+// texel of 64 added to an ambient of 0.5 reads 134 and multiplied 4; a
+// specular colour of 0.25 at power 0 adds everywhere, to 133. Two halves
+// of one mesh at alpha 0.5, the nearer red listed first but second in
+// MMD's material order, blend green then red, the red writing depth; in the
+// other order the green would fail the depth test. Last, an ambient edit
+// rewrites one slot and nothing else.
+Check MmdCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mmd";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const Toon::MeshId mesh = AddTriangle(world, 0.0F);
+  world.SetMeshUVs(mesh, {{0.25F, 0.75F}, {0.25F, 0.75F}, {0.25F, 0.75F}});
+  const Toon::LightId key = world.CreateLight();
+  Toon::ToonLight light;
+  light.color = {0.302F, 0.302F, 0.302F};
+  light.direction = {0.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+  Toon::ToonMaterial mmd;
+  mmd.model = Toon::ToonShadingModel::MMD;
+  mmd.base_color = {0.8F, 0.8F, 0.8F};
+  mmd.mmd.ambient_color = {0.6F, 0.6F, 0.6F};
+  const Toon::MaterialId material = world.CreateMaterial();
+  world.SetMaterial(material, mmd);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  std::array<std::uint8_t, 4> pixel{};
+  float center_depth = 0.0F;
+  const auto render = [&]() {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    pixel = CenterPixel(color);
+    center_depth = depth.payload[32U * depth.width + 32U];
+    return true;
+  };
+  const auto is = [&](int red, int green, int blue) {
+    const auto near = [](int value, int expected) {
+      return std::abs(value - expected) <= 2;
+    };
+    return near(pixel[0], red) && near(pixel[1], green) &&
+           near(pixel[2], blue);
+  };
+  const auto grey = [&](int value) { return is(value, value, value); };
+
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  if (!grey(173)) {
+    return {id, "fail",
+        "MMD's lighting term must be computed on stored values and decoded "
+        "once: saturate(0.8 x 0.302 + 0.6) is 173"};
+  }
+  light.color = {1.0F, 1.0F, 1.0F};
+  world.SetLight(key, light);
+  if (!render() || !grey(255)) {
+    return {id, "fail", "MMD's lighting term must saturate"};
+  }
+  light.direction = {0.0F, 0.0F, 1.0F};
+  world.SetLight(key, light);
+  if (!render() || !grey(255)) {
+    return {id, "fail",
+        "a material without a toon ramp must not shade its far side"};
+  }
+  mmd.mmd.toon_source = Toon::ToonRampSource::Shared;
+  mmd.mmd.shared_toon_index = 0;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(156)) {
+    return {id, "fail",
+        "toon01 from the shared ramps must shade the far side by 205 / 255"};
+  }
+  light.direction = {0.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+  if (!render() || !grey(255)) {
+    return {id, "fail", "toon01's lit side must be white"};
+  }
+
+  const Toon::TextureId texture = world.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 1;
+  texels.height = 1;
+  texels.encoding = Toon::ToonTextureEncoding::Linear;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 128, 128, 255});
+  world.SetTexture(texture, texels);
+  mmd.base_texture.texture = texture;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(55)) {
+    return {id, "fail", "a base texel must multiply as stored"};
+  }
+
+  const Toon::TextureId sphere = world.CreateTexture();
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{64, 64, 64, 255});
+  world.SetTexture(sphere, texels);
+  mmd.base_texture.texture = 0;
+  mmd.base_color = {0.0F, 0.0F, 0.0F};
+  mmd.mmd.ambient_color = {0.5F, 0.5F, 0.5F};
+  mmd.mmd.toon_source = Toon::ToonRampSource::None;
+  mmd.mmd.shared_toon_index = -1;
+  mmd.mmd.sphere_texture.texture = sphere;
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Add;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(134)) {
+    return {id, "fail", "an add sphere must add its texel"};
+  }
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Multiply;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(4)) {
+    return {id, "fail", "a multiply sphere must multiply by its texel"};
+  }
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Disabled;
+  mmd.mmd.specular_color = {0.25F, 0.25F, 0.25F};
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(133)) {
+    return {id, "fail",
+        "a specular power of 0 must add the specular colour everywhere"};
+  }
+
+  // Red at z 0.5 and green at 0.2, each half the mesh, listed red first.
+  world.SetMeshVisible(mesh, false);
+  const Toon::MeshId halves = world.CreateMesh();
+  world.SetMeshPoints(halves,
+      {{-0.70F, -0.65F, 0.5F}, {0.70F, -0.65F, 0.5F}, {0.00F, 0.70F, 0.5F},
+          {-0.70F, -0.65F, 0.2F}, {0.70F, -0.65F, 0.2F},
+          {0.00F, 0.70F, 0.2F}});
+  world.SetMeshTopology(halves, {0, 1, 2, 3, 4, 5});
+  const auto layer = [](Toon::Float3 ambient, std::int32_t order) {
+    Toon::ToonMaterial values;
+    values.model = Toon::ToonShadingModel::MMD;
+    values.base_color = {0.0F, 0.0F, 0.0F};
+    values.alpha = 0.5F;
+    values.mmd.ambient_color = ambient;
+    values.mmd.draw_order = order;
+    return values;
+  };
+  const Toon::MaterialId red = world.CreateMaterial();
+  const Toon::MaterialId green = world.CreateMaterial();
+  world.SetMaterial(red, layer({1.0F, 0.0F, 0.0F}, 1));
+  world.SetMaterial(green, layer({0.0F, 1.0F, 0.0F}, 0));
+  world.SetMeshSubsets(halves, {{0, 3, red}, {3, 3, green}});
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  if (!is(131, 70, 10) || std::fabs(center_depth - 0.25F) > 0.01F) {
+    return {id, "fail",
+        "transparent MMD draws must blend in MMD's material order and write "
+        "depth"};
+  }
+
+  const Toon::OffscreenStatistics before = renderer->statistics();
+  Toon::ToonMaterial brighter = layer({1.0F, 0.0F, 0.0F}, 1);
+  brighter.mmd.ambient_color = {1.0F, 1.0F, 0.0F};
+  world.SetMaterial(red, brighter);
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  const Toon::OffscreenStatistics& after = renderer->statistics();
+  if (after.validation_message_count != 0) {
+    return {id, "fail", after.validation_detail};
+  }
+  if (!is(131, 198, 10)) {
+    return {id, "fail", "an ambient edit must reach the next frame"};
+  }
+  if (after.material_writes != before.material_writes + 1U ||
+      after.pipelines_created != before.pipelines_created ||
+      after.point_uploads != before.point_uploads ||
+      after.topology_uploads != before.topology_uploads ||
+      after.texture_uploads != before.texture_uploads) {
+    return {id, "fail",
+        "an MMD value-only edit must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
 // the default, 4, through SetOrthographicView. The first scene is
 // AddOctahedron's diamond in unlit red under an unlit green world outline
@@ -2565,7 +2757,7 @@ int main(int argc, char** argv) {
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 4 &&
+                     statistics.pipelines_created == 6 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;
@@ -2614,6 +2806,7 @@ int main(int argc, char** argv) {
     checks.push_back(OutlineOcclusionCheck(shaders));
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
+    checks.push_back(MmdCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
@@ -2633,6 +2826,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.outline.frustum", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
+    checks.push_back({"renderer.material.mmd", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }

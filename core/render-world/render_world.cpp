@@ -381,6 +381,62 @@ void RenderWorld::SetMetersPerUnit(float meters) {
   }
 }
 
+ToonTexture SharedToonRamp(std::int32_t index) {
+  // A row and its colour, 8-bit as MMD stores it. Rows above a ramp's
+  // first stop take its colour, rows below its last stop the last one's,
+  // and rows between two stops run linearly from one to the other.
+  struct Stop {
+    std::uint8_t row;
+    std::uint8_t red;
+    std::uint8_t green;
+    std::uint8_t blue;
+  };
+  struct Ramp {
+    Stop stops[2];
+  };
+  // toon01-toon04 are white above the middle and one shade below it;
+  // toon05 and toon06 grade into their shade, toon06 from a yellow lit
+  // side, and their highlights are left out; toon07-toon10 are white.
+  static constexpr Ramp kRamps[10] = {
+      {{{15, 255, 255, 255}, {16, 205, 205, 205}}},
+      {{{15, 255, 255, 255}, {16, 245, 225, 225}}},
+      {{{15, 255, 255, 255}, {16, 154, 154, 154}}},
+      {{{15, 255, 255, 255}, {16, 248, 239, 235}}},
+      {{{17, 255, 255, 255}, {24, 255, 231, 221}}},
+      {{{21, 255, 237, 97}, {25, 195, 172, 3}}},
+      {{{0, 255, 255, 255}, {31, 255, 255, 255}}},
+      {{{0, 255, 255, 255}, {31, 255, 255, 255}}},
+      {{{0, 255, 255, 255}, {31, 255, 255, 255}}},
+      {{{0, 255, 255, 255}, {31, 255, 255, 255}}}};
+  constexpr std::uint32_t kSize = 32;
+  ToonTexture texture;
+  texture.width = kSize;
+  texture.height = kSize;
+  texture.encoding = ToonTextureEncoding::Linear;
+  std::vector<std::uint8_t> pixels(kSize * kSize * 4U, 255);
+  if (index >= 0 && index < 10) {
+    const Stop& first = kRamps[index].stops[0];
+    const Stop& last = kRamps[index].stops[1];
+    for (std::uint32_t row = 0; row < kSize; ++row) {
+      const float t = row <= first.row  ? 0.0F
+                      : row >= last.row ? 1.0F
+                                        : static_cast<float>(row - first.row) /
+                                              static_cast<float>(last.row - first.row);
+      const auto mix = [t](std::uint8_t from, std::uint8_t to) {
+        return static_cast<std::uint8_t>(std::lround(
+            static_cast<float>(from) + (static_cast<float>(to) - static_cast<float>(from)) * t));
+      };
+      const std::uint8_t color[3] = {mix(first.red, last.red),
+          mix(first.green, last.green), mix(first.blue, last.blue)};
+      for (std::uint32_t column = 0; column < kSize; ++column) {
+        std::copy(color, color + 3, pixels.begin() + (row * kSize + column) * 4U);
+      }
+    }
+  }
+  texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(std::move(pixels));
+  return texture;
+}
+
 bool HasOutline(const ToonMaterial& material) {
   return material.model == ToonShadingModel::MToon && material.outline &&
          material.mtoon.outline_width_mode != ToonOutlineWidthMode::None &&

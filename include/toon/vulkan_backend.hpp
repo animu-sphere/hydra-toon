@@ -51,7 +51,7 @@ struct BackendCapability {
 // install-tree layouts exercise the same backend code without source-tree
 // fallbacks.
 struct SceneShaders {
-  // Unlit, one colour per draw: meshes that bind no MToon material.
+  // Unlit, one colour per draw: meshes that bind no MToon or MMD material.
   std::string mesh_vertex;
   std::string mesh_fragment;
   // mtoon_opaque (material policy §7).
@@ -65,6 +65,13 @@ struct SceneShaders {
   // outline (material policy §5).
   std::string mtoon_outline_vertex;
   std::string mtoon_outline_fragment;
+  // mmd_opaque: an MMD material that blends nothing (material policy §7).
+  std::string mmd_vertex;
+  std::string mmd_fragment;
+  // mmd_transparent: an MMD material that can blend, in MMD's material
+  // order after every opaque draw (material policy §6).
+  std::string mmd_transparent_vertex;
+  std::string mmd_transparent_fragment;
   // overlay: a present session's 2D overlay (OverlayDrawList). The offscreen
   // renderer draws none and does not read these.
   std::string overlay_vertex;

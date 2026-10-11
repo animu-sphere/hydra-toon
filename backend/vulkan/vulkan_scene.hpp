@@ -55,10 +55,10 @@ struct DrawConstants {
   std::uint32_t padding[3];
 };
 
-// Must match DrawConstants in shaders/mtoon_common.slang, which both
-// mtoon_opaque and mtoon_outline read: 128 bytes, the push constant size
-// every Vulkan device offers.
-struct MToonDrawConstants {
+// Must match DrawConstants in shaders/surface_common.slang, which every
+// MToon and MMD pipeline reads: 128 bytes, the push constant size every
+// Vulkan device offers.
+struct SurfaceDrawConstants {
   float clip_from_object[16];
   // The top three rows of view-from-object: its 3x3 in xyz and the
   // translation in w. The shaders derive the normal matrix from it.
@@ -76,7 +76,7 @@ struct MToonDrawConstants {
   // width, which MToon gives in metres.
   float units_per_meter;
 };
-static_assert(sizeof(MToonDrawConstants) == 128);
+static_assert(sizeof(SurfaceDrawConstants) == 128);
 
 constexpr std::uint32_t kDrawHasUVs = 1U;
 constexpr std::uint32_t kDrawSkinned = 2U;
@@ -99,11 +99,15 @@ static_assert(sizeof(ToonMorphRange) == 8);
 constexpr std::uint32_t kOutlineWorld = 1U;
 constexpr std::uint32_t kOutlineScreen = 2U;
 
-// Entries in the texture table mtoon_opaque indexes, and a shader constant
-// (kTextureCapacity in shaders/mtoon.slang). Entry 0 is a white placeholder,
-// which a material samples for a texture it has not got or that is not
-// resident, so every entry is always a valid image.
+// Entries in the texture table the surface pipelines index, and a shader
+// constant (kTextureCapacity in shaders/surface_common.slang). Entry 0 is a
+// white placeholder, which a material samples for a texture it has not got
+// or that is not resident, so every entry is always a valid image.
 constexpr std::uint32_t kTextureCapacity = 128;
+// MMD's shared toon ramps, SharedToonRamp(0) to (9), resident from the
+// table's creation in the entries after the placeholder.
+constexpr std::uint32_t kSharedToonRamps = 10;
+constexpr std::uint32_t kFirstRampEntry = 1;
 
 // One sampler per glTF wrap pair: index wrap_s * 3 + wrap_t, in ToonWrap
 // order.
@@ -164,6 +168,27 @@ struct MToonParameters {
 };
 static_assert(sizeof(MToonParameters) == 544);
 
+// An MMD slot's sphere mode, as shaders/mmd_common.slang reads it.
+constexpr std::uint32_t kSphereNone = 0U;
+constexpr std::uint32_t kSphereMultiply = 1U;
+constexpr std::uint32_t kSphereAdd = 2U;
+
+// One material's slot in the MMD parameter buffer. Must match
+// MmdParameters in shaders/mmd_common.slang. Colours are MMD's as stored.
+struct MmdParameters {
+  float diffuse[4];
+  // rgb the specular colour, a the specular power.
+  float specular[4];
+  float ambient[4];
+  // x base texture entry, y its sampler; z sphere texture entry, w its
+  // sampler.
+  std::uint32_t textures[4];
+  // x the toon ramp's entry, 0 without one; y the sphere mode.
+  std::uint32_t modes[4];
+  float base_uv[8];
+};
+static_assert(sizeof(MmdParameters) == 112);
+
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
 // pass or framebuffer to rebuild on resize), Synchronization2 and timeline
 // semaphores (design policy §19), and a texture table indexed by a value
@@ -205,22 +230,25 @@ struct ScenePipeline {
 };
 
 // The scene pipelines for one colour/depth format pair and sample count:
-// the unlit mesh pipeline, mtoon_opaque, mtoon_transparent and
-// mtoon_outline. The last two blend their source's alpha over the target;
-// multisampled, mtoon_opaque turns its alpha into coverage. The MToon ones
-// read the material parameter buffer, the texture table and the wrap
-// samplers through `material_layout` (set 0), in both stages, since the
-// outline's width is the vertex stage's to apply. Every pipeline skins a
-// mesh in the vertex stage through `skin_layout` (set 1): its influences
-// and its joint buffer. Viewport and scissor are dynamic, and so are the MToon pipelines'
-// cull mode, front face, depth writes and vertex strides, so each pipeline
-// is created once and survives every resize, every material and every mesh
+// the unlit mesh pipeline, mtoon_opaque, mtoon_transparent, mtoon_outline,
+// mmd_opaque and mmd_transparent. The transparent ones and mtoon_outline
+// blend their source's alpha over the target; multisampled, mtoon_opaque
+// turns its alpha into coverage. The MToon and MMD ones read their model's
+// parameter buffer, the texture table and the wrap samplers through
+// `material_layout` (set 0), in both stages, since the outline's width is
+// the vertex stage's to apply. Every pipeline skins a mesh in the vertex
+// stage through `skin_layout` (set 1): its influences and its joint buffer.
+// Viewport and scissor are dynamic, and so are the surface pipelines' cull
+// mode, front face, depth writes and vertex strides, so each pipeline is
+// created once and survives every resize, every material and every mesh
 // with or without UVs or a skin.
 struct ScenePipelines {
   ScenePipeline mesh;
   ScenePipeline mtoon;
   ScenePipeline mtoon_transparent;
   ScenePipeline mtoon_outline;
+  ScenePipeline mmd;
+  ScenePipeline mmd_transparent;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
@@ -228,7 +256,7 @@ struct ScenePipelines {
   // What every pipeline rasterizes at; the targets must match it.
   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
-  static constexpr std::uint32_t kCount = 4;
+  static constexpr std::uint32_t kCount = 6;
 };
 
 // The SPIR-V of every scene pipeline, loaded before any device exists so a
@@ -242,6 +270,10 @@ struct SceneShaderWords {
   std::vector<std::uint32_t> mtoon_transparent_fragment;
   std::vector<std::uint32_t> mtoon_outline_vertex;
   std::vector<std::uint32_t> mtoon_outline_fragment;
+  std::vector<std::uint32_t> mmd_vertex;
+  std::vector<std::uint32_t> mmd_fragment;
+  std::vector<std::uint32_t> mmd_transparent_vertex;
+  std::vector<std::uint32_t> mmd_transparent_fragment;
 };
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -252,7 +284,7 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
     std::string& detail);
 void DestroyScenePipelines(VkDevice device, ScenePipelines& pipelines);
 
-// The four pipelines alone, at `samples`, over the set layouts and samplers
+// The pipelines alone, at `samples`, over the set layouts and samplers
 // `pipelines` already holds: another sample count destroys and creates these
 // and keeps the layouts, so every descriptor set allocated from them, and
 // the material, texture and skin data they point at, stays as it is.
@@ -324,6 +356,8 @@ bool InvalidateIfNeeded(VkDevice device, const HostBuffer& buffer,
 // table in the material descriptor set. A texture is uploaded only when its
 // revision changes: its pixels go through a staging buffer, and the copy and
 // its mipmaps are recorded at the start of the frame that first samples it.
+// MMD's shared toon ramps are the renderer's own, uploaded with the
+// placeholder and resident for the cache's life.
 //
 // That upload is recorded on the render thread, on the graphics queue: a
 // stand-in for design policy §20's off-thread transfer, as geometry's is.
@@ -339,8 +373,13 @@ public:
   // The table entry a texture samples through: 0, the placeholder, when it
   // is none, has no pixels or did not fit in the table.
   [[nodiscard]] std::uint32_t Entry(TextureId texture) const;
+  // The table entry of MMD's shared toon ramp `index`: 0, white, outside
+  // 0-9.
+  [[nodiscard]] static std::uint32_t SharedRampEntry(std::int32_t index);
   // True only for a resident image whose entire G channel is zero.
   [[nodiscard]] bool ZeroGreen(TextureId texture) const;
+  // True only for a resident image with an alpha below 1 anywhere.
+  [[nodiscard]] bool Translucent(TextureId texture) const;
   void Destroy();
 
   [[nodiscard]] std::uint64_t uploads() const {
@@ -359,6 +398,7 @@ private:
     std::uint64_t revision = 0;
     std::uint64_t generation = 0;
     bool zero_green = false;
+    bool translucent = false;
   };
   struct Upload {
     VkImage image = VK_NULL_HANDLE;
@@ -381,9 +421,10 @@ private:
   bool srgb_mipmaps_ = false;
   bool linear_mipmaps_ = false;
   DeviceImage placeholder_;
+  DeviceImage ramps_[kSharedToonRamps];
   std::unordered_map<TextureId, Resident> textures_;
   std::vector<std::uint32_t> free_entries_;
-  std::uint32_t next_entry_ = 1;
+  std::uint32_t next_entry_ = kFirstRampEntry + kSharedToonRamps;
   // Staged, not yet recorded.
   std::vector<Upload> pending_;
   // Recorded; freed once the frame that copies from them has completed.
@@ -392,7 +433,7 @@ private:
   std::uint64_t uploads_ = 0;
 };
 
-// The texture table entry of every texture an MToon slot samples.
+// The texture table entry of every texture an MToon or MMD slot samples.
 struct MaterialEntries {
   std::uint32_t base = 0;
   std::uint32_t shade = 0;
@@ -403,17 +444,21 @@ struct MaterialEntries {
   std::uint32_t normal = 0;
   std::uint32_t shift = 0;
   std::uint32_t mask = 0;
+  std::uint32_t sphere = 0;
+  std::uint32_t toon = 0;
 
   friend bool operator==(const MaterialEntries&,
       const MaterialEntries&) = default;
 };
 
-// One parameter slot per material, in a host-visible storage buffer that
-// mtoon_opaque indexes by slot (material policy §7). A slot is rewritten
-// when its material's parameters revision changes or a texture it samples
-// moves to another table entry; a new material takes a free slot, and the
-// buffer grows by doubling, keeping every slot. Its descriptor set also
-// holds the texture table, which a TextureCache fills.
+// One parameter slot per material, in its model's host-visible storage
+// buffer, which that model's pipelines index by slot (material policy §7):
+// MToonParameters for MToon and MmdParameters for MMD, one slot number in
+// both. A slot is rewritten when its material's parameters revision
+// changes or a texture it samples moves to another table entry; a new
+// material takes a free slot, and the buffers grow by doubling, keeping
+// every slot. Its descriptor set also holds the texture table, which a
+// TextureCache fills.
 class MaterialCache {
 public:
   struct Entry {
@@ -429,11 +474,19 @@ public:
     float outline_width = 0;
     ToonOutlineWidthMode outline_width_mode = ToonOutlineWidthMode::None;
     bool zero_width_texture = false;
-    // Whether its draws go through mtoon_transparent, in `queue` order
-    // after every opaque draw, and whether they write depth.
+    // Whether its draws go through mtoon_transparent or mmd_transparent,
+    // in `queue` order after every opaque draw, and whether they write
+    // depth. An MMD material is transparent when it can blend: its diffuse
+    // alpha is below 1, or a base or sphere texture it samples is
+    // translucent. Its queue is 3000, and it writes depth, as MMD does.
     bool transparent = false;
     std::int32_t queue = 0;
     bool depth_write = true;
+    // MMD's material-table index, which orders an MMD material's
+    // transparent draws within one mesh.
+    std::int32_t draw_order = 0;
+    // An MMD material's diffuse alpha is below 1.
+    bool mmd_translucent = false;
     std::uint64_t generation = 0;
   };
 
@@ -463,6 +516,7 @@ private:
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkDescriptorSet set_ = VK_NULL_HANDLE;
   HostBuffer buffer_;
+  HostBuffer mmd_buffer_;
   // Fixed frame/light buffer, kFrameBytes bytes: time, debug, uniform ambient
   // and up to kLightCapacity direct sources. Updated after the prior frame.
   HostBuffer frame_buffer_;
@@ -517,10 +571,11 @@ public:
   // material its face subset binds. Unlit draws first; then the outline
   // hull of every opaque MToon draw that asks for one (design policy §10's
   // first pass); then every opaque draw whose material selected MToon, a
-  // Mask one by alpha to coverage when `pipelines` are multisampled.
-  // Transparent MToon draws come last, ordered by their material's render
-  // queue and then as `draws` and each mesh's parts list them, each surface
-  // followed by its hull (material policy §6). `record`, when given, counts
+  // Mask one by alpha to coverage when `pipelines` are multisampled, or
+  // MMD. Transparent draws come last, ordered by their material's render
+  // queue and then as `draws` and each mesh's parts list them, an MMD
+  // mesh's parts in MMD's material order; an MToon surface is followed by
+  // its hull (material policy §6). `record`, when given, counts
   // what was drawn and marks where each pass ends.
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws,
