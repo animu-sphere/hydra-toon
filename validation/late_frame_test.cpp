@@ -6,6 +6,8 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace {
 void Require(bool condition, const char* why) { if (!condition) throw std::runtime_error(why); }
@@ -86,19 +88,35 @@ void State() {
   Toon::viewport::FrameTelemetry telemetry;
   Toon::FrameLatency sample;
   sample.inputs.pose = sample.inputs.expression = sample.inputs.look_at = sample.inputs.camera = 1'000'000;
+  sample.latched = 1'500'000;
   sample.buffers_written = 2'000'000;
   sample.submitted = 3'000'000;
   sample.present_returned = 4'000'000;
   telemetry.PushLatency(sample);
   const auto rows = telemetry.Latency();
-  Require(rows[0].series->Summarize().mean == 1 && rows[1].series->Summarize().mean == 2 &&
-      rows[2].series->Summarize().mean == 3, "latency clock conversion wrong");
+  const auto row = [&](std::string_view name) -> const Toon::viewport::Series& {
+    for (const auto& named : rows) {
+      if (name == named.name) return *named.series;
+    }
+    throw std::runtime_error("missing latency series " + std::string(name));
+  };
+  // Every input's age at the late read, buffer write, submit and present.
+  for (const char* input : {"pose", "expression", "look_at"}) {
+    const std::string prefix(input);
+    Require(row(prefix + "_latch").Summarize().mean == 0.5 &&
+            row(prefix + "_buffer").Summarize().mean == 1 &&
+            row(prefix + "_submit").Summarize().mean == 2 &&
+            row(prefix + "_present_api").Summarize().mean == 3,
+        "latency clock conversion wrong");
+  }
+  Require(row("camera_present_api").Summarize().mean == 3, "latency clock conversion wrong");
   telemetry.PushLatency(sample);
-  Require(rows[0].series->size() == 1 && rows[5].series->size() == 1,
+  Require(row("pose_buffer").size() == 1 && row("expression_present_api").size() == 1 &&
+              row("camera_present_api").size() == 1,
       "unchanged input age counted as another response latency");
   sample.inputs = {}; // Absent samples must not be reported as zero latency.
   telemetry.PushLatency(sample);
-  Require(rows[0].series->size() == 1, "absent input counted as measured latency");
+  Require(row("pose_buffer").size() == 1, "absent input counted as measured latency");
   Require(telemetry.Json().find("\"display_time_measured\":false") != std::string::npos,
       "telemetry misrepresents display endpoint");
 }

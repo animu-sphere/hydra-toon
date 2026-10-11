@@ -1,5 +1,8 @@
 # The runtime's motion clip provider in the host composition
 
+Later: [report 51](51-2026-10-11-v030-evidence.md) compares draw packets and
+rebinding with the oracle and ages input at every endpoint.
+
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev; `usd-avatar-runtime`

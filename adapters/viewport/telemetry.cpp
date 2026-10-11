@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <locale>
 #include <sstream>
+#include <tuple>
 
 namespace Toon::viewport {
 namespace {
@@ -86,12 +87,19 @@ void FrameTelemetry::PushLatency(const FrameLatency& sample) {
       measured_inputs_[index] = input;
     }
   };
-  age(0, pose_buffer_, sample.inputs.pose, sample.buffers_written);
-  age(1, pose_submit_, sample.inputs.pose, sample.submitted);
-  age(2, pose_present_, sample.inputs.pose, sample.present_returned);
-  age(3, expression_submit_, sample.inputs.expression, sample.submitted);
-  age(4, look_at_submit_, sample.inputs.look_at, sample.submitted);
-  age(5, camera_present_, sample.inputs.camera, sample.present_returned);
+  std::size_t index = 0;
+  for (const auto& [input, latch, buffer, submit, present] :
+      {std::tuple{sample.inputs.pose, &pose_latch_, &pose_buffer_, &pose_submit_, &pose_present_},
+          std::tuple{sample.inputs.expression, &expression_latch_, &expression_buffer_,
+              &expression_submit_, &expression_present_},
+          std::tuple{sample.inputs.look_at, &look_at_latch_, &look_at_buffer_, &look_at_submit_,
+              &look_at_present_}}) {
+    age(index++, *latch, input, sample.latched);
+    age(index++, *buffer, input, sample.buffers_written);
+    age(index++, *submit, input, sample.submitted);
+    age(index++, *present, input, sample.present_returned);
+  }
+  age(index, camera_present_, sample.inputs.camera, sample.present_returned);
   pose_write_.Push(sample.pose_write_ms);
   morph_write_.Push(sample.morph_write_ms);
   material_write_.Push(sample.material_write_ms);
@@ -103,9 +111,14 @@ void FrameTelemetry::PushLatency(const FrameLatency& sample) {
 }
 
 std::vector<FrameTelemetry::Named> FrameTelemetry::Latency() const {
-  return {{"pose_buffer", &pose_buffer_}, {"pose_submit", &pose_submit_},
-      {"pose_present_api", &pose_present_}, {"expression_submit", &expression_submit_},
-      {"look_at_submit", &look_at_submit_}, {"camera_present_api", &camera_present_},
+  return {{"pose_latch", &pose_latch_}, {"pose_buffer", &pose_buffer_},
+      {"pose_submit", &pose_submit_}, {"pose_present_api", &pose_present_},
+      {"expression_latch", &expression_latch_}, {"expression_buffer", &expression_buffer_},
+      {"expression_submit", &expression_submit_},
+      {"expression_present_api", &expression_present_},
+      {"look_at_latch", &look_at_latch_}, {"look_at_buffer", &look_at_buffer_},
+      {"look_at_submit", &look_at_submit_}, {"look_at_present_api", &look_at_present_},
+      {"camera_present_api", &camera_present_},
       {"pose_write", &pose_write_}, {"morph_write", &morph_write_}, {"material_write", &material_write_}};
 }
 
