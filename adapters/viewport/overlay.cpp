@@ -779,8 +779,9 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
       const SceneCounts& counts = frame.counts;
       ImGui::Text("meshes %zu  MToon %zu  skinned %zu", counts.draws,
           counts.mtoon, counts.skinned);
-      ImGui::Text("materials %zu MToon, %zu preview  textures %zu",
-          counts.mtoon_materials, counts.preview_materials, counts.textures);
+      ImGui::Text("materials %zu MToon, %zu MMD, %zu preview  textures %zu",
+          counts.mtoon_materials, counts.mmd_materials,
+          counts.preview_materials, counts.textures);
       ImGui::Text("unlit %u  outline %u  opaque %u  transparent %u",
           draws.unlit, draws.outline, draws.opaque, draws.transparent);
       ImGui::Text("pipeline binds %u", draws.pipeline_binds);

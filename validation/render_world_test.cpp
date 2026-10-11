@@ -505,11 +505,12 @@ int main() {
   world.RemoveLight(light_id);
   if (!Check(world.Commit().lights.empty(), "removed lights must leave snapshots"))
     return 1;
-  for (int role = 0; role < 4; ++role) {
+  for (int role = 0; role < 6; ++role) {
     auto changed = defaults;
-    const std::array<Toon::ToonTextureRef*, 4> refs{&changed.emissive_texture,
+    const std::array<Toon::ToonTextureRef*, 6> refs{&changed.emissive_texture,
         &changed.normal_texture, &changed.mtoon.shading_shift_texture,
-        &changed.mtoon.uv_animation_mask_texture};
+        &changed.mtoon.uv_animation_mask_texture, &changed.mmd.sphere_texture,
+        &changed.mmd.toon_texture};
     refs[role]->rotation = 1.0F;
     if (!Check(!Toon::IsStructuralChange(defaults, changed),
             "a new role's transform is value-only")) {

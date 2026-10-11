@@ -212,6 +212,14 @@ enum class ToonAlphaMode { Opaque, Mask, Blend };
 
 enum class ToonOutlineWidthMode { None, World, Screen };
 
+// MMD's sphere mode: how the sphere texture combines with the base colour,
+// or `SubTexture`, sampled at the mesh's additional UV 1 instead.
+enum class ToonSphereMode { Disabled, Multiply, Add, SubTexture };
+
+// Where an MMD material's toon ramp comes from: none, its own texture, or
+// MMD's shared ramp at an index, which the renderer supplies.
+enum class ToonRampSource { None, Individual, Shared };
+
 // How a texture's bytes encode their values: colour is sRGB-encoded, data
 // is linear. The role a material samples a texture in decides which.
 enum class ToonTextureEncoding { Srgb, Linear };
@@ -320,6 +328,35 @@ struct ToonMaterial {
 
     friend bool operator==(const MToon&, const MToon&) = default;
   } mtoon;
+
+  // Read only when `model` is MMD. Colours are MMD's as authored, which
+  // states no colour space (material policy MAT-Q3). Diffuse is the common
+  // base colour and alpha, the base texture the common one, and the edge
+  // the common outline request.
+  struct MMD {
+    Float3 specular_color;
+    float specular_power = 0.0F;
+    Float3 ambient_color;
+    // The edge colour's alpha; its RGB is the common outline colour.
+    float edge_alpha = 0.0F;
+    ToonTextureRef sphere_texture;
+    ToonSphereMode sphere_mode = ToonSphereMode::Disabled;
+    ToonRampSource toon_source = ToonRampSource::None;
+    // Sampled clamped; read when `toon_source` is Individual.
+    ToonTextureRef toon_texture;
+    // MMD's shared ramp 0-9 when `toon_source` is Shared, else -1.
+    std::int32_t shared_toon_index = -1;
+    bool ground_shadow = false;
+    bool cast_self_shadow = false;
+    bool receive_self_shadow = false;
+    bool vertex_color = false;
+    bool draw_points = false;
+    bool draw_lines = false;
+    // The material-table index MMD draws in (material policy §6).
+    std::int32_t draw_order = 0;
+
+    friend bool operator==(const MMD&, const MMD&) = default;
+  } mmd;
 
   friend bool operator==(const ToonMaterial&, const ToonMaterial&) = default;
 };

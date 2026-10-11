@@ -21,7 +21,7 @@ it into, and what stays specific to one model.
 | Model | Recognized by | Read from | Owner |
 | --- | --- | --- | --- |
 | MToon | `VrmMToonAPI` applied to the `UsdShadeMaterial`; in Hydra, a `vrm/mtoon` container on the material prim | `inputs:vrm:material:*`, `inputs:vrm:mtoon:*`, `inputs:vrm:textureInfo:<slot>:*`, as `vrmImaging` exposes them on the Hydra material prim: `vrm/material`, `vrm/mtoon`, `vrm/textureInfo/<role>` | [`usd-vrm-plugins` material policy §6](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/MATERIAL_ARCHITECTURE_POLICY.md#6-canonical-vrm-material-semantics); the Hydra view, [imaging policy §28.1](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/docs/design/VRM_IMAGING_POLICY.md#281-the-vrm-locator-hierarchy) |
-| MMD | `MmdMaterialAPI` applied to the `UsdShadeMaterial` | `inputs:mmd:material:*`; `mmd:sourceIndex`; `primvars:mmd:edgeScale`, `primvars:mmd:uv1`; the Hydra view is `mmdImaging`'s, which does not exist yet (MAT-Q1) | [`usd-mmd-plugins` material policy §4](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#4-canonical-material-semantics) |
+| MMD | `MmdMaterialAPI` applied to the `UsdShadeMaterial`; in Hydra, an `mmd/material` container on the material prim | `inputs:mmd:material:*` and `mmd:sourceIndex`, as `mmdImaging` exposes them on the Hydra material prim: `mmd/material/<field>`, `mmd/drawOrder`; `primvars:mmd:edgeScale`, `primvars:mmd:uv1` on the mesh | [`usd-mmd-plugins` material policy §4](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#4-canonical-material-semantics); the Hydra view, [§12.1](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#121-the-hydra-view-mmdimaging) |
 | PreviewSurface | neither API applied; a `UsdPreviewSurface` reached from the material's surface output | the ordinary Hydra material network | OpenUSD |
 
 The attribute names and their meaning belong to the owners and are not
@@ -34,8 +34,8 @@ not connect to them, so the network never carries them
 `hdToon` therefore reads the Hydra material prim's own data sources, from the
 render index's terminal scene index, in the locator hierarchy the adapter's
 owner froze. It links neither the schema nor the adapter. A session that
-registers either without the other, or neither, carries no `vrm` container,
-and the material is PreviewSurface by §3 — a silent fall-back that the
+registers either without the other, or neither, carries no `vrm` or `mmd`
+container, and the material is PreviewSurface by §3 — a silent fall-back that the
 session's composition, not this renderer, has to prevent. MMD's
 stage-contract version 1 (schema-less `mmd:material:*`) is not read: the MMD
 path reads version 2, which is what that repository's importer authors.
@@ -45,7 +45,7 @@ path reads version 2, which is what that repository's importer authors.
 For each material, exactly one model applies, in this order:
 
 1. `VrmMToonAPI` applied — in Hydra, `vrm/mtoon` present → **MToon**.
-2. `MmdMaterialAPI` applied → **MMD**.
+2. `MmdMaterialAPI` applied — in Hydra, `mmd/material` present → **MMD**.
 3. Otherwise → **PreviewSurface**, from the material's surface network.
 4. Nothing readable → the fallback material.
 
@@ -72,7 +72,7 @@ model-specific block:
 | --- | --- |
 | common | shading model; base colour and alpha; base texture; normal texture and scale; alpha mode and cutoff; cull mode (double-sidedness); emissive and its texture; outline enable, width, colour; sort key |
 | MToon block | shade colour and texture; shading shift, its texture and contribution scale, and toony; GI equalization; MatCap; parametric rim and rim texture; outline width mode and lighting mix; UV animation and mask; render-queue offset; transparent-with-Z-write |
-| MMD block | specular colour and power; ambient; sphere texture and mode; toon source, texture or shared index; shadow flags; vertex-colour and draw-points / lines flags |
+| MMD block | specular colour and power; ambient; the edge colour's alpha; sphere texture and mode; toon source, texture or shared index; shadow flags; vertex-colour and draw-points / lines flags; draw order |
 
 Only what is truly the same goes into the common part. MMD-only concepts —
 sphere modes, sub-texture UVs, shared toon slots, shadow flags, per-vertex edge
@@ -171,6 +171,6 @@ structural.
 
 | Id | Question | Proposed answer | Resolve by |
 | --- | --- | --- | --- |
-| MAT-Q1 | How `inputs:mmd:material:*` reaches the render delegate. For MToon this is answered by §2 and §8 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)) | The same shape for `mmdImaging` — a container on the Hydra material prim, read from the terminal scene index — whose Hydra view is `usd-mmd-plugins`' to define, so that one read path serves both models | agreed with `usd-mmd-plugins` before v0.4.0 |
+| MAT-Q1 | How `inputs:mmd:material:*` reaches the render delegate. For MToon this is answered by §2 and §8 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)) | resolved 2026-10-11: the same shape for both models, a container on the Hydra material prim read from the terminal scene index. `usd-mmd-plugins` froze `mmdImaging`'s view on 2026-10-04, and every material of 41 local MMD stages selects MMD through it (§2, §3; [report 53](../reports/renderer/53-2026-10-11-mmd-material-read.md)) | agreed with `usd-mmd-plugins` before v0.4.0 |
 | MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | `hydra-toon` ships its own ramp set whose terms allow redistribution, mapped by index | v0.4.0 |
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | Decide, and record, how the MMD path interprets them, against reference renders from MMD itself | v0.4.0 |

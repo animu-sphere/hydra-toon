@@ -368,6 +368,8 @@ bool IsStructuralChange(const ToonMaterial& before,
     const ToonMaterial& after) {
   return before.model != after.model ||
          before.alpha_mode != after.alpha_mode ||
+         before.mmd.sphere_texture.texture != after.mmd.sphere_texture.texture ||
+         before.mmd.toon_texture.texture != after.mmd.toon_texture.texture ||
          before.double_sided != after.double_sided ||
          before.emissive_texture.texture != after.emissive_texture.texture ||
          before.normal_texture.texture != after.normal_texture.texture ||

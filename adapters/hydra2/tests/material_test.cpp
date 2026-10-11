@@ -3,7 +3,8 @@
 // hdToon's material Sprim, through scene index emulation as a host drives it.
 //
 // Without arguments: a retained scene index stands in for vrmImaging and
-// spells its locators literally (its imaging policy §28.1), so the check
+// mmdImaging and spells their locators literally (vrmImaging's imaging
+// policy §28.1, usd-mmd-plugins' material policy §12.1), so the check
 // needs no format plugin and no GPU. With --stage, a stage runs through
 // UsdImaging instead and each material's selection is printed at the start
 // and end time codes; what it shows depends on the schema and imaging
@@ -14,6 +15,7 @@
 
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/gf/vec4f.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/imaging/hd/changeTracker.h>
 #include <pxr/imaging/hd/renderIndex.h>
@@ -26,6 +28,7 @@
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -271,7 +274,7 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
 
   // Every MToon role owns a separate transform, including the unanimated
   // mask and view-mapped MatCap. Contribution scale stays outside it.
-  const std::array<const char*, kHdToonTextureRoles> role_names{
+  const std::array<const char*, 9> role_names{
       "baseColor", "shadeMultiply", "outlineWidthMultiply", "matcap",
       "rimMultiply", "emissive", "normal", "shadingShift", "uvAnimationMask"};
   for (std::size_t slot = 0; slot < role_names.size(); ++slot) {
@@ -314,6 +317,212 @@ int RunTextures(HdRetainedSceneIndex& scene, HdRenderIndex& index) {
     return 1;
   }
   scene.RemovePrims({{a_id}, {unresolved_id}});
+  std::error_code ignored;
+  std::filesystem::remove(image_path, ignored);
+  return 0;
+}
+
+// A colour leaf whose value the test changes without replacing the prim.
+class SharedColorDataSource final : public HdTypedSampledDataSource<GfVec4f> {
+public:
+  HD_DECLARE_DATASOURCE(SharedColorDataSource);
+
+  VtValue GetValue(Time shutter_offset) override {
+    return VtValue(GetTypedValue(shutter_offset));
+  }
+
+  GfVec4f GetTypedValue(Time shutter_offset) override {
+    (void)shutter_offset;
+    return *value_;
+  }
+
+  bool GetContributingSampleTimesForInterval(Time start_time, Time end_time,
+      std::vector<Time>* sample_times) override {
+    (void)start_time;
+    (void)end_time;
+    (void)sample_times;
+    return false;
+  }
+
+private:
+  explicit SharedColorDataSource(std::shared_ptr<const GfVec4f> value)
+      : value_(std::move(value)) {
+  }
+
+  std::shared_ptr<const GfVec4f> value_;
+};
+
+// `mmdImaging`'s contribution: every field resolved, as it exposes them, and
+// `slots` added or replacing one.
+HdContainerDataSourceHandle MmdPrim(const HdDataSourceBaseHandle& diffuse,
+    const std::vector<Field>& slots) {
+  std::vector<Field> fields{
+      {"diffuseColor", diffuse},
+      {"specularColor", Value(GfVec3f(0.1F, 0.2F, 0.3F))},
+      {"specularPower", Value(12.0F)},
+      {"ambientColor", Value(GfVec3f(0.4F, 0.5F, 0.6F))},
+      {"doubleSided", Value(true)},
+      {"groundShadow", Value(true)},
+      {"castSelfShadow", Value(false)},
+      {"receiveSelfShadow", Value(true)},
+      {"drawEdge", Value(true)},
+      {"vertexColor", Value(false)},
+      {"drawPoints", Value(false)},
+      {"drawLines", Value(true)},
+      {"edgeColor", Value(GfVec4f(0.1F, 0.0F, 0.2F, 0.75F))},
+      {"edgeSize", Value(1.5F)},
+      {"sphereMode", Value(TfToken("add"))},
+      {"toonSource", Value(TfToken("shared"))},
+      {"sharedToonIndex", Value(3)},
+  };
+  for (const Field& slot : slots) {
+    const auto same = std::find_if(fields.begin(), fields.end(),
+        [&slot](const Field& field) {
+          return std::strcmp(field.first, slot.first) == 0;
+        });
+    if (same != fields.end()) {
+      same->second = slot.second;
+    } else {
+      fields.push_back(slot);
+    }
+  }
+  return Container({{"mmd", Container({
+      {"material", Container(fields)},
+      {"drawOrder", Value(7)},
+  })}});
+}
+
+// mmd/material/<field> and mmd/drawOrder (`usd-mmd-plugins` material policy
+// §12.1): selected after vrm/mtoon, every field read, an unauthored slot
+// absent, an individual toon texture clamped, and a diffuse change by the
+// value-only route.
+int RunMmd() {
+  const std::filesystem::path image_path =
+      std::filesystem::temp_directory_path() / "toon-material-mmd-test.png";
+  const std::string image = image_path.generic_string();
+  std::vector<std::uint8_t> pixels{255, 255, 255, 255};
+  HioImage::StorageSpec storage;
+  storage.width = 1;
+  storage.height = 1;
+  storage.depth = 1;
+  storage.format = HioFormatUNorm8Vec4;
+  storage.data = pixels.data();
+  const HioImageSharedPtr writer = HioImage::OpenForWriting(image);
+  if (!Check(writer != nullptr && writer->Write(storage),
+          "the test image must be written")) {
+    return 1;
+  }
+  const SdfAssetPath file(image, image);
+
+  const SdfPath shared_id("/Looks/MmdShared");
+  const SdfPath individual_id("/Looks/MmdIndividual");
+  const SdfPath both_id("/Looks/Both");
+  const auto diffuse =
+      std::make_shared<GfVec4f>(GfVec4f(0.8F, 0.6F, 0.4F, 0.5F));
+  const HdRetainedSceneIndexRefPtr scene = HdRetainedSceneIndex::New();
+  scene->AddPrims({
+      {shared_id, HdPrimTypeTokens->material,
+          MmdPrim(SharedColorDataSource::New(diffuse),
+              {{"texture", Value(file)}, {"sphereTexture", Value(file)}})},
+      {individual_id, HdPrimTypeTokens->material,
+          MmdPrim(Value(GfVec4f(1.0F)), {
+              {"toonSource", Value(TfToken("individual"))},
+              {"toonTexture", Value(file)},
+              {"sphereMode", Value(TfToken("subTexture"))},
+          })},
+      // Rule 1 before rule 2.
+      {both_id, HdPrimTypeTokens->material,
+          Container({
+              {"vrm", Container({{"mtoon", Container({})}})},
+              {"mmd", Container({{"material", Container({
+                  {"diffuseColor", Value(GfVec4f(0.0F, 0.0F, 0.0F, 1.0F))},
+              })}})},
+          })},
+  });
+  HdToonRenderDelegate delegate;
+  std::unique_ptr<HdRenderIndex> index(HdRenderIndex::New(&delegate, {}));
+  index->InsertSceneIndex(scene, SdfPath::AbsoluteRootPath());
+  HdTaskSharedPtrVector tasks;
+  HdTaskContext context;
+  index->SyncAll(&tasks, &context);
+
+  const HdToonMaterial* shared = FindMaterial(*index, shared_id);
+  const HdToonMaterial* individual = FindMaterial(*index, individual_id);
+  const HdToonMaterial* both = FindMaterial(*index, both_id);
+  if (!Check(shared != nullptr && individual != nullptr && both != nullptr,
+          "MMD material prims must become Toon materials")) {
+    return 1;
+  }
+  Toon::ToonMaterial expected;
+  expected.model = Toon::ToonShadingModel::MMD;
+  expected.base_color = {0.8F, 0.6F, 0.4F};
+  expected.alpha = 0.5F;
+  expected.double_sided = true;
+  expected.outline = true;
+  expected.outline_width = 1.5F;
+  expected.outline_color = {0.1F, 0.0F, 0.2F};
+  expected.mmd.edge_alpha = 0.75F;
+  expected.mmd.specular_color = {0.1F, 0.2F, 0.3F};
+  expected.mmd.specular_power = 12.0F;
+  expected.mmd.ambient_color = {0.4F, 0.5F, 0.6F};
+  expected.mmd.ground_shadow = true;
+  expected.mmd.receive_self_shadow = true;
+  expected.mmd.draw_lines = true;
+  expected.mmd.sphere_mode = Toon::ToonSphereMode::Add;
+  expected.mmd.toon_source = Toon::ToonRampSource::Shared;
+  expected.mmd.shared_toon_index = 3;
+  expected.mmd.toon_texture.wrap_s = Toon::ToonWrap::ClampToEdge;
+  expected.mmd.toon_texture.wrap_t = Toon::ToonWrap::ClampToEdge;
+  expected.mmd.draw_order = 7;
+  Toon::ToonMaterial read = shared->GetToonMaterial();
+  const Toon::TextureId texture = read.base_texture.texture;
+  if (!Check(texture != 0 && read.mmd.sphere_texture.texture == texture,
+          "the base and sphere slots must sample their image")) {
+    return 1;
+  }
+  read.base_texture.texture = 0;
+  read.mmd.sphere_texture.texture = 0;
+  if (!Check(read == expected,
+          "mmd/material must select MMD and read every field")) {
+    return 1;
+  }
+  const Toon::ToonMaterial& toon = individual->GetToonMaterial();
+  if (!Check(toon.model == Toon::ToonShadingModel::MMD &&
+                 toon.base_texture.texture == 0 &&
+                 toon.mmd.sphere_mode == Toon::ToonSphereMode::SubTexture &&
+                 toon.mmd.toon_source == Toon::ToonRampSource::Individual &&
+                 toon.mmd.shared_toon_index == -1 &&
+                 toon.mmd.toon_texture.texture == texture &&
+                 toon.mmd.toon_texture.wrap_s == Toon::ToonWrap::ClampToEdge,
+          "an individual toon texture must be sampled, clamped, and a shared "
+          "index ignored") ||
+      !Check(both->GetToonMaterial().model == Toon::ToonShadingModel::MToon,
+          "vrm/mtoon must win over mmd/material")) {
+    return 1;
+  }
+
+  // A material morph's result, time-sampled by a runtime, dirties its
+  // `mmd/material/<field>` alone (`mmdImaging` §12.1 item 5).
+  *diffuse = GfVec4f(0.2F, 0.3F, 0.4F, 1.0F);
+  scene->DirtyPrims({{shared_id,
+      HdDataSourceLocatorSet{HdDataSourceLocator(TfToken("mmd"),
+          TfToken("material"), TfToken("diffuseColor"))}}});
+  if (!Check(index->GetChangeTracker().GetSprimDirtyBits(shared_id) ==
+                 HdChangeTracker::Clean,
+          "emulation must leave an MMD value-only change's material clean")) {
+    return 1;
+  }
+  index->SyncAll(&tasks, &context);
+  shared = FindMaterial(*index, shared_id);
+  if (!Check(shared != nullptr &&
+                 shared->GetToonMaterial().base_color ==
+                     Toon::Float3{0.2F, 0.3F, 0.4F} &&
+                 shared->GetToonMaterial().alpha == 1.0F &&
+                 shared->GetToonMaterial().base_texture.texture == texture,
+          "an MMD value-only change must reach the material's values")) {
+    return 1;
+  }
+  index.reset();
   std::error_code ignored;
   std::filesystem::remove(image_path, ignored);
   return 0;
@@ -479,7 +688,7 @@ int RunRetained() {
     return 1;
   }
   index.reset();
-  return 0;
+  return RunMmd();
 }
 
 const char* ModelName(Toon::ToonShadingModel model) {
@@ -508,6 +717,7 @@ const char* AlphaModeName(Toon::ToonAlphaMode mode) {
 
 void PrintMaterials(HdRenderIndex& index, double time) {
   std::size_t mtoon = 0;
+  std::size_t mmd = 0;
   const SdfPathVector ids = index.GetSprimSubtree(HdPrimTypeTokens->material,
       SdfPath::AbsoluteRootPath());
   for (const SdfPath& id : ids) {
@@ -517,6 +727,7 @@ void PrintMaterials(HdRenderIndex& index, double time) {
     }
     const Toon::ToonMaterial& values = material->GetToonMaterial();
     mtoon += values.model == Toon::ToonShadingModel::MToon ? 1U : 0U;
+    mmd += values.model == Toon::ToonShadingModel::MMD ? 1U : 0U;
     std::cout << "time=" << time << ' ' << id
               << " model=" << ModelName(values.model)
               << " base=(" << values.base_color.x << ", "
@@ -524,12 +735,23 @@ void PrintMaterials(HdRenderIndex& index, double time) {
               << " alpha=" << values.alpha
               << " alphaMode=" << AlphaModeName(values.alpha_mode)
               << " doubleSided=" << values.double_sided
-              << " outline=" << values.outline
-              << " shadingShift=" << values.mtoon.shading_shift
-              << " shadingToony=" << values.mtoon.shading_toony << '\n';
+              << " outline=" << values.outline;
+    if (values.model == Toon::ToonShadingModel::MMD) {
+      std::cout << " drawOrder=" << values.mmd.draw_order
+                << " texture=" << (values.base_texture.texture != 0)
+                << " sphereMode=" << static_cast<int>(values.mmd.sphere_mode)
+                << " sphere=" << (values.mmd.sphere_texture.texture != 0)
+                << " toonSource=" << static_cast<int>(values.mmd.toon_source)
+                << " toon=" << (values.mmd.toon_texture.texture != 0)
+                << " sharedToon=" << values.mmd.shared_toon_index
+                << " edgeSize=" << values.outline_width << '\n';
+    } else {
+      std::cout << " shadingShift=" << values.mtoon.shading_shift
+                << " shadingToony=" << values.mtoon.shading_toony << '\n';
+    }
   }
   std::cout << "time=" << time << " materials=" << ids.size()
-            << " mtoon=" << mtoon << '\n';
+            << " mtoon=" << mtoon << " mmd=" << mmd << '\n';
 }
 
 // Populates at the start time code, then moves to the end one: a
