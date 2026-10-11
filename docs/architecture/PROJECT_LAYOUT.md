@@ -120,6 +120,15 @@ states the stage's `metersPerUnit` on each commit, as the viewport does. Its
 oracle authors each result into the session layer for UsdImaging to compose;
 that authoring belongs to the check, not to a renderer path.
 
+`toon-viewport-avatar` is the viewport built from the same sources with
+`adapters/viewport/avatar_runtime.*`, an external host of the same
+providers. It is built only with `TOON_AVATAR_RUNTIME_PROVIDERS` and the
+Hydra adapter, and is never installed; `toon-viewport` links no provider.
+`avatar_runtime.hpp` carries no runtime or OpenUSD type, and the overlay
+reads only its status. The host reaches the stage and delegate through
+`hydra_scene_parts.hpp`, which only OpenUSD translation units include. Its
+CTests use `run_avatar_providers.cmake` with `EXPECT` patterns.
+
 The sparse morph representation lives in `include/toon/render_world.hpp`:
 `ToonMorphOffset` and `ToonMorphRange` are immutable structural arrays,
 while weights have an independent revision. `SetMeshMorphWeights` does not
@@ -323,7 +332,7 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    core nor the backend receives skeleton hierarchy or debug geometry.
 5. No target links a format repository
    ([integration scope §4](../design/INTEGRATION_SCOPE_POLICY.md#4-dependency-rules)),
-   except the opt-in, uninstalled real-provider host check above. It reaches
+   except the opt-in, uninstalled real-provider hosts above. They reach
    the VRM owners only through the runtime's providers, and every build
    without `TOON_AVATAR_RUNTIME_PROVIDERS` needs no VRM install.
 6. The optional evaluated-state consumer under `adapters/fast/` may depend on

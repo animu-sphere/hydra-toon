@@ -253,6 +253,96 @@ void TimingTable(const char* id, const std::vector<FrameTelemetry::Named>& rows,
   ImGui::EndTable();
 }
 
+// Runtime outputs against where they land, with the applied value.
+void RuntimeRows(const char* id, const char* source, const char* target,
+    const std::vector<AvatarRuntimeRow>& rows) {
+  if (rows.empty()) {
+    ImGui::TextDisabled("None");
+    return;
+  }
+  if (!ImGui::BeginTable(id, 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                                    ImGuiTableFlags_SizingFixedFit)) {
+    return;
+  }
+  ImGui::TableSetupColumn(source);
+  ImGui::TableSetupColumn(target);
+  ImGui::TableSetupColumn("Value");
+  ImGui::TableHeadersRow();
+  ImGuiListClipper clipper;
+  clipper.Begin(static_cast<int>(rows.size()));
+  while (clipper.Step()) {
+    for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
+      const AvatarRuntimeRow& row = rows[static_cast<std::size_t>(index)];
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(row.source.c_str());
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(row.target.c_str());
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(row.value.c_str());
+    }
+  }
+  ImGui::EndTable();
+}
+
+// The runtime result applied this frame: its identity, how its layout
+// matched the resident targets, owner diagnostics, inputs and outputs.
+void AvatarRuntimePanel(const AvatarRuntimeStatus& avatar, float scale) {
+  ImGui::Text("%s, LookAt %s", avatar.avatar.c_str(), avatar.look_at.c_str());
+  ImGui::Text("Instance %llu generation %llu frame %llu (input revision %llu)",
+      static_cast<unsigned long long>(avatar.instance),
+      static_cast<unsigned long long>(avatar.generation),
+      static_cast<unsigned long long>(avatar.frame),
+      static_cast<unsigned long long>(avatar.input_revision));
+  ImGui::Text("Layout %s v%llu, binding epoch %llu, %.3f s", avatar.layout.c_str(),
+      static_cast<unsigned long long>(avatar.layout_version),
+      static_cast<unsigned long long>(avatar.binding_epoch), avatar.evaluation_seconds);
+  ImGui::Text("Published %llu, refused %llu, resets %llu",
+      static_cast<unsigned long long>(avatar.published),
+      static_cast<unsigned long long>(avatar.refused),
+      static_cast<unsigned long long>(avatar.resets));
+  ImGui::Text("Applied at extraction %llu; late %llu, held %llu",
+      static_cast<unsigned long long>(avatar.extracted),
+      static_cast<unsigned long long>(avatar.late),
+      static_cast<unsigned long long>(avatar.held));
+  ImGui::Text("Layout: %zu joints, %zu shapes, %zu material inputs, %zu expressions",
+      avatar.joints, avatar.shapes, avatar.material_inputs, avatar.expressions);
+  ImGui::Text("Bound: %zu skins, %zu morphs, %zu material fields, %zu visibility",
+      avatar.skins, avatar.morphs, avatar.materials, avatar.visibility);
+  const Summary publish = avatar.sample_publish.Summarize();
+  const Summary latch = avatar.publish_latch.Summarize();
+  ImGui::Text("Generated sample to publication %.3f ms (p95 %.3f)", publish.mean, publish.p95);
+  ImGui::Text("Publication to late read %.3f ms (p95 %.3f)", latch.mean, latch.p95);
+  if (ImGui::TreeNode("Unmatched outputs")) {
+    if (avatar.mismatches.empty()) ImGui::TextDisabled("None");
+    for (const auto& [subject, reason] : avatar.mismatches) {
+      ImGui::TextWrapped("%s: %s", subject.c_str(), reason.c_str());
+    }
+    ImGui::TreePop();
+  }
+  if (ImGui::TreeNode("Owner diagnostics")) {
+    if (avatar.diagnostics.empty()) ImGui::TextDisabled("None");
+    for (const auto& [code, count] : avatar.diagnostics) {
+      ImGui::Text("%s x%llu", code.c_str(), static_cast<unsigned long long>(count));
+    }
+    ImGui::TreePop();
+  }
+  ImGui::BeginChild("avatar-rows", ImVec2(520.0F * scale, 260.0F * scale));
+  if (ImGui::TreeNode("Source inputs")) {
+    RuntimeRows("inputs", "Channel", "Expression / LookAt", avatar.inputs);
+    ImGui::TreePop();
+  }
+  if (ImGui::TreeNode("Shapes")) {
+    RuntimeRows("shapes", "Runtime shape", "Resident slot", avatar.morph_rows);
+    ImGui::TreePop();
+  }
+  if (ImGui::TreeNode("Material inputs")) {
+    RuntimeRows("materials", "Canonical input", "Resident field", avatar.material_rows);
+    ImGui::TreePop();
+  }
+  ImGui::EndChild();
+}
+
 void CountRow(const char* name, unsigned long long frame,
     unsigned long long total) {
   ImGui::TableNextRow();
@@ -561,6 +651,10 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
         }
         ImGui::EndChild();
       }
+    }
+
+    if (frame.avatar_runtime != nullptr && ImGui::CollapsingHeader("Avatar runtime")) {
+      AvatarRuntimePanel(*frame.avatar_runtime, scale);
     }
 
     const Summary& interval =

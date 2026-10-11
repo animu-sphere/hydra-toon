@@ -65,6 +65,45 @@ endif()
 
 toon_copy_shaders(toon-viewport)
 
+# toon-viewport-avatar: the same viewport as an external host of
+# usd-avatar-runtime's real VRM providers (`--avatar-runtime`, roadmap
+# v0.3.0). It links the providers and, through them, the VRM and motion
+# owners, which toon-viewport does not; it is opt-in and never installed.
+if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
+  find_package(AvatarRuntime CONFIG REQUIRED
+    COMPONENTS vrm_expression_usd vrm_lookat_usd)
+  add_executable(toon-viewport-avatar
+    avatar_runtime.cpp
+    camera.cpp
+    hydra_scene.cpp
+    main.cpp
+    overlay.cpp
+    playback.cpp
+    skeleton_debug.cpp
+    telemetry.cpp
+    window_glfw.cpp)
+  toon_configure_warnings(toon-viewport-avatar)
+  target_link_libraries(toon-viewport-avatar PRIVATE
+    Toon::RenderWorld
+    Toon::RenderExtraction
+    Toon::Vulkan
+    Vulkan::Vulkan
+    glfw
+    toon-viewport-imgui
+    toon-hydra2-avatar-binding
+    AvatarRuntime::avatarVrmExpressionUsdBinding
+    AvatarRuntime::avatarVrmLookAtUsdBinding
+    AvatarRuntime::avatarRuntime
+    usdImaging usdSkel usdGeom usd nfd)
+  target_compile_features(toon-viewport-avatar PRIVATE cxx_std_20)
+  target_compile_definitions(toon-viewport-avatar PRIVATE
+    TOON_VIEWPORT_HAS_HYDRA=1
+    TOON_VIEWPORT_HAS_AVATAR_RUNTIME=1
+    NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+  toon_copy_shaders(toon-viewport-avatar)
+endif()
+
 # The installed tree reuses bin/shaders written by the project install rules.
 install(TARGETS toon-viewport
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
@@ -312,6 +351,36 @@ if(TOON_BUILD_TESTS)
         DEPENDS "toon-viewport-file-reference;toon-viewport-file-${_case}"
         SKIP_REGULAR_EXPRESSION "SKIP:" LABELS "gpu;viewport;presentation;hydra")
     endforeach()
+    if(TOON_AVATAR_RUNTIME_PROVIDERS AND TOON_VRM_IMAGING_RESOURCES)
+      # The provider fixture driven by the runtime in the presenting
+      # viewport. At a zero rate each frame's result is published after its
+      # extraction, so every late read applies a newer one; joints, weights
+      # and materials change with no static upload or Hydra sync after the
+      # first frame. Results 20 and 40 follow instance resets.
+      set(_avatar_stage "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/avatar-provider.usda")
+      set(_avatar_run
+        "-DPROGRAM=$<TARGET_FILE:toon-viewport-avatar>"
+        "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-viewport-avatar>,|>"
+        "-DPLUGINS=${TOON_VRM_SCHEMA_RESOURCES}|${TOON_VRM_IMAGING_RESOURCES}")
+      add_test(NAME toon-viewport-avatar-runtime-late
+        COMMAND "${CMAKE_COMMAND}" ${_avatar_run}
+          "-DARGUMENTS=--hidden|--frames|48|--vsync|off|--overlay|off|--usd|${_avatar_stage}|--avatar-runtime|--avatar-lookat|/Avatar/LookAtBone|--avatar-rate|0|--avatar-reset-every|20"
+          "-DEXPECT=results=49 extracted=49 late=48 held=0 refused=0 resets=2 epoch=1 generation=3|matched skins=2 morphs=6 materials=4 visibility=0 mismatches=0|static_uploads=0 poses=[1-9][0-9]* morph_weights=[1-9][0-9]* materials=[1-9]|Late latch: applied=48 rejected=0|Hydra syncs=1 |avatar publish_latch"
+          -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+      # A producer thread at 240 results per second, and the scene replaced
+      # halfway: the replacement binds its own runtime in a new epoch.
+      add_test(NAME toon-viewport-avatar-runtime-thread
+        COMMAND "${CMAKE_COMMAND}" ${_avatar_run}
+          "-DARGUMENTS=--hidden|--frames|120|--vsync|off|--overlay|off|--usd|${_avatar_stage}|--avatar-runtime|--avatar-lookat|/Avatar/LookAtExpression|--avatar-rate|240|--switch-file|${_avatar_stage}"
+          "-DEXPECT=Opened file:|refused=0 resets=0 epoch=2 |mismatches=0|Late latch: applied=120 rejected=0|avatar sample_publish"
+          -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+      set_tests_properties(toon-viewport-avatar-runtime-late toon-viewport-avatar-runtime-thread
+        PROPERTIES
+        LABELS "gpu;viewport;presentation;hydra"
+        SKIP_REGULAR_EXPRESSION "SKIP: no Vulkan device" TIMEOUT 120
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    endif()
     # The usdview smoke stage through Hydra: its one mesh must draw.
     add_test(NAME toon-viewport-present-usd
       COMMAND toon-viewport --hidden --frames 8 --vsync off

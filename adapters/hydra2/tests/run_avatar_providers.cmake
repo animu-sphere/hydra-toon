@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runs toon-hydra2-avatar-provider-test with what its providers need at run
-# time: the directories of the DLLs it links (the runtime, the VRM schema and
-# the motion owners) on PATH, and the VRM schema and imaging plugins'
-# resources registered. Arguments after the stage are separated by `|`.
-foreach(required IN ITEMS PROGRAM STAGE DLLS PLUGINS)
+# Runs a host over the runtime's providers (toon-hydra2-avatar-provider-test,
+# toon-viewport-avatar) with what they need at run time: the directories of
+# the DLLs it links (the runtime, the VRM schema and the motion owners) on
+# PATH, and the VRM schema and imaging plugins' resources registered. STAGE,
+# when given, is the first argument; the others are separated by `|`. Each
+# `|`-separated regular expression in EXPECT must match the output.
+foreach(required IN ITEMS PROGRAM DLLS PLUGINS)
   if(NOT DEFINED ${required})
     message(FATAL_ERROR "${required} is required")
   endif()
@@ -21,18 +23,28 @@ cmake_path(CONVERT "${directories};$ENV{PATH}" TO_NATIVE_PATH_LIST runtime_path 
 string(REPLACE "|" ";" plugins "${PLUGINS}")
 cmake_path(CONVERT "${plugins}" TO_NATIVE_PATH_LIST plugin_path NORMALIZE)
 string(REPLACE "|" ";" arguments "${ARGUMENTS}")
+if(DEFINED STAGE)
+  list(PREPEND arguments "${STAGE}")
+endif()
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E env
     "PATH=${runtime_path}"
     "PXR_PLUGINPATH_NAME=${plugin_path}"
-    "${PROGRAM}" "${STAGE}" ${arguments}
+    "${PROGRAM}" ${arguments}
   RESULT_VARIABLE result
   OUTPUT_VARIABLE output
   ERROR_VARIABLE error)
 message("${output}${error}")
 if(result EQUAL 77)
-  message("SKIP: no Vulkan device for the image comparison")
+  message("SKIP: no Vulkan device")
+  return()
 elseif(NOT result EQUAL 0)
-  message(FATAL_ERROR "the provider host check failed (${result})")
+  message(FATAL_ERROR "the provider host failed (${result})")
 endif()
+string(REPLACE "|" ";" expectations "${EXPECT}")
+foreach(expected IN LISTS expectations)
+  if(NOT output MATCHES "${expected}")
+    message(FATAL_ERROR "the output does not match: ${expected}")
+  endif()
+endforeach()

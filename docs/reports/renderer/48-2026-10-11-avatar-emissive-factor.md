@@ -1,5 +1,8 @@
 # Runtime `emissiveFactor` scaled as the delegate realizes it
 
+Later: [report 49](49-2026-10-11-viewport-avatar-runtime.md) draws runtime
+results in the dedicated viewport, applied after extraction.
+
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev; `usd-avatar-runtime`

@@ -10,6 +10,18 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- `toon-viewport-avatar`, built only with the opt-in
+  `TOON_AVATAR_RUNTIME_PROVIDERS` and never installed: the viewport as a host
+  of `usd-avatar-runtime`'s real VRM expression/LookAt providers
+  (`--avatar-runtime`, `--avatar-lookat`, `--avatar-rate`,
+  `--avatar-reset-every`). Generated expression and gaze input, evaluated on
+  a producer thread or once per frame after extraction, is matched to the
+  scene's resident targets and applied over the extracted scene and again at
+  the late read, with input times from the result's retained source samples.
+  An `Avatar runtime` panel shows the applied result's identity, matching,
+  owner diagnostics, source channels and bound outputs. CTests
+  `toon-viewport-avatar-runtime-{late,thread}` cover late arrival, resets and
+  scene replacement without static uploads.
 - `emissiveFactor` in the avatar fast path: `Toon::AvatarMaterialBinding` has
   a finite `scale` that multiplies what it writes, each
   `HdToonResidentMaterial` describes its `emissive_strength`, and
