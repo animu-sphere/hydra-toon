@@ -16,6 +16,9 @@
 #if TOON_VIEWPORT_HAS_HYDRA
 #include "hydra_scene.hpp"
 #endif
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+#include "avatar_runtime.hpp"
+#endif
 
 #include <toon/extraction.hpp>
 #include <toon/render_world.hpp>
@@ -81,6 +84,12 @@ struct Arguments {
   std::optional<std::uint32_t> switch_samples;
   // An in-session file open halfway through a bounded run, for regression.
   std::string switch_file;
+  // The stage's avatar driven by usd-avatar-runtime's real providers
+  // (toon-viewport-avatar only).
+  bool avatar_runtime = false;
+  std::string avatar_look_at;
+  double avatar_rate = 120.0;
+  std::uint64_t avatar_reset_every = 0;
 };
 
 std::uint64_t ReadUnsigned(std::string_view value, std::string_view name) {
@@ -224,6 +233,20 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--overlay must be on or off");
       }
       result.overlay = value == "on";
+    } else if (option == "--avatar-runtime") {
+      result.avatar_runtime = true;
+    } else if (option == "--avatar-lookat") {
+      result.avatar_look_at = next();
+    } else if (option == "--avatar-rate") {
+      const std::string value(next());
+      std::size_t consumed = 0;
+      result.avatar_rate = std::stod(value, &consumed);
+      if (consumed != value.size() || !std::isfinite(result.avatar_rate) ||
+          result.avatar_rate < 0.0 || result.avatar_rate > 2000.0) {
+        throw std::invalid_argument("--avatar-rate must be in [0, 2000]");
+      }
+    } else if (option == "--avatar-reset-every") {
+      result.avatar_reset_every = ReadUnsigned(next(), option);
     } else if (option == "--help") {
       std::cout << "Usage: toon-viewport [options]\n"
                    "  --width N --height N     window size (default 1280x720)\n"
@@ -263,6 +286,16 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --capture-sequence DIR   capture every bounded frame\n"
                    "                           (cannot benchmark with readbacks)\n"
                    "  --camera-output FILE     final view/projection as JSON\n"
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+                   "  --avatar-runtime         drive the stage's VRM avatar with\n"
+                   "                           usd-avatar-runtime's providers\n"
+                   "  --avatar-lookat <prim>   the VRM LookAt prim to evaluate\n"
+                   "  --avatar-rate N          results per second on a producer\n"
+                   "                           thread (120); 0 publishes one per\n"
+                   "                           frame, after extraction\n"
+                   "  --avatar-reset-every N   reset the runtime instance every\n"
+                   "                           N results\n"
+#endif
                    "Left drag orbits, middle or Shift+left drag pans; right\n"
                    "drag to the right zooms in, to the left zooms out; the\n"
                    "wheel dollies. F frames the scene and R\n"
@@ -321,6 +354,16 @@ Arguments ParseArguments(int argc, char** argv) {
   if (!result.switch_file.empty() && result.frame_limit < 2) {
     throw std::invalid_argument("--switch-file needs --frames N, N >= 2");
   }
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+  if (result.avatar_runtime && result.usd.empty() && result.switch_file.empty()) {
+    throw std::invalid_argument("--avatar-runtime needs --usd <stage>");
+  }
+#else
+  if (result.avatar_runtime) {
+    throw std::invalid_argument("--avatar-runtime needs toon-viewport-avatar, a build "
+                                "with TOON_AVATAR_RUNTIME_PROVIDERS");
+  }
+#endif
   return result;
 }
 
@@ -541,6 +584,24 @@ int RunViewport(int argc, char** argv) {
       return next;
     };
     std::unique_ptr<Toon::viewport::HydraScene> hydra;
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+    // Each scene binds its own runtime; the epoch tells the adapter apart
+    // scenes whose renderer ids coincide.
+    std::uint64_t avatar_epoch = 0;
+    std::unique_ptr<Toon::viewport::AvatarRuntime> avatar;
+    const auto start_avatar = [&](const Toon::viewport::HydraScene& scene,
+                                  Toon::FrameSnapshot& bound) {
+      std::unique_ptr<Toon::viewport::AvatarRuntime> started;
+      if (!arguments.avatar_runtime) return started;
+      started = Toon::viewport::AvatarRuntime::Start(scene, bound, ++avatar_epoch,
+          {arguments.avatar_look_at, arguments.avatar_rate, arguments.avatar_reset_every});
+      std::string failure;
+      if (!started->Apply(bound, false, failure)) {
+        throw std::runtime_error("avatar runtime: " + failure);
+      }
+      return started;
+    };
+#endif
     if (!arguments.usd.empty()) {
       hydra = Toon::viewport::HydraScene::Open(arguments.usd);
       playback = configure_playback(*hydra);
@@ -548,6 +609,9 @@ int RunViewport(int argc, char** argv) {
         hydra->SetTime(playback.time());
       }
       hydra->Update(snapshot);
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+      avatar = start_avatar(*hydra, snapshot);
+#endif
       up_axis = hydra->up_axis();
       meters_per_unit = hydra->meters_per_unit();
       scene_name = FileName(arguments.usd);
@@ -626,10 +690,15 @@ int RunViewport(int argc, char** argv) {
     auto last_overlay = Clock::now();
     auto playback_clock = Clock::now();
     std::int64_t camera_input = Toon::SteadyNanoseconds();
-    auto read_latest = [&](Toon::FrameSnapshot& latest, std::string&) {
+    auto read_latest = [&](Toon::FrameSnapshot& latest, std::string& why) {
+      (void)why;
 #if TOON_VIEWPORT_HAS_HYDRA
       if (hydra) hydra->ReadFast(latest);
       else latest = snapshot;
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+      // A result published since extraction reaches this frame here.
+      if (avatar && !avatar->Apply(latest, true, why)) return false;
+#endif
 #else
       latest = snapshot;
 #endif
@@ -662,9 +731,16 @@ int RunViewport(int argc, char** argv) {
         }
         Toon::FrameSnapshot next_snapshot;
         next_scene->Update(next_snapshot);
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        auto next_avatar = start_avatar(*next_scene, next_snapshot);
+#endif
         Toon::viewport::OrbitCamera next_camera(next_scene->up_axis());
         next_camera.Frame(Toon::viewport::SceneBounds(next_snapshot));
         std::string next_name = FileName(path);
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        // The old runtime goes before the scene it was bound to.
+        avatar = std::move(next_avatar);
+#endif
         hydra = std::move(next_scene);
         playback = next_playback;
         playback_clock = Clock::now();
@@ -697,6 +773,9 @@ int RunViewport(int argc, char** argv) {
     // Uploads before --switch-samples asked, which the change must not add
     // to.
     std::optional<std::uint64_t> uploads_at_switch;
+    // What the first presented frame had uploaded, all static resources of
+    // an unchanged scene among them.
+    std::optional<Toon::viewport::UploadCounts> first_uploads;
     auto title_update = Clock::now();
     while (running && (arguments.frame_limit == 0 ||
                           session->statistics().frames_presented <
@@ -810,11 +889,22 @@ int RunViewport(int argc, char** argv) {
         }
         playback_clock = now;
         hydra->Update(snapshot);
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        if (avatar && !avatar->Apply(snapshot, false, error)) {
+          std::cerr << "toon-viewport: avatar runtime: " << error << '\n';
+          return 1;
+        }
+#endif
       }
 #endif
       const auto extract_start = Clock::now();
       cpu.hydra = Milliseconds(extract_start - hydra_start);
       Toon::ExtractDrawList(snapshot, draws);
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+      // At a zero rate the next result is published now, after extraction,
+      // and only the late read can apply it.
+      if (avatar) avatar->Produce();
+#endif
       const auto overlay_start = Clock::now();
       cpu.extract = Milliseconds(overlay_start - extract_start);
       draws.view = camera.View(static_cast<float>(width) /
@@ -874,6 +964,9 @@ int RunViewport(int argc, char** argv) {
         shown.hydra_syncs = hydra == nullptr ? 0 : hydra->sync_count();
         shown.evaluated_scene = hydra == nullptr ? nullptr : &snapshot;
         if (hydra != nullptr) shown.read_skeletons = [&] { return hydra->ReadSkeletons(); };
+#endif
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        shown.avatar_runtime = avatar ? &avatar->status() : nullptr;
 #endif
         const Toon::viewport::OverlayControls controls = overlay->Build(shown,
             Milliseconds(overlay_start - last_overlay) / 1000.0,
@@ -952,6 +1045,7 @@ int RunViewport(int argc, char** argv) {
           Toon::viewport::UploadCounts::Of(session->statistics());
       frame_uploads = uploads_after - uploads_before;
       uploads_before = uploads_after;
+      if (presented && !first_uploads) first_uploads = uploads_after;
       if (session->statistics().samples != samples) {
         samples = session->statistics().samples;
         // The frame that changed the count also rebuilt the pipelines.
@@ -1009,6 +1103,17 @@ int RunViewport(int argc, char** argv) {
               << telemetry.Report();
     std::cout << "Late latch: applied=" << statistics.late_samples_applied
               << " rejected=" << statistics.late_samples_rejected << '\n';
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+    if (avatar) {
+      const auto now = Toon::viewport::UploadCounts::Of(statistics);
+      const auto since = now - first_uploads.value_or(Toon::viewport::UploadCounts{});
+      std::cout << avatar->Report()
+                << "Avatar runtime: after the first frame static_uploads="
+                << since.topology + since.points + since.textures + since.skins + since.morphs
+                << " poses=" << since.poses << " morph_weights=" << since.morph_weights
+                << " materials=" << since.materials << '\n';
+    }
+#endif
     if (!arguments.telemetry_output.empty()) {
       std::ofstream output(arguments.telemetry_output);
       output << telemetry.Json();

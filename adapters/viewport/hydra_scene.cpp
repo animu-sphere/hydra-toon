@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "hydra_scene.hpp"
+#include "hydra_scene_parts.hpp"
 
 #include "adapter.hpp"
 #include <toon/vulkan_backend.hpp>
@@ -105,6 +106,7 @@ public:
         static_cast<float>(UsdGeomGetStageMetersPerUnit(stage_));
     up_axis_ = UsdGeomGetStageUpAxis(stage_) == UsdGeomTokens->z ? UpAxis::Z
                                                                  : UpAxis::Y;
+    parts_ = {stage_, &delegate_};
   }
 
   ~UsdHydraScene() override {
@@ -246,6 +248,8 @@ public:
     return up_axis_;
   }
 
+  const HydraSceneParts& parts() const noexcept override { return parts_; }
+
 private:
   UsdStageRefPtr stage_;
   UsdImagingSceneIndices indices_;
@@ -263,6 +267,7 @@ private:
   UsdSkelCache skeleton_cache_;
   std::vector<std::pair<std::string, UsdSkelSkeletonQuery>> skeleton_queries_;
   bool skeletons_dirty_ = true;
+  HydraSceneParts parts_;
 };
 
 } // namespace

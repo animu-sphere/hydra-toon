@@ -382,6 +382,24 @@ ctest --test-dir build/cy2026-windows-x86_64-py313-lookdev--viewport-usd \
 records this run. Wall-clock playback evaluates the USD scene before
 extraction; it does not latch a motion sample at GPU submission.
 
+A build configured with `TOON_AVATAR_RUNTIME_PROVIDERS`, as
+[renderer report 47](../reports/renderer/47-2026-10-11-avatar-real-providers.md)
+configures it, and `TOON_ENABLE_VIEWPORT` also builds `toon-viewport-avatar`.
+With the providers' DLLs on `PATH` and `vrmSchema` and `vrmImaging`
+registered, `--avatar-runtime` drives the stage's VRM avatar with
+`usd-avatar-runtime`'s expression and LookAt providers from generated input:
+
+```sh
+toon-viewport-avatar --usd <avatar> --avatar-runtime --avatar-rate 120
+```
+
+`--avatar-rate 0` publishes one result per frame after extraction, for
+repeatable runs; `--avatar-lookat <prim>` picks the LookAt and
+`--avatar-reset-every N` resets the runtime instance. The `Avatar runtime`
+panel and the final `Avatar runtime:` lines show what was published, applied
+late and bound
+([renderer report 49](../reports/renderer/49-2026-10-11-viewport-avatar-runtime.md)).
+
 For a VRM stage with the material and file plugins registered, use the same
 time options with `--samples 1`, `4` or `8` and `--outlines on` or `off`.
 [Renderer report 24](../reports/renderer/24-2026-09-30-outline-stability-cost.md)

@@ -14,6 +14,9 @@
 
 namespace Toon::viewport {
 
+// Defined in hydra_scene_parts.hpp, for OpenUSD translation units only.
+struct HydraSceneParts;
+
 class HydraScene {
 public:
   // Opens the stage and populates a render index through UsdImaging's scene
@@ -52,6 +55,10 @@ public:
   // The stage's metersPerUnit and upAxis, which Hydra does not carry.
   [[nodiscard]] virtual float meters_per_unit() const noexcept = 0;
   [[nodiscard]] virtual UpAxis up_axis() const noexcept = 0;
+
+  // The stage and delegate, for a host that reads the stage beside Hydra
+  // (avatar_runtime.cpp). They belong to this scene instance.
+  [[nodiscard]] virtual const HydraSceneParts& parts() const noexcept = 0;
 };
 
 } // namespace Toon::viewport

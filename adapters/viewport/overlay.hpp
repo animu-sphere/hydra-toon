@@ -15,6 +15,7 @@
 #include <toon/overlay.hpp>
 #include <toon/vulkan_present.hpp>
 
+#include "avatar_runtime.hpp"
 #include "telemetry.hpp"
 #include "playback.hpp"
 #include "window.hpp"
@@ -82,6 +83,8 @@ struct OverlayFrame {
   ToonView view;
   // Called only while the Skeleton panel or its screen display is active.
   std::function<std::vector<SkeletonDebug>()> read_skeletons;
+  // The avatar runtime host's, in toon-viewport-avatar; outlives Build.
+  const AvatarRuntimeStatus* avatar_runtime = nullptr;
 };
 
 struct MorphEdit {
