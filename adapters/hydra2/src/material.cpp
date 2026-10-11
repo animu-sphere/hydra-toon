@@ -28,8 +28,9 @@ PXR_NAMESPACE_OPEN_SCOPE
 
 namespace {
 
-// `vrmImaging`'s locators, spelled here because it has no public header and
-// nothing of it is linked (its imaging policy §28.1).
+// `vrmImaging`'s and `mmdImaging`'s locators, spelled here because neither
+// has a public header and nothing of either is linked (`vrmImaging`'s
+// imaging policy §28.1, `usd-mmd-plugins`' material policy §12.1).
 TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (vrm)
     (material)
@@ -85,7 +86,39 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (rotation)
     (scale)
     ((wrapClampToEdge, "clampToEdge"))
-    ((wrapMirroredRepeat, "mirroredRepeat")));
+    ((wrapMirroredRepeat, "mirroredRepeat"))
+
+    (mmd)
+    (drawOrder)
+    (diffuseColor)
+    (specularColor)
+    (specularPower)
+    (ambientColor)
+    (groundShadow)
+    (castSelfShadow)
+    (receiveSelfShadow)
+    (drawEdge)
+    (vertexColor)
+    (drawPoints)
+    (drawLines)
+    (edgeColor)
+    (edgeSize)
+    (texture)
+    (sphereTexture)
+    (sphereMode)
+    (toonSource)
+    (toonTexture)
+    (sharedToonIndex)
+    ((sphereMultiply, "multiply"))
+    ((sphereAdd, "add"))
+    ((sphereSubTexture, "subTexture"))
+    ((toonIndividual, "individual"))
+    ((toonShared, "shared")));
+
+// HdToonTextureRefs' order: MToon's roles, base colour first, then MMD's.
+constexpr std::size_t kMToonRoles = 9;
+constexpr std::size_t kSphereRole = 9;
+constexpr std::size_t kToonRole = 10;
 
 HdContainerDataSourceHandle Group(const HdContainerDataSourceHandle& parent,
     const TfToken& name) {
@@ -238,6 +271,80 @@ void ReadMToon(const HdContainerDataSourceHandle& group,
   Read(group, _tokens->outlineColorFactor, result.outline_color);
 }
 
+void Read(const HdContainerDataSourceHandle& group, const TfToken& name,
+    Toon::Float3& color, float& alpha) {
+  GfVec4f rgba;
+  if (Read(group, name, rgba)) {
+    color = {rgba[0], rgba[1], rgba[2]};
+    alpha = rgba[3];
+  }
+}
+
+// An `mmd/material` texture slot: present only when authored, with the path
+// the session's resolver gave it (`mmdImaging` §12.1 item 3).
+void ReadMmdTexture(const HdContainerDataSourceHandle& group,
+    const TfToken& name, HdToonTextureKey& key) {
+  SdfAssetPath file;
+  if (!Read(group, name, file)) {
+    return;
+  }
+  if (file.GetResolvedPath().empty()) {
+    WarnUnresolved(file.GetAssetPath());
+    return;
+  }
+  key.path = file.GetResolvedPath();
+  // MMD's images are 8-bit sRGB colour images (`usd-mmd-plugins` material
+  // policy §4.1); how MMD's unmanaged shading reads them is MAT-Q3.
+  key.encoding = Toon::ToonTextureEncoding::Srgb;
+}
+
+// MmdMaterialAPI, from `mmdImaging`'s `mmd/material`. Every field is
+// resolved to its schema fallback when unauthored, so only the slots are
+// conditional.
+void ReadMmd(const HdContainerDataSourceHandle& group,
+    Toon::ToonMaterial& result) {
+  Toon::ToonMaterial::MMD& mmd = result.mmd;
+  Read(group, _tokens->diffuseColor, result.base_color, result.alpha);
+  Read(group, _tokens->doubleSided, result.double_sided);
+  Read(group, _tokens->specularColor, mmd.specular_color);
+  Read(group, _tokens->specularPower, mmd.specular_power);
+  Read(group, _tokens->ambientColor, mmd.ambient_color);
+  Read(group, _tokens->groundShadow, mmd.ground_shadow);
+  Read(group, _tokens->castSelfShadow, mmd.cast_self_shadow);
+  Read(group, _tokens->receiveSelfShadow, mmd.receive_self_shadow);
+  Read(group, _tokens->vertexColor, mmd.vertex_color);
+  Read(group, _tokens->drawPoints, mmd.draw_points);
+  Read(group, _tokens->drawLines, mmd.draw_lines);
+  TfToken mode;
+  if (Read(group, _tokens->sphereMode, mode)) {
+    mmd.sphere_mode = mode == _tokens->sphereMultiply
+        ? Toon::ToonSphereMode::Multiply
+        : mode == _tokens->sphereAdd ? Toon::ToonSphereMode::Add
+        : mode == _tokens->sphereSubTexture
+            ? Toon::ToonSphereMode::SubTexture
+            : Toon::ToonSphereMode::Disabled;
+  }
+  if (Read(group, _tokens->toonSource, mode)) {
+    mmd.toon_source = mode == _tokens->toonIndividual
+        ? Toon::ToonRampSource::Individual
+        : mode == _tokens->toonShared ? Toon::ToonRampSource::Shared
+                                      : Toon::ToonRampSource::None;
+  }
+  int index = -1;
+  if (mmd.toon_source == Toon::ToonRampSource::Shared &&
+      Read(group, _tokens->sharedToonIndex, index)) {
+    mmd.shared_toon_index = index;
+  }
+  mmd.toon_texture.wrap_s = Toon::ToonWrap::ClampToEdge;
+  mmd.toon_texture.wrap_t = Toon::ToonWrap::ClampToEdge;
+
+  // The edge is the common outline request; how it is drawn is the
+  // renderer's (material policy §5).
+  Read(group, _tokens->drawEdge, result.outline);
+  Read(group, _tokens->edgeSize, result.outline_width);
+  Read(group, _tokens->edgeColor, result.outline_color, mmd.edge_alpha);
+}
+
 } // namespace
 
 std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
@@ -246,18 +353,19 @@ std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
       &material.mtoon.outline_width_texture, &material.mtoon.matcap_texture,
       &material.mtoon.rim_multiply_texture, &material.emissive_texture,
       &material.normal_texture, &material.mtoon.shading_shift_texture,
-      &material.mtoon.uv_animation_mask_texture};
+      &material.mtoon.uv_animation_mask_texture,
+      &material.mmd.sphere_texture, &material.mmd.toon_texture};
 }
 
 bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
   static const HdDataSourceLocator vrm(_tokens->vrm);
-  return locators.Intersects(vrm) &&
+  static const HdDataSourceLocator mmd(_tokens->mmd);
+  return (locators.Intersects(vrm) || locators.Intersects(mmd)) &&
          !locators.Intersects(HdMaterialSchema::GetDefaultLocator());
 }
 
-// Rule 2 of the selection, MMD, waits for `mmdImaging`'s Hydra view
-// (MAT-Q1). Rule 3's surface network is not read yet: a PreviewSurface
-// material has the fallback material's values.
+// Rule 3's surface network is not read yet: a PreviewSurface material has
+// the fallback material's values.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim) {
   HdToonMaterialSource source;
@@ -265,6 +373,27 @@ HdToonMaterialSource HdToonReadMaterial(
   const HdContainerDataSourceHandle vrm = Group(prim, _tokens->vrm);
   const HdContainerDataSourceHandle mtoon = Group(vrm, _tokens->mtoon);
   if (!mtoon) {
+    // Rule 2: `mmdImaging`'s `mmd/material`, with the base, sphere and
+    // individual toon textures; `mmd/drawOrder` is the material-table index.
+    const HdContainerDataSourceHandle mmd = Group(prim, _tokens->mmd);
+    const HdContainerDataSourceHandle material =
+        Group(mmd, _tokens->material);
+    if (!material) {
+      return source;
+    }
+    result.model = Toon::ToonShadingModel::MMD;
+    ReadMmd(material, result);
+    int draw_order = 0;
+    if (Read(mmd, _tokens->drawOrder, draw_order)) {
+      result.mmd.draw_order = draw_order;
+    }
+    ReadMmdTexture(material, _tokens->texture, source.textures[0]);
+    ReadMmdTexture(material, _tokens->sphereTexture,
+        source.textures[kSphereRole]);
+    if (result.mmd.toon_source == Toon::ToonRampSource::Individual) {
+      ReadMmdTexture(material, _tokens->toonTexture,
+          source.textures[kToonRole]);
+    }
     return source;
   }
   result.model = Toon::ToonShadingModel::MToon;
@@ -280,7 +409,7 @@ HdToonMaterialSource HdToonReadMaterial(
     Toon::ToonTextureEncoding encoding;
     bool samples_st;
   };
-  const Role roles[kHdToonTextureRoles] = {
+  const Role roles[kMToonRoles] = {
       {_tokens->baseColor, Toon::ToonTextureEncoding::Srgb, true},
       {_tokens->shadeMultiply, Toon::ToonTextureEncoding::Srgb, true},
       {_tokens->outlineWidthMultiply, Toon::ToonTextureEncoding::Linear,
@@ -294,7 +423,7 @@ HdToonMaterialSource HdToonReadMaterial(
   const HdContainerDataSourceHandle textures =
       Group(vrm, _tokens->textureInfo);
   const auto references = HdToonTextureRefs(result);
-  for (std::size_t role = 0; role < kHdToonTextureRoles; ++role) {
+  for (std::size_t role = 0; role < kMToonRoles; ++role) {
     ReadTexture(Group(textures, roles[role].name), roles[role].encoding,
         roles[role].samples_st, source.textures[role], *references[role]);
   }

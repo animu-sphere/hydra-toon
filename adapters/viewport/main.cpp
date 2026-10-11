@@ -427,6 +427,8 @@ Toon::viewport::SceneCounts CountScene(const Toon::DrawList& draws) {
       ++counts.preview_materials;
     } else if (material.material.model == Toon::ToonShadingModel::MToon) {
       ++counts.mtoon_materials;
+    } else {
+      ++counts.mmd_materials;
     }
   }
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
@@ -457,6 +459,7 @@ std::string SceneSummary(const Toon::DrawList& draws) {
           << " draws_authored_normals=" << counts.authored_normals
           << " materials_preview=" << counts.preview_materials
           << " materials_mtoon=" << counts.mtoon_materials
+          << " materials_mmd=" << counts.mmd_materials
           << " textures=" << counts.textures;
   return summary.str();
 }

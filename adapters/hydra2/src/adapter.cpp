@@ -101,11 +101,14 @@ void AppendHostEvidence(std::uint64_t frame_index,
   // policy §3) without a probe of its own.
   std::size_t preview_materials{};
   std::size_t mtoon_materials{};
+  std::size_t mmd_materials{};
   for (const Toon::MaterialSnapshot& material : snapshot.materials) {
     if (material.material.model == Toon::ToonShadingModel::PreviewSurface) {
       ++preview_materials;
     } else if (material.material.model == Toon::ToonShadingModel::MToon) {
       ++mtoon_materials;
+    } else {
+      ++mmd_materials;
     }
   }
   // And how many of this frame's draws selected MToon, how many of those
@@ -157,6 +160,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " textures=" << snapshot.textures.size()
          << " materials_preview=" << preview_materials
          << " materials_mtoon=" << mtoon_materials
+         << " materials_mmd=" << mmd_materials
          << " draws=" << draws.draws.size()
          << " draws_mtoon=" << mtoon_draws
          << " draws_transparent=" << transparent_draws
@@ -1692,7 +1696,8 @@ const Toon::ToonMaterial& HdToonMaterial::GetToonMaterial() const {
 }
 
 // Scene index emulation turns only locators under `material` into a
-// material's dirty bits, so a `vrm/<group>/<field>` dirtied alone — a time
+// material's dirty bits, so a `vrm/<group>/<field>` or `mmd/material/<field>`
+// dirtied alone — a time
 // move across a sample — leaves the Sprim clean (renderer report 02). The
 // delegate observes the terminal scene index for those and syncs the values
 // itself in Update(), before any Sprim sync (material policy §8).

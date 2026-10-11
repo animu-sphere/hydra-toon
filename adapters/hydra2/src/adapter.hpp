@@ -84,8 +84,8 @@ struct HdToonTextureKey {
 
 // The roles a material samples a texture in: base colour, shade multiply,
 // outline width multiply, MatCap, rim multiply, emissive, normal,
-// shading shift and UV animation mask.
-constexpr std::size_t kHdToonTextureRoles = 9;
+// shading shift and UV animation mask; then MMD's sphere and toon.
+constexpr std::size_t kHdToonTextureRoles = 11;
 
 // A material's texture references, one per role, in role order.
 std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
@@ -104,8 +104,9 @@ struct HdToonMaterialSource {
 // Selects a material's model and normalizes its values from its Hydra prim's
 // own data sources (material policy §2–§4): a `vrm/mtoon` container is
 // MToon, read in the locator hierarchy `vrmImaging` froze, with a texture in
-// every role; anything else is PreviewSurface. A null container is the
-// fallback material.
+// every MToon role; otherwise an `mmd/material` container is MMD, read in
+// the one `mmdImaging` froze; anything else is PreviewSurface. A null
+// container is the fallback material.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim);
 
@@ -116,8 +117,8 @@ bool HdToonLoadTexture(const std::string& path,
     Toon::ToonTextureEncoding encoding, Toon::ToonTexture& texture);
 
 // Whether a material prim's dirtied locators are a value-only change: `vrm`
-// values without `material`, which emulation turns into no dirty bit
-// (material policy §8).
+// or `mmd` values without `material`, which emulation turns into no dirty
+// bit (material policy §8).
 bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators);
 
 class HdToonMaterial final : public HdMaterial {
@@ -130,8 +131,8 @@ public:
   HdDirtyBits GetInitialDirtyBitsMask() const override;
 
   // A value-only change, which never reaches Sync (material policy §8): the
-  // delegate calls this from Update() for a material whose `vrm` locators
-  // alone were dirtied.
+  // delegate calls this from Update() for a material whose `vrm` or `mmd`
+  // locators alone were dirtied.
   void SyncValues(const HdSceneIndexBase& terminal);
 
   // What the last Sync or SyncValues read.

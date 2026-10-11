@@ -33,6 +33,7 @@ struct SceneCounts {
   std::size_t authored_normals = 0;
   std::size_t preview_materials = 0;
   std::size_t mtoon_materials = 0;
+  std::size_t mmd_materials = 0;
   std::size_t textures = 0;
 };
 

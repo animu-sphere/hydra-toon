@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [53](53-2026-10-11-mmd-material-read.md) | MMD selected from `mmdImaging`'s Hydra view and normalized into an MMD block; all 495 materials of 41 local MMD stages read as MMD with `mmdImaging` and none with `mmdSchema` alone, and `usdview` reports 20 MMD materials; MAT-Q1 resolved, nothing drawn through MMD yet and no `GeomSubset` bindings |
 | [52](52-2026-10-11-v030-preparation.md) | v0.3.0 release preparation: OpenStrata `core` 14/14, `hydra` 22/22 and `viewport-usd` 53/53 with every `ost validate` passed, and a reproducible local `hydra` package |
 | [51](51-2026-10-11-v030-evidence.md) | v0.3.0's remaining evidence: identical draw packets and pipeline selection on both paths, a replaced scene refused until rebound in a new epoch, generated input aged at the late read, buffer write, submit and present API return on two avatars, and runtime-free builds passing |
 | [50](50-2026-10-11-avatar-motion-provider.md) | The runtime's motion clip provider ahead of the VRM provider in both hosts: a committed clip and seven VRMA clips on two avatars match UsdImaging's palettes and images within declared tolerances, and pose the viewport through late reads with no static uploads |

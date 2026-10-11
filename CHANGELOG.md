@@ -8,6 +8,15 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- MMD materials are selected and read: a material prim with `mmdImaging`'s
+  `mmd/material` and no `vrm/mtoon` is MMD, its fields and `mmd/drawOrder`
+  normalized into `ToonMaterial`'s common part and a new MMD block, with the
+  sphere and individual toon textures as two more texture roles. A dirtied
+  `mmd` locator is a value-only change. `TOON_HYDRA_EVIDENCE` and the
+  viewport count `materials_mmd`. Nothing draws through an MMD pipeline yet.
+
 ## [0.3.0] - 2026-10-11
 
 ### Added
