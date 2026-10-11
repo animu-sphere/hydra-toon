@@ -19,12 +19,14 @@ struct DrawConstants {
   // and the skinning flags (skinning.slang).
   uint flags;
   // |projection[1][1]|: clip-space y per unit of view-space height at w = 1.
-  // Read by mtoon_outline's screen-coordinates width alone. Scalars, not a
-  // uint2, which could align past 128 bytes.
+  // Read by a screen-space outline width alone. Scalars, not a uint2, which
+  // could align past 128 bytes.
   float projection_scale;
-  // The scene's units per metre: 1 / its metersPerUnit. Read by
-  // mtoon_outline's world-coordinates width alone.
-  float units_per_meter;
+  // What an outline width is multiplied by: for mtoon_outline's
+  // world-coordinates width, the scene's units per metre, 1 / its
+  // metersPerUnit; for mmd_outline's width in pixels, 1 / the target's
+  // height in pixels.
+  float outline_scale;
 };
 
 static const uint kDrawHasUVs = 1;
@@ -58,6 +60,27 @@ struct VertexInput {
   float2 st : TEXCOORD0;
   uint vertex : SV_VulkanVertexID;
 };
+
+// The vertex stage's move of a skinned point out along its normal by
+// `width` in view space, for an inverted hull: the object-space move that is
+// `width` along the view-space normal. The inverse of the model-view 3x3 is
+// the normal matrix transposed, so it holds under any scale the mesh's
+// transform or skin has.
+float3 HullPosition(float3 position, float3 view_normal,
+    float3x3 normal_matrix, float width) {
+  const float view_length = length(view_normal);
+  if (view_length <= 0.0) {
+    return position;
+  }
+  return position + mul(view_normal / view_length, normal_matrix) * width;
+}
+
+// A width given as a share of the screen's height, which spans 2 in clip
+// space, as a length in view space at a point's clip w: 2 * share * w /
+// |projection[1][1]|, perspective or not.
+float ScreenWidth(float share, float w) {
+  return 2.0 * share * w / max(draw.projection_scale, 1e-6);
+}
 
 struct VertexStageOutput {
   float4 position : SV_Position;

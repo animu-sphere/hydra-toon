@@ -220,7 +220,7 @@ std::uint64_t MaxRevision(const FrameSnapshot& s) {
   auto n = std::max(s.revision, s.view_revision);
   for (const auto& m : s.meshes)
     n = std::max({n, m.points_revision, m.normals_revision,
-        m.topology_revision, m.uvs_revision, m.skin_revision, m.pose_revision, m.morph_revision, m.morph_weights_revision});
+        m.topology_revision, m.uvs_revision, m.edge_scales_revision, m.skin_revision, m.pose_revision, m.morph_revision, m.morph_weights_revision});
   for (const auto& m : s.materials)
     n = std::max({n, m.parameters_revision, m.structure_revision});
   for (const auto& t : s.textures)
@@ -383,10 +383,12 @@ bool AvatarStateAdapter::CheckScene(const FrameSnapshot& scene, std::uint64_t ep
     const auto& a = bound_.meshes[i];
     const auto& b = scene.meshes[i];
     if (a.id != b.id || a.material != b.material || a.points != b.points || a.normals != b.normals ||
-        a.indices != b.indices || a.uvs != b.uvs || a.influences != b.influences ||
+        a.indices != b.indices || a.uvs != b.uvs || a.edge_scales != b.edge_scales ||
+        a.influences != b.influences ||
         a.morph_offsets != b.morph_offsets || a.morph_ranges != b.morph_ranges ||
         a.points_revision != b.points_revision || a.normals_revision != b.normals_revision ||
         a.topology_revision != b.topology_revision || a.uvs_revision != b.uvs_revision ||
+        a.edge_scales_revision != b.edge_scales_revision ||
         a.skin_revision != b.skin_revision || a.morph_revision != b.morph_revision ||
         a.geom_bind != b.geom_bind || a.influences_per_point != b.influences_per_point ||
         a.constant_influences != b.constant_influences || a.joint_bound != b.joint_bound || a.index_bound != b.index_bound ||

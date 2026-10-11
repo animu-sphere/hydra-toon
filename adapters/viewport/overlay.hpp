@@ -30,6 +30,7 @@ struct SceneCounts {
   std::size_t transparent = 0;
   std::size_t outline = 0;
   std::size_t mmd = 0;
+  std::size_t mmd_outline = 0;
   std::size_t skinned = 0;
   std::size_t authored_normals = 0;
   std::size_t preview_materials = 0;

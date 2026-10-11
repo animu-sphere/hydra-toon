@@ -37,18 +37,11 @@ VertexStageOutput vertex_main(VertexInput input) {
   // 2 * width * w / |projection[1][1]| in view space, perspective or not.
   if (material.outline_texture.z == kOutlineScreen) {
     const float w = mul(draw.clip_from_object, float4(position, 1.0)).w;
-    width *= 2.0 * w / max(draw.projection_scale, 1e-6);
+    width = ScreenWidth(width, w);
   } else {
-    width *= draw.units_per_meter;
+    width *= draw.outline_scale;
   }
-  // The object-space move that is `width` along the view-space normal: the
-  // inverse of the model-view 3x3 is the normal matrix transposed, so it
-  // holds under any scale the mesh's transform or skin has.
-  const float view_length = length(view_normal);
-  if (view_length > 0.0) {
-    const float3 direction = view_normal / view_length;
-    position += mul(direction, normal_matrix) * width;
-  }
+  position = HullPosition(position, view_normal, normal_matrix, width);
 
   output.position = mul(draw.clip_from_object, float4(position, 1.0));
   output.view_normal = view_normal;

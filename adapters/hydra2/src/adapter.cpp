@@ -113,13 +113,14 @@ void AppendHostEvidence(std::uint64_t frame_index,
   }
   // And how many draws this frame made, one per part of a mesh its face
   // subsets divide it into; how many of those selected MToon, went through
-  // mtoon_transparent, added mtoon_outline's hull, selected MMD, were
-  // skinned on the GPU and drew authored normals.
+  // mtoon_transparent, added mtoon_outline's hull, selected MMD, added
+  // mmd_outline's edge, were skinned on the GPU and drew authored normals.
   std::size_t part_draws{};
   std::size_t mtoon_draws{};
   std::size_t transparent_draws{};
   std::size_t outline_draws{};
   std::size_t mmd_draws{};
+  std::size_t mmd_outline_draws{};
   std::size_t skinned_draws{};
   std::size_t authored_normal_draws{};
   for (const Toon::MeshSnapshot& mesh : draws.draws) {
@@ -140,6 +141,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
           material->id == part.material &&
           material->material.model == Toon::ToonShadingModel::MMD) {
         ++mmd_draws;
+        mmd_outline_draws += Toon::HasOutline(material->material) ? 1U : 0U;
       } else if (material != snapshot.materials.end() &&
           material->id == part.material &&
           material->material.model == Toon::ToonShadingModel::MToon) {
@@ -181,6 +183,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " draws_transparent=" << transparent_draws
          << " draws_outline=" << outline_draws
          << " draws_mmd=" << mmd_draws
+         << " draws_mmd_outline=" << mmd_outline_draws
          << " draws_skinned=" << skinned_draws
          << " draws_authored_normals=" << authored_normal_draws << '\n';
 }
@@ -361,6 +364,11 @@ public:
   void SetMeshUVs(Toon::MeshId mesh, std::vector<Toon::Float2> uvs) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshUVs(mesh, std::move(uvs));
+  }
+
+  void SetMeshEdgeScales(Toon::MeshId mesh, std::vector<float> scales) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshEdgeScales(mesh, std::move(scales));
   }
 
   void SetMeshNormals(Toon::MeshId mesh, std::vector<Toon::Float3> normals) {
@@ -802,6 +810,9 @@ public:
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, StToken())) {
       state_->SetMeshUVs(mesh_, ReadUVs(delegate));
+    }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, EdgeScaleToken())) {
+      state_->SetMeshEdgeScales(mesh_, ReadEdgeScales(delegate));
     }
     if (HdChangeTracker::IsTransformDirty(*dirty_bits, id)) {
       state_->SetMeshTransform(mesh_, ToToon(delegate->GetTransform(id)));
@@ -1397,6 +1408,32 @@ private:
       }
     }
     return uvs;
+  }
+
+  static const TfToken& EdgeScaleToken() {
+    static const TfToken edge_scale("mmd:edgeScale");
+    return edge_scale;
+  }
+
+  // MMD's per-vertex edge scale, which usd-mmd-plugins authors on every
+  // PMX mesh with one value per point (its stage contract §8.4).
+  std::vector<float> ReadEdgeScales(HdSceneDelegate* delegate) const {
+    for (const HdInterpolation interpolation :
+        {HdInterpolationVertex, HdInterpolationVarying}) {
+      for (const HdPrimvarDescriptor& descriptor :
+          GetPrimvarDescriptors(delegate, interpolation)) {
+        if (descriptor.name != EdgeScaleToken()) {
+          continue;
+        }
+        const VtValue value = GetPrimvar(delegate, EdgeScaleToken());
+        if (value.IsHolding<VtFloatArray>()) {
+          const VtFloatArray& source = value.UncheckedGet<VtFloatArray>();
+          return {source.begin(), source.end()};
+        }
+        return {};
+      }
+    }
+    return {};
   }
 
   static std::vector<Toon::Float3> ReadPoints(const VtValue& value) {

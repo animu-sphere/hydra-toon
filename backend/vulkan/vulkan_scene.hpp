@@ -70,11 +70,13 @@ struct SurfaceDrawConstants {
   // kDrawSkinned, kDrawConstantInfluences and the influences
   // per point from kInfluenceCountShift up when it is skinned.
   std::uint32_t flags;
-  // |projection[1][1]|, for mtoon_outline's screen-coordinates width.
+  // |projection[1][1]|, for a screen-space outline width.
   float projection_scale;
-  // The scene's units per metre, for mtoon_outline's world-coordinates
-  // width, which MToon gives in metres.
-  float units_per_meter;
+  // What an outline's width is multiplied by: for mtoon_outline's
+  // world-coordinates width, which MToon gives in metres, the scene's units
+  // per metre; for mmd_outline's, which MMD gives in pixels, 1 over the
+  // target's height in pixels.
+  float outline_scale;
 };
 static_assert(sizeof(SurfaceDrawConstants) == 128);
 
@@ -186,8 +188,12 @@ struct MmdParameters {
   // x the toon ramp's entry, 0 without one; y the sphere mode.
   std::uint32_t modes[4];
   float base_uv[8];
+  // rgb the edge colour, a its alpha.
+  float edge_color[4];
+  // x the edge size, in pixels at an edge scale of 1.
+  float edge[4];
 };
-static_assert(sizeof(MmdParameters) == 112);
+static_assert(sizeof(MmdParameters) == 144);
 
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
 // pass or framebuffer to rebuild on resize), Synchronization2 and timeline
@@ -231,8 +237,9 @@ struct ScenePipeline {
 
 // The scene pipelines for one colour/depth format pair and sample count:
 // the unlit mesh pipeline, mtoon_opaque, mtoon_transparent, mtoon_outline,
-// mmd_opaque and mmd_transparent. The transparent ones and mtoon_outline
-// blend their source's alpha over the target; multisampled, mtoon_opaque
+// mmd_opaque, mmd_transparent and mmd_outline. The transparent ones and the
+// outlines blend their source's alpha over the target; mmd_outline also
+// reads the mesh's edge scale as a fourth stream. Multisampled, mtoon_opaque
 // turns its alpha into coverage. The MToon and MMD ones read their model's
 // parameter buffer, the texture table and the wrap samplers through
 // `material_layout` (set 0), in both stages, since the outline's width is
@@ -249,6 +256,7 @@ struct ScenePipelines {
   ScenePipeline mtoon_outline;
   ScenePipeline mmd;
   ScenePipeline mmd_transparent;
+  ScenePipeline mmd_outline;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
@@ -256,7 +264,7 @@ struct ScenePipelines {
   // What every pipeline rasterizes at; the targets must match it.
   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
-  static constexpr std::uint32_t kCount = 6;
+  static constexpr std::uint32_t kCount = 7;
 };
 
 // The SPIR-V of every scene pipeline, loaded before any device exists so a
@@ -274,6 +282,8 @@ struct SceneShaderWords {
   std::vector<std::uint32_t> mmd_fragment;
   std::vector<std::uint32_t> mmd_transparent_vertex;
   std::vector<std::uint32_t> mmd_transparent_fragment;
+  std::vector<std::uint32_t> mmd_outline_vertex;
+  std::vector<std::uint32_t> mmd_outline_fragment;
 };
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -468,8 +478,9 @@ public:
     MaterialEntries entries;
     ToonShadingModel model = ToonShadingModel::PreviewSurface;
     bool double_sided = false;
-    // Whether a draw with this material also draws mtoon_outline's hull:
-    // an MToon material that asks for an outline of some width.
+    // Whether a draw with this material also draws an outline's hull: an
+    // MToon material that asks for an outline of some width, through
+    // mtoon_outline, or an MMD one that draws its edge, through mmd_outline.
     bool outline = false;
     float outline_width = 0;
     ToonOutlineWidthMode outline_width_mode = ToonOutlineWidthMode::None;
@@ -575,8 +586,9 @@ public:
   // MMD. Transparent draws come last, ordered by their material's render
   // queue and then as `draws` and each mesh's parts list them, an MMD
   // mesh's parts in MMD's material order; an MToon surface is followed by
-  // its hull (material policy §6). `record`, when given, counts
-  // what was drawn and marks where each pass ends.
+  // its hull (material policy §6). MMD's edges come after every surface,
+  // as MMD draws a model's edge after its materials. `record`, when given,
+  // counts what was drawn and marks where each pass ends.
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws,
       VkExtent2D extent, SceneRecord* record = nullptr);
@@ -605,6 +617,7 @@ private:
     OutlineBounds outline_bounds;
     HostBuffer normals;
     HostBuffer uvs;
+    HostBuffer edge_scales;
     HostBuffer indices;
     HostBuffer influences;
     HostBuffer joints;
@@ -617,12 +630,16 @@ private:
     std::uint64_t points_revision = 0;
     std::uint64_t normals_revision = 0;
     std::uint64_t uvs_revision = 0;
+    std::uint64_t edge_scales_revision = 0;
     std::uint64_t topology_revision = 0;
     std::uint64_t skin_revision = 0;
     std::uint64_t pose_revision = 0;
     std::uint32_t index_count = 0;
     // Whether `uvs` holds a coordinate for every vertex the indices reach.
     bool has_uvs = false;
+    // Whether `edge_scales` holds a scale for every vertex the indices
+    // reach; mmd_outline otherwise scales every vertex by 1.
+    bool has_edge_scales = false;
     // Whether this frame's draw skins the mesh, and the flags that say how.
     bool skinned = false;
     bool morphed = false;
@@ -649,6 +666,8 @@ private:
   VkDescriptorSetLayout skin_layout_ = VK_NULL_HANDLE;
   // Bound with stride 0 in place of a mesh's missing UVs.
   HostBuffer zero_uv_;
+  // Bound with stride 0 in place of a mesh's missing edge scales: 1.
+  HostBuffer unit_edge_scale_;
   // Bound, never read, in place of an unskinned mesh's skin.
   HostBuffer zero_skin_;
   VkDescriptorSet unskinned_set_ = VK_NULL_HANDLE;

@@ -2380,6 +2380,123 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// mmd_outline (material policy §5), on AddOctahedron's diamond in red under
+// one light. An edge of size 4 in a stored green of 0.5, which decodes to
+// 55, reaches the pixel at x = 0.58 on the centre row on a 64x64 target,
+// while the centre stays the surface's; the edge is unlit, so a light ten
+// times dimmer leaves it as it is. MMD gives the edge's width in pixels, so
+// on a 128x128 target the same edge is half as wide in the scene and the
+// pixel at the same x is background. An edge scale of 0 at every vertex,
+// or drawEdge off, takes it away. Last, an edge colour edit rewrites one
+// slot and nothing else.
+Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mmd_outline";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  const Toon::MeshId mesh = AddOctahedron(world);
+  const Toon::LightId key = world.CreateLight();
+  Toon::ToonLight light;
+  light.direction = {0.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+  Toon::ToonMaterial mmd;
+  mmd.model = Toon::ToonShadingModel::MMD;
+  mmd.base_color = {0.0F, 0.0F, 0.0F};
+  mmd.mmd.ambient_color = {1.0F, 0.0F, 0.0F};
+  mmd.outline = true;
+  mmd.outline_width = 4.0F;
+  mmd.outline_color = {0.0F, 0.5F, 0.0F};
+  mmd.mmd.edge_alpha = 1.0F;
+  const Toon::MaterialId material = world.CreateMaterial();
+  world.SetMaterial(material, mmd);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  std::array<std::uint8_t, 4> rim{};
+  std::array<std::uint8_t, 4> center{};
+  // Column 50's centre is x = 0.578 at 64 pixels, and column 100's x =
+  // 0.570 at 128; the centre row's y is within a pixel of 0.
+  const auto render = [&](std::uint32_t size) {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), size, size,
+            color, depth, detail)) {
+      return false;
+    }
+    rim = PixelAt(color, size * 50U / 64U, size / 2U);
+    center = CenterPixel(color);
+    return true;
+  };
+  const auto near = [](const std::array<std::uint8_t, 4>& pixel, int red,
+                        int green, int blue) {
+    return std::abs(pixel[0] - red) <= 2 && std::abs(pixel[1] - green) <= 2 &&
+           std::abs(pixel[2] - blue) <= 2;
+  };
+  const auto edge = [&]() { return near(rim, 0, 55, 0); };
+  const auto background = [&]() { return near(rim, 13, 26, 38); };
+
+  if (!render(64)) {
+    return {id, "fail", detail};
+  }
+  if (!edge() || !near(center, 255, 0, 0)) {
+    return {id, "fail",
+        "an MMD edge must draw its stored colour, decoded, around the "
+        "surface and not over it"};
+  }
+  light.color = {0.1F, 0.1F, 0.1F};
+  world.SetLight(key, light);
+  if (!render(64) || !edge()) {
+    return {id, "fail", "an MMD edge must not be lit"};
+  }
+  if (!render(128) || !background()) {
+    return {id, "fail",
+        "an MMD edge's width must be in pixels, so half as wide in the "
+        "scene on a target twice as tall"};
+  }
+  world.SetMeshEdgeScales(mesh, std::vector<float>(6, 0.0F));
+  if (!render(64) || !background()) {
+    return {id, "fail", "an edge scale of 0 must take the edge away"};
+  }
+  world.SetMeshEdgeScales(mesh, std::vector<float>(6, 1.0F));
+  mmd.outline = false;
+  world.SetMaterial(material, mmd);
+  if (!render(64) || !background()) {
+    return {id, "fail", "a material that draws no edge must draw none"};
+  }
+  mmd.outline = true;
+  world.SetMaterial(material, mmd);
+  if (!render(64) || !edge()) {
+    return {id, "fail", detail};
+  }
+
+  const Toon::OffscreenStatistics before = renderer->statistics();
+  mmd.outline_color = {0.5F, 0.0F, 0.5F};
+  world.SetMaterial(material, mmd);
+  if (!render(64)) {
+    return {id, "fail", detail};
+  }
+  const Toon::OffscreenStatistics& after = renderer->statistics();
+  if (after.validation_message_count != 0) {
+    return {id, "fail", after.validation_detail};
+  }
+  if (!near(rim, 55, 0, 55)) {
+    return {id, "fail", "an edge colour edit must reach the next frame"};
+  }
+  if (after.material_writes != before.material_writes + 1U ||
+      after.pipelines_created != before.pipelines_created ||
+      after.point_uploads != before.point_uploads ||
+      after.topology_uploads != before.topology_uploads ||
+      after.texture_uploads != before.texture_uploads) {
+    return {id, "fail",
+        "an MMD edge edit must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
 // the default, 4, through SetOrthographicView. The first scene is
 // AddOctahedron's diamond in unlit red under an unlit green world outline
@@ -2751,13 +2868,13 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: the four scene pipelines, one target
+    // 1,000 frames on one device: the seven scene pipelines, one target
     // allocation and one upload of the unchanged mesh, every later frame
     // reusing them.
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 6 &&
+                     statistics.pipelines_created == 7 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;
@@ -2807,6 +2924,7 @@ int main(int argc, char** argv) {
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(MmdCheck(shaders));
+    checks.push_back(MmdOutlineCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
@@ -2827,6 +2945,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
     checks.push_back({"renderer.material.mmd", "skip", dependent});
+    checks.push_back({"renderer.material.mmd_outline", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }

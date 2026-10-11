@@ -10,6 +10,17 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MMD edges draw: `mmd_outline`, the seventh scene pipeline, adds an
+  inverted hull for every MMD draw whose material draws its edge, after
+  every surface, `edgeSize` × the mesh's `primvars:mmd:edgeScale` wide, in
+  the edge colour, unlit and decoded once. Its width is a length in MMD
+  units plus a width in pixels, fitted to MMD's own frames at two distances
+  (MAT-Q4, open). `RenderWorld::SetMeshEdgeScales` and
+  `MeshSnapshot::edge_scales` carry the edge scale; `MmdParameters` is 144
+  bytes with the edge colour and size. The headless check
+  `renderer.material.mmd_outline`, and `draws_mmd_outline` in
+  `TOON_HYDRA_EVIDENCE` and the viewport
+  ([renderer report 57](docs/reports/renderer/57-2026-10-11-mmd-outline.md)).
 - MMD materials draw: `mmd_opaque` for a material that cannot blend and
   `mmd_transparent`, after the opaque draws in MMD's material order and
   writing depth, for the rest. MMD's shading is computed on stored values
@@ -42,6 +53,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Setting the UVs a mesh already has changes nothing, so an edit of another
+  primvar, which Hydra reports through the same dirty bit, no longer gives
+  them a new revision.
 - MMD's textures are read undecoded, as MMD shades them.
 - What every surface pipeline shares moved from `mtoon_common.slang` into
   `surface_common.slang`.

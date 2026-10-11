@@ -103,6 +103,8 @@ MeshId RenderWorld::CreateMesh() {
   mesh.topology_revision = Stamp();
   mesh.uvs = std::make_shared<const std::vector<Float2>>();
   mesh.uvs_revision = Stamp();
+  mesh.edge_scales = std::make_shared<const std::vector<float>>();
+  mesh.edge_scales_revision = Stamp();
   mesh.influences = std::make_shared<const std::vector<ToonJointInfluence>>();
   mesh.skin_revision = Stamp();
   mesh.joints = std::make_shared<const std::vector<Matrix4>>();
@@ -149,12 +151,25 @@ void RenderWorld::SetMeshPoints(MeshId mesh, std::vector<Float3> points) {
 }
 
 void RenderWorld::SetMeshUVs(MeshId mesh, std::vector<Float2> uvs) {
-  if (MeshRecord* record = Find(mesh)) {
-    record->snapshot.uvs =
-        std::make_shared<const std::vector<Float2>>(std::move(uvs));
-    record->snapshot.uvs_revision = Stamp();
-    dirty_ = true;
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || *record->snapshot.uvs == uvs) {
+    return;
   }
+  record->snapshot.uvs =
+      std::make_shared<const std::vector<Float2>>(std::move(uvs));
+  record->snapshot.uvs_revision = Stamp();
+  dirty_ = true;
+}
+
+void RenderWorld::SetMeshEdgeScales(MeshId mesh, std::vector<float> scales) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || *record->snapshot.edge_scales == scales) {
+    return;
+  }
+  record->snapshot.edge_scales =
+      std::make_shared<const std::vector<float>>(std::move(scales));
+  record->snapshot.edge_scales_revision = Stamp();
+  dirty_ = true;
 }
 
 void RenderWorld::SetMeshNormals(MeshId mesh, std::vector<Float3> normals) {
@@ -438,9 +453,18 @@ ToonTexture SharedToonRamp(std::int32_t index) {
 }
 
 bool HasOutline(const ToonMaterial& material) {
-  return material.model == ToonShadingModel::MToon && material.outline &&
-         material.mtoon.outline_width_mode != ToonOutlineWidthMode::None &&
-         material.outline_width > 0.0F && std::isfinite(material.outline_width);
+  const bool width = material.outline && material.outline_width > 0.0F &&
+                     std::isfinite(material.outline_width);
+  switch (material.model) {
+  case ToonShadingModel::MToon:
+    return width &&
+           material.mtoon.outline_width_mode != ToonOutlineWidthMode::None;
+  case ToonShadingModel::MMD:
+    return width;
+  case ToonShadingModel::PreviewSurface:
+    break;
+  }
+  return false;
 }
 
 bool IsTransparent(const ToonMaterial& material) {

@@ -3,7 +3,8 @@
 // A mesh's GeomSubset material bindings, through UsdImaging's scene indices
 // and scene index emulation as a host drives them: each subset that binds a
 // material becomes one part of the mesh's triangle list, and faces no such
-// subset names draw with the mesh's own binding.
+// subset names draw with the mesh's own binding. MMD's per-vertex edge
+// scale, `primvars:mmd:edgeScale`, reaches the mesh with them.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
@@ -12,6 +13,7 @@
 #include <pxr/imaging/hd/rprimCollection.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/subset.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
@@ -118,6 +120,33 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // The edge scale is read per point, and an edit of it changes nothing
+  // else.
+  std::vector<float> scales(13, 1.0F);
+  scales.front() = 2.0F;
+  scales.back() = 0.5F;
+  if (!Check(mesh.edge_scales != nullptr && *mesh.edge_scales == scales,
+          "the mesh must carry MMD's edge scale, one per point")) {
+    return 1;
+  }
+  UsdGeomPrimvarsAPI(stage->GetPrimAtPath(SdfPath("/Root/Body")))
+      .GetPrimvar(TfToken("mmd:edgeScale"))
+      .Set(VtFloatArray(13, 1.0F));
+  const Toon::FrameSnapshot rescaled = sync();
+  if (!Check(rescaled.meshes.size() == 1 &&
+                 *rescaled.meshes[0].edge_scales ==
+                     std::vector<float>(13, 1.0F) &&
+                 rescaled.meshes[0].edge_scales_revision !=
+                     mesh.edge_scales_revision,
+          "an edge scale edit must reach the mesh") ||
+      !Check(rescaled.meshes[0].points_revision == mesh.points_revision &&
+                 rescaled.meshes[0].topology_revision ==
+                     mesh.topology_revision &&
+                 rescaled.meshes[0].uvs_revision == mesh.uvs_revision,
+          "an edge scale edit must not touch the points, topology or UVs")) {
+    return 1;
+  }
+
   // A material prim that goes away leaves its subset unlit, and the
   // topology as it was.
   stage->RemovePrim(SdfPath("/Root/Looks/Blue"));
@@ -163,7 +192,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   index.reset();
-  std::cout << "subsets: 3 parts, removal, rebinding and removal of the "
-               "subsets reached the mesh\n";
+  std::cout << "subsets: 3 parts, an edge scale edit, removal, rebinding "
+               "and removal of the subsets reached the mesh\n";
   return 0;
 }

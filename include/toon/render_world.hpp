@@ -95,6 +95,7 @@ using TexCoordArray = std::shared_ptr<const std::vector<Float2>>;
 using PixelArray = std::shared_ptr<const std::vector<std::uint8_t>>;
 using InfluenceArray = std::shared_ptr<const std::vector<ToonJointInfluence>>;
 using MatrixArray = std::shared_ptr<const std::vector<Matrix4>>;
+using FloatArray = std::shared_ptr<const std::vector<float>>;
 
 // Sparse morph contributions in rest space, evaluated before skinning.
 // A point's range indexes offsets; each offset indexes the small weight array.
@@ -180,6 +181,11 @@ struct MeshSnapshot {
   // no texture.
   TexCoordArray uvs;
   std::uint64_t uvs_revision = 0;
+  // MMD's per-vertex edge scale (`primvars:mmd:edgeScale`), one per point,
+  // which multiplies an MMD material's edge size. Empty when the mesh has
+  // none; its edge then scales by 1 everywhere.
+  FloatArray edge_scales;
+  std::uint64_t edge_scales_revision = 0;
   // The skin, when the mesh is skinned: `points` and `normals` are then its
   // rest pose, and a draw moves them by `joints` (see IsSkinned). Empty
   // influences when it is not.
@@ -386,7 +392,8 @@ struct ToonMaterial {
 };
 
 // Whether a material's draws add an outline (material policy §5): an MToon
-// material whose width mode is not None, with a finite width above zero.
+// material whose width mode is not None, or an MMD material that draws its
+// edge, with a finite width above zero.
 [[nodiscard]] bool HasOutline(const ToonMaterial& material);
 
 // Whether a material's draws blend over what is behind them: its alpha mode
@@ -460,7 +467,11 @@ public:
   void SetMeshTopology(MeshId mesh, std::vector<std::uint32_t> triangles);
   void SetMeshPoints(MeshId mesh, std::vector<Float3> points);
   // One per point; any other count, or none, draws without textures.
+  // Setting the UVs a mesh already has changes nothing.
   void SetMeshUVs(MeshId mesh, std::vector<Float2> uvs);
+  // MMD's edge scale, one per point; any other count, or none, scales an
+  // MMD edge by 1. Setting the scales a mesh already has changes nothing.
+  void SetMeshEdgeScales(MeshId mesh, std::vector<float> scales);
   // Authored normals, one per point. Fewer than the topology reaches, or
   // none, derive smooth normals instead. Setting the normals a mesh already
   // has changes nothing.
