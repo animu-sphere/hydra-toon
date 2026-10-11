@@ -35,6 +35,7 @@ const std::vector<HdToonAvatarMaterialInput>& HdToonCanonicalMaterialInputs() {
   static const std::vector<HdToonAvatarMaterialInput> inputs{
       {"inputs:vrm:material:baseColorFactor", Field::BaseColorRgb},
       {"inputs:vrm:material:baseColorAlphaFactor", Field::Alpha},
+      {"inputs:vrm:material:emissiveFactor", Field::Emissive},
       {"inputs:vrm:mtoon:shadeColorFactor", Field::ShadeColor},
       {"inputs:vrm:mtoon:shadingShiftFactor", Field::ShadingShift},
       {"inputs:vrm:mtoon:shadingToonyFactor", Field::ShadingToony},
@@ -128,10 +129,11 @@ HdToonAvatarTargetMatch HdToonMatchAvatarTargets(const ArStateView& layout,
     match.bindings.morphs.push_back(std::move(binding));
   }
 
-  // Materials: the resident material at the path, the host's field.
-  std::map<std::string, Toon::MaterialId> materials;
+  // Materials: the resident material at the path, the host's field, and
+  // for emission the strength the delegate scales it by.
+  std::map<std::string, const HdToonResidentMaterial*> materials;
   for (const HdToonResidentMaterial& material : resident.materials) {
-    materials.emplace(material.path.GetString(), material.material);
+    materials.emplace(material.path.GetString(), &material);
   }
   for (std::uint32_t i = 0; i < layout.material_count; ++i) {
     const ArMaterialInput& value = layout.materials[i];
@@ -145,7 +147,11 @@ HdToonAvatarTargetMatch HdToonMatchAvatarTargets(const ArStateView& layout,
                                       : "no renderer field for this canonical input");
       continue;
     }
-    match.bindings.materials.push_back({i, material->second, input->field});
+    match.bindings.materials.push_back({i, material->second->material,
+        input->field,
+        input->field == Toon::AvatarMaterialField::Emissive
+            ? material->second->emissive_strength
+            : 1.0F});
   }
 
   // Visibility: the resident mesh whose path is the target.

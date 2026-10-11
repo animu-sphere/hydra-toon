@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [48](48-2026-10-11-avatar-emissive-factor.md) | Runtime `emissiveFactor` bound with the resident material's `emissiveStrength` as a per-binding scale; the provider fixture's emission bind equals the delegate's normalization in state and images, and a mutation without the scale fails at the first emissive frame |
 | [47](47-2026-10-11-avatar-real-providers.md) | The runtime's real VRM expression/LookAt providers through the host matcher: every output of a committed fixture and two avatars bound, each result's fast output equal to the same values composed by UsdImaging and usdSkelImaging in palettes, weights, materials and images, with no static uploads |
 | [46](46-2026-10-10-avatar-target-matching.md) | Host-side matching of runtime target identities to the resident description, with mismatch diagnostics; reordered palette and placed skeleton composing usdSkelImaging's palette, and a whole avatar's 128 joints and 158 shapes binding completely |
 | [45](45-2026-10-10-avatar-state-runtime-revision-4.md) | Avatar-state consumer moved to runtime ABI revision 4; vec2 base texture offset/scale with vec3-with-zero-z refused; core, installed, runtime-lifetime, GPU and Hydra skinning checks |

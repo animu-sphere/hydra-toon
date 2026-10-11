@@ -191,6 +191,36 @@ void SplitBaseColor() {
   bindings.materials.back().source = 1;
   Check(!adapter.Bind(layout, base, 2, bindings, error), "RGB/RGBA overlap accepted without alpha");
 }
+// A binding's scale multiplies what it writes, as the Hydra delegate scales
+// `emissiveFactor` by `emissiveStrength`; release restores the scaled
+// baseline, and a non-finite scale is refused.
+void ScaledEmissive() {
+  Scene scene;
+  scene.values.emissive = {.2F, .1F, 0};
+  scene.world.SetMaterial(scene.material, scene.values);
+  Values v;
+  v.materials[0] = {"surface", "owner:emission", AR_VALUE_VEC3, 1, {.3, .7, .1, 0}};
+  auto bindings = scene.Bindings();
+  bindings.materials = {{0, scene.material, Toon::AvatarMaterialField::Emissive, 2.5F},
+      {1, scene.material, Toon::AvatarMaterialField::ShadeColor}};
+  auto base = scene.world.Commit();
+  Toon::AvatarStateAdapter adapter;
+  std::string error;
+  Check(adapter.Bind(v.View(), base, 1, bindings, error), error.c_str());
+  auto retained = Fake::Snapshot(v.View());
+  Toon::FrameSnapshot output;
+  Check(adapter.Apply(retained, base, 1, output, error), error.c_str());
+  const auto& emissive = output.materials[0].material.emissive;
+  Check(emissive.x == .3F * 2.5F && emissive.y == .7F * 2.5F && emissive.z == .1F * 2.5F,
+      "scaled emissive mapping lost its factor");
+  v.materials[0].overridden = 0;
+  retained = Fake::Snapshot(v.View(2));
+  Check(adapter.Apply(retained, base, 1, output, error) &&
+            output.materials[0].material.emissive == scene.values.emissive,
+      "emissive release did not restore the baseline");
+  bindings.materials[0].scale = std::numeric_limits<float>::infinity();
+  Check(!adapter.Bind(v.View(), base, 2, bindings, error), "non-finite binding scale accepted");
+}
 // Runtime revision 4 publishes two-component inputs as vec2; the former
 // vec3-with-zero-z convention is refused rather than accepted as an alias.
 void TextureTransform() {
@@ -636,6 +666,7 @@ int main(int argc, char** argv) {
   try {
     SplitBaseColor();
     TextureTransform();
+    ScaledEmissive();
     Inbetweens();
     State();
     if (argc == 3 && std::string(argv[1]) == "--runtime")

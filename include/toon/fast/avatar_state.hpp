@@ -76,6 +76,10 @@ struct AvatarMaterialBinding {
   // The host maps the owner's canonical input id to a renderer field.
   // No source-name, expression or gaze interpretation happens here.
   AvatarMaterialField field = AvatarMaterialField::BaseColor;
+  // Multiplies each component written, in single precision, for a field the
+  // resident realization scales: the host states the factor, as the Hydra
+  // delegate's `emissiveStrength` for `Emissive`. Finite.
+  float scale = 1.0F;
 };
 struct AvatarVisibilityBinding {
   std::uint32_t source = 0;

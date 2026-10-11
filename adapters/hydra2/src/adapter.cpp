@@ -294,7 +294,9 @@ public:
       }
     }
     for (const auto& [path, material] : materials_by_path_) {
-      targets.materials.push_back({material, path});
+      const auto strength = emissive_strength_.find(material);
+      targets.materials.push_back({material, path,
+          strength == emissive_strength_.end() ? 1.0F : strength->second});
     }
     std::sort(targets.meshes.begin(), targets.meshes.end(),
         [](const auto& a, const auto& b) { return a.mesh < b.mesh; });
@@ -434,6 +436,7 @@ public:
   void RemoveMaterial(Toon::MaterialId material, const SdfPath& path) {
     std::scoped_lock lock(mutex_);
     world_.RemoveMaterial(material);
+    emissive_strength_.erase(material);
     const auto found = materials_by_path_.find(path);
     if (found != materials_by_path_.end() && found->second == material) {
       materials_by_path_.erase(found);
@@ -442,9 +445,10 @@ public:
   }
 
   void SetMaterial(Toon::MaterialId material,
-      const Toon::ToonMaterial& values) {
+      const Toon::ToonMaterial& values, float emissive_strength) {
     std::scoped_lock lock(mutex_);
     world_.SetMaterial(material, values);
+    emissive_strength_[material] = emissive_strength;
   }
 
   // One texture per image and encoding, however many materials sample it,
@@ -633,6 +637,8 @@ private:
   std::unordered_map<Toon::MeshId, SdfPath> bindings_;
   // Each mesh's Hydra identities; its material is resolved when described.
   std::unordered_map<Toon::MeshId, HdToonResidentMesh> resident_;
+  // Each material's `emissiveStrength`, described with its path.
+  std::unordered_map<Toon::MaterialId, float> emissive_strength_;
   std::map<HdToonTextureKey, SharedTexture> textures_;
   // Warned about once, and not decoded again.
   std::set<HdToonTextureKey> unreadable_;
@@ -1678,7 +1684,7 @@ void HdToonMaterial::Read(const HdContainerDataSourceHandle& prim) {
     references[role]->texture = textures[role];
   }
   values_ = source.values;
-  state_->SetMaterial(material_, values_);
+  state_->SetMaterial(material_, values_, source.emissive_strength);
 }
 
 const Toon::ToonMaterial& HdToonMaterial::GetToonMaterial() const {

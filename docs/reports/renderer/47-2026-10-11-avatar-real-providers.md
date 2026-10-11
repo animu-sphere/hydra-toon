@@ -1,5 +1,8 @@
 # Real runtime providers through the host matcher
 
+Later: [report 48](48-2026-10-11-avatar-emissive-factor.md) binds
+`emissiveFactor`, scaled by the resident material's `emissiveStrength`.
+
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev; `usd-avatar-runtime`
