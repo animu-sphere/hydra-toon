@@ -368,7 +368,7 @@ if(TOON_BUILD_TESTS)
       add_test(NAME toon-viewport-avatar-runtime-late
         COMMAND "${CMAKE_COMMAND}" ${_avatar_run}
           "-DARGUMENTS=--hidden|--frames|48|--vsync|off|--overlay|off|--usd|${_avatar_stage}|--avatar-runtime|--avatar-lookat|/Avatar/LookAtBone|--avatar-rate|0|--avatar-reset-every|20"
-          "-DEXPECT=results=49 extracted=49 late=48 held=0 refused=0 resets=2 epoch=1 generation=3|matched skins=2 morphs=6 materials=4 visibility=0 mismatches=0|static_uploads=0 poses=[1-9][0-9]* morph_weights=[1-9][0-9]* materials=[1-9]|Late latch: applied=48 rejected=0|Hydra syncs=1 |avatar publish_latch"
+          "-DEXPECT=results=49 extracted=49 late=48 held=0 refused=0 resets=2 epoch=1 generation=3|matched skins=2 morphs=6 materials=4 visibility=0 mismatches=0|static_uploads=0 poses=[1-9][0-9]* morph_weights=[1-9][0-9]* materials=[1-9]|Late latch: applied=48 rejected=0|Hydra syncs=1 |avatar publish_latch|latency expression_latch frames=48|latency look_at_present_api frames=4[78] "
           -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
       # A producer thread at 240 results per second, and the scene replaced
       # halfway: the replacement binds its own runtime in a new epoch.

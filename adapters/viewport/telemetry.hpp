@@ -105,14 +105,20 @@ private:
   // The frame without its image wait: the GPU's own work.
   Series gpu_work_;
   Series gpu_frame_;
-  Series pose_buffer_{kWindow}, pose_submit_{kWindow}, pose_present_{kWindow};
-  Series expression_submit_{kWindow}, look_at_submit_{kWindow}, camera_present_{kWindow};
+  // Each input's age at the late read, buffer write, submit and present API
+  // return.
+  Series pose_latch_{kWindow}, pose_buffer_{kWindow}, pose_submit_{kWindow}, pose_present_{kWindow};
+  Series expression_latch_{kWindow}, expression_buffer_{kWindow}, expression_submit_{kWindow},
+      expression_present_{kWindow};
+  Series look_at_latch_{kWindow}, look_at_buffer_{kWindow}, look_at_submit_{kWindow},
+      look_at_present_{kWindow};
+  Series camera_present_{kWindow};
   Series pose_write_{kWindow}, morph_write_{kWindow}, material_write_{kWindow};
   std::vector<FrameLatency> latency_frames_;
   std::size_t latency_next_ = 0;
   // Response latency uses the first completed frame for each input update.
   // Repeated frames of a stationary camera are not new response samples.
-  std::array<std::int64_t, 6> measured_inputs_{};
+  std::array<std::int64_t, 13> measured_inputs_{};
 };
 
 } // namespace Toon::viewport

@@ -977,13 +977,22 @@ int RunViewport(int argc, char** argv) {
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
         shown.avatar_runtime = avatar ? &avatar->status() : nullptr;
 #endif
-        const Toon::viewport::OverlayControls controls = overlay->Build(shown,
+        Toon::viewport::OverlayControls controls = overlay->Build(shown,
             Milliseconds(overlay_start - last_overlay) / 1000.0,
             overlay_draws);
         last_overlay = overlay_start;
         open_file_requested = controls.open_file;
 #if TOON_VIEWPORT_HAS_HYDRA
         // ReadFast publishes these edits in this frame, without Hydra sync.
+        // The avatar runtime binds over the unoverridden scene and owns the
+        // values it writes, so panel overrides wait until it stops.
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        if (avatar && (!controls.morph_edits.empty() || !controls.material_edits.empty())) {
+          controls.morph_edits.clear();
+          controls.material_edits.clear();
+          open_error = "Overrides are off while the avatar runtime drives the scene.";
+        }
+#endif
         if (hydra != nullptr) {
           for (const auto& edit : controls.morph_edits) {
             if (edit.weights) {

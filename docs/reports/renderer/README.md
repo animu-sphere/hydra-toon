@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [51](51-2026-10-11-v030-evidence.md) | v0.3.0's remaining evidence: identical draw packets and pipeline selection on both paths, a replaced scene refused until rebound in a new epoch, generated input aged at the late read, buffer write, submit and present API return on two avatars, and runtime-free builds passing |
 | [50](50-2026-10-11-avatar-motion-provider.md) | The runtime's motion clip provider ahead of the VRM provider in both hosts: a committed clip and seven VRMA clips on two avatars match UsdImaging's palettes and images within declared tolerances, and pose the viewport through late reads with no static uploads |
 | [49](49-2026-10-11-viewport-avatar-runtime.md) | The runtime's real providers in the dedicated viewport (`toon-viewport-avatar`): results published after extraction applied at the late read on every fixture frame and 596 of 600 avatar frames, through resets and scene replacement, with no static uploads or extra Hydra syncs, and a runtime-frame diagnostics panel |
 | [48](48-2026-10-11-avatar-emissive-factor.md) | Runtime `emissiveFactor` bound with the resident material's `emissiveStrength` as a per-binding scale; the provider fixture's emission bind equals the delegate's normalization in state and images, and a mutation without the scale fails at the first emissive frame |

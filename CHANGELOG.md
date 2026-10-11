@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The provider host check compares both paths' draw packets, in order, and
+  their pipeline selection for every result, then replaces the scene: the
+  old binding must refuse it until it is matched and bound in a new epoch.
+- Viewport latency series for every input at every endpoint:
+  `pose_latch`, `expression_latch`, `expression_buffer`,
+  `expression_present_api`, `look_at_latch`, `look_at_buffer` and
+  `look_at_present_api` join the existing ones, live and in
+  `--telemetry-output`.
 - The runtime's motion clip provider in both provider hosts:
   `toon-hydra2-avatar-provider-test --motion <stage>` and
   `toon-viewport-avatar --avatar-motion <stage>` read a stage's one-skeleton
@@ -121,6 +129,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- While `toon-viewport-avatar`'s runtime drives the scene, Morphs and
+  Materials panel overrides are ignored with a note, since the runtime binds
+  over the unoverridden scene.
 - `Toon::AvatarState` follows the runtime's experimental C ABI revision 4 and
   is rebuilt against its headers. Base texture offset and scale bindings take
   the runtime's vec2 material values; the former vec3-with-zero-z convention

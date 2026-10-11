@@ -13,8 +13,10 @@
 // the bound Hydra scene, and authored into the session layer for UsdImaging
 // and usdSkelImaging to compose. Authoring is this check's oracle only; no
 // renderer path authors USD per frame. Both must give the same palettes,
-// subshape weights and normalized materials, while the fast result keeps
-// every static revision of the bound scene. With --shaders, both are also
+// subshape weights and normalized materials, the same draw packets selecting
+// the same pipelines, while the fast result keeps every static revision of
+// the bound scene. Last, the scene is replaced: the old binding is refused
+// until the replacement is matched and bound in a new epoch. With --shaders, both are also
 // drawn on the same Vulkan configuration and their colour and depth must
 // agree within the tolerances `Images` declares, while the fast renderer
 // uploads no static resource after its first frame.
@@ -519,6 +521,39 @@ float Relative(const Toon::Matrix4& a, const Toon::Matrix4& b) {
   return error;
 }
 
+// What selects a draw's pipelines, as the backend reads a draw packet: its
+// material's model, alpha, sidedness and hull, and its skin and morphs.
+struct Selection {
+  Toon::MeshId mesh = 0;
+  Toon::MaterialId material = 0;
+  Toon::ToonShadingModel model = Toon::ToonShadingModel::PreviewSurface;
+  Toon::ToonAlphaMode alpha = Toon::ToonAlphaMode::Opaque;
+  bool transparent = false, outline = false, double_sided = false;
+  bool skinned = false, morphed = false;
+  friend bool operator==(const Selection&, const Selection&) = default;
+};
+
+std::vector<Selection> Packets(const Toon::DrawList& draws) {
+  std::vector<Selection> packets;
+  for (const Toon::MeshSnapshot& mesh : draws.draws) {
+    Selection selection;
+    selection.mesh = mesh.id;
+    selection.material = mesh.material;
+    selection.skinned = Toon::IsSkinned(mesh);
+    selection.morphed = Toon::IsMorphed(mesh);
+    for (const Toon::MaterialSnapshot& material : draws.materials) {
+      if (material.id != mesh.material) continue;
+      selection.model = material.material.model;
+      selection.alpha = material.material.alpha_mode;
+      selection.transparent = Toon::IsTransparent(material.material);
+      selection.outline = Toon::HasOutline(material.material);
+      selection.double_sided = material.material.double_sided;
+    }
+    packets.push_back(selection);
+  }
+  return packets;
+}
+
 struct Totals {
   float palette_error = 0.0F;
   float weight_error = 0.0F;
@@ -526,6 +561,7 @@ struct Totals {
   std::size_t posed = 0;     // frames whose fast palettes left the rest
   std::size_t weighted = 0;  // frames with a nonzero fast subshape weight
   std::size_t coloured = 0;  // frames whose fast materials left the scene's
+  std::size_t draws = 0;     // draw packets per frame, the same on both paths
 };
 
 // The fast result over the bound scene against the oracle's Hydra commit,
@@ -609,6 +645,13 @@ bool Compare(const Toon::AvatarBindings& bindings, const Toon::FrameSnapshot& bo
     }
     coloured = coloured || !(a->material == s->material);
   }
+  // The same draw packets, in the same order, selecting the same pipelines.
+  const auto direct_packets = Packets(Toon::ExtractDrawList(direct));
+  if (!Check(direct_packets == Packets(Toon::ExtractDrawList(hydra)),
+          label + ": the draw packets or their pipeline selection differ from Hydra's")) {
+    return false;
+  }
+  totals.draws = direct_packets.size();
   // Value-only: the fast result keeps every static array and revision.
   for (const auto& mesh : direct.meshes) {
     const auto* s = Mesh(bound, mesh.id);
@@ -982,11 +1025,49 @@ int Run(const Options& options) {
     }
   }
 
+  // Structural rebinding: the same stage in a new Hydra scene, as a host
+  // replaces one. Its renderer ids may coincide with the old scene's, so the
+  // host states a new epoch; the old binding refuses it until the
+  // replacement is matched and bound, after which a result compares as
+  // before. The images stay with the first scene's renderers.
+  {
+    Host replacement(stage);
+    const Toon::FrameSnapshot rebound = replacement.Sync();
+    const ArSnapshot handle = Evaluate(runtime, diagnostics, ++frame_id, generation,
+        clip_end, frames[frames.size() - 3]);
+    Toon::RetainedAvatarSnapshot held;
+    std::string error;
+    const bool retained = handle != 0 && held.Reset(runtime.api, handle, error);
+    if (handle) runtime.api.release_snapshot(handle);
+    if (!Check(retained, "rebinding: the runtime published no result " + error)) return 1;
+    const ArStateView& view = *held.View();
+    Toon::FrameSnapshot direct;
+    if (!Check(!adapter.Apply(held, rebound, 2, direct, error),
+            "rebinding: the old binding must refuse the replaced scene's epoch")) {
+      return 1;
+    }
+    const HdToonAvatarTargetMatch rematch =
+        HdToonMatchAvatarTargets(view, replacement.Describe(), HdToonCanonicalMaterialInputs());
+    if (!Check(rematch.mismatches.empty(), "rebinding: every output must match again") ||
+        !Check(adapter.Bind(view, rebound, 2, rematch.bindings, error), "rebind: " + error) ||
+        !Check(adapter.Apply(held, rebound, 2, direct, error), "rebound apply: " + error) ||
+        !Check(adapter.IdentityInfo().binding_epoch == 2, "rebinding: the epoch must be the new one") ||
+        !Check(oracle.Author(view), "rebinding: cannot author the oracle")) {
+      return 1;
+    }
+    const Toon::FrameSnapshot hydra = replacement.Sync();
+    if (!Compare(rematch.bindings, rebound, rest, direct, hydra, "rebound", totals)) return 1;
+    std::cout << "  rebinding: the replaced scene refused in epoch 2 until bound, then "
+              << rematch.bindings.skins.size() << " skins and " << rematch.bindings.morphs.size()
+              << " morphs bound and one result compared\n";
+  }
+
   std::cout << "  " << totals.frames << " results compared: palettes within "
             << totals.palette_error << " relative, subshape weights within "
             << totals.weight_error << "; " << totals.posed << " posed, "
             << totals.weighted << " weighted and " << totals.coloured
-            << " recoloured fast frames\n";
+            << " recoloured fast frames; " << totals.draws
+            << " draw packets per frame with the same pipeline selection\n";
   if (gpu) images.Report();
   for (const auto& [code, count] : diagnostics.counts) {
     std::cout << "  " << code << " x" << count << '\n';
@@ -995,7 +1076,7 @@ int Run(const Options& options) {
     std::cout << "  motion: clip " << clip_start << " to " << clip_end << " s, "
               << pose_samples << " retained pose samples\n";
   }
-  if (!Check(totals.frames == frames.size(), "every result must be compared") ||
+  if (!Check(totals.frames == frames.size() + 1, "every result must be compared") ||
       !Check(options.expect_gaze != "bone" || gaze_posed > 0,
           "bone gaze must move a bound palette") ||
       !Check(options.expect_gaze != "expression" || (gaze_weighted > 0 && gaze_posed == 0),
