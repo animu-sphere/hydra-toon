@@ -2,6 +2,8 @@
 
 > Followed by [report 54](54-2026-10-11-geom-subset-bindings.md): `GeomSubset` material bindings, so the 20-material model is 20 draws, one per material.
 
+> Followed by [report 55](55-2026-10-11-mat-q3-mmd-colour.md): MAT-Q3 decided, so MMD's textures will be sampled undecoded, not as the sRGB colour §1 reads them as.
+
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Tooling: `ost 0.23.14`; the canonical runtime

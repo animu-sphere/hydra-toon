@@ -23,6 +23,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
   draw per part over the mesh's buffers. CTests `toon-render-world`,
   `toon-subset-gpu` and `toon-renderer-hydra-geom-subsets`;
   `toon-hydra2-material-test --stage` prints each mesh's parts.
+- Renderer report 55 resolves MAT-Q3 against captures from MMD itself: MMD
+  shades its colours as stored, so the MMD path will compute on stored
+  values and convert its result to linear once
+  ([material policy §9](docs/design/MATERIAL_POLICY.md#9-open-questions)).
 
 ### Changed
 
