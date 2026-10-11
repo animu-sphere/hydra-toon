@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The runtime's motion clip provider in both provider hosts:
+  `toon-hydra2-avatar-provider-test --motion <stage>` and
+  `toon-viewport-avatar --avatar-motion <stage>` read a stage's one-skeleton
+  clip with the motion owner's reader and retarget it onto the avatar's VRM
+  humanoid ahead of the VRM provider. `avatar-motion.usda` is a committed
+  clip; CTests `toon-renderer-hydra-avatar-providers-motion{,-gpu}` and
+  `toon-viewport-avatar-runtime-motion` compare its results with UsdImaging
+  and apply them late in the viewport.
 - `toon-viewport-avatar`, built only with the opt-in
   `TOON_AVATAR_RUNTIME_PROVIDERS` and never installed: the viewport as a host
   of `usd-avatar-runtime`'s real VRM expression/LookAt providers
@@ -136,6 +144,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Fixed
 
+- The provider host check syncs only the `geometry` and `proxy` render tags,
+  as the viewport does, so usdSkelImaging's skeleton guide mesh no longer
+  enters its image comparison.
 - A UsdSkel aggregator edit that changes only morph targets no longer
   re-sends unchanged rest points. Normal-offset edits preserve geometry,
   skin, pose and weight revisions.

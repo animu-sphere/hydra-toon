@@ -3,7 +3,9 @@
 // A renderer-side host over real usd-avatar-runtime providers (roadmap
 // v0.3.0). The runtime's VRM USD bindings read the avatar, and its owner
 // LookAt/Expression evaluator, registered in the runtime, produces every
-// result from host scalar and gaze input. The host matches each result's
+// result from host scalar and gaze input. With --motion, the runtime's motion
+// clip provider poses the avatar first, from a clip read from a stage's one
+// skeleton and retargeted onto the avatar's humanoid. The host matches each result's
 // identities to the delegate's resident description and binds the fast
 // adapter with them; every runtime output must bind.
 //
@@ -18,9 +20,13 @@
 // uploads no static resource after its first frame.
 #include "avatar_binding.hpp"
 
+#include <avatarMotion/ClipPoseAdapter.h>
+#include <avatarMotionUsd/ReadStageClip.h>
 #include <avatarVrm/ExpressionAdapter.h>
 #include <avatarVrmUsd/ExpressionBinding.h>
+#include <avatarVrmUsd/HumanoidBinding.h>
 #include <avatarVrmUsd/LookAtBinding.h>
+#include <vrmRig/RequiredBones.h>
 
 #include <pxr/pxr.h>
 
@@ -32,9 +38,11 @@
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
+#include <pxr/imaging/hd/task.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/editContext.h>
+#include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/xformable.h>
@@ -56,6 +64,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -76,6 +85,27 @@ struct Options {
   bool expect_materials = false;
   bool expect_images = false; // fast images must change with the results
   std::string shaders;
+  std::string motion;          // a stage with one skeleton and its clip
+  bool expect_motion = false;  // the clip must pose a bound palette
+};
+
+// Draws nothing: it states the render tags toon-viewport shows, geometry and
+// proxy, so usdSkelImaging's skeleton guide mesh, whose points Hydra poses
+// on the CPU, is not synced as a drawn mesh.
+class RenderTagTask final : public HdTask {
+public:
+  RenderTagTask()
+      : HdTask(SdfPath("/__toonProviderRenderTags")),
+        tags_{HdRenderTagTokens->geometry, HdRenderTagTokens->proxy} {}
+  void Sync(HdSceneDelegate*, HdTaskContext*, HdDirtyBits* dirty_bits) override {
+    *dirty_bits = 0;
+  }
+  void Prepare(HdTaskContext*, HdRenderIndex*) override {}
+  void Execute(HdTaskContext*) override {}
+  const TfTokenVector& GetRenderTags() const override { return tags_; }
+
+private:
+  TfTokenVector tags_;
 };
 
 // UsdImaging's scene indices over the stage, synced into the delegate as
@@ -119,7 +149,7 @@ private:
   UsdImagingSceneIndices indices_;
   HdToonRenderDelegate delegate_;
   std::unique_ptr<HdRenderIndex> index_;
-  HdTaskSharedPtrVector tasks_;
+  HdTaskSharedPtrVector tasks_{std::make_shared<RenderTagTask>()};
   HdTaskContext context_;
 };
 
@@ -163,13 +193,52 @@ struct Frame {
 constexpr const char* kSource = "host";
 constexpr const char* kActor = "avatar";
 constexpr const char* kGaze = "gaze:point";
+constexpr const char* kMotion = "toon.provider-check.motion";
+
+// The runtime's motion clip provider: the clip of the one skeleton in the
+// stage at `path`, read by the motion owner, retargeted onto the avatar's
+// humanoid. Clip seconds are runtime seconds. VRM's required bones are the
+// target's, so a partial humanoid is reported by the owner, not refused.
+std::unique_ptr<avatarMotion::ClipPoseAdapter> MotionProvider(const UsdStageRefPtr& avatar,
+    const avatarVrmUsd::HumanoidBindingConfig& humanoid, const std::string& path,
+    const ArStateView& baseline, double& start, double& end) {
+  UsdStageRefPtr stage = UsdStage::Open(path);
+  if (!stage) throw std::runtime_error("cannot open the motion " + path);
+  SdfPath skeleton;
+  for (const UsdPrim& prim : stage->Traverse()) {
+    if (!prim.IsA<UsdSkelSkeleton>()) continue;
+    if (!skeleton.IsEmpty()) throw std::runtime_error("the motion must hold one skeleton");
+    skeleton = prim.GetPath();
+  }
+  if (skeleton.IsEmpty()) throw std::runtime_error("the motion holds no skeleton");
+  const auto read = avatarMotionUsd::ReadStageClip(stage, skeleton);
+  stage.Reset();
+  const avatarVrmUsd::HumanoidBinding binding(avatar, humanoid);
+  const avatarUsd::SkeletonBinding& target = binding.Skeleton();
+  avatarMotion::ClipPoseAdapterConfig config;
+  config.evaluatorId = kMotion;
+  config.layoutId = baseline.layout_id;
+  config.layoutVersion = baseline.layout_version;
+  config.skeletonId = target.SkeletonId();
+  config.skeleton = target.Skeleton();
+  config.map = target.HumanoidMap();
+  config.jointIds = target.JointIds();
+  config.rootPlacement = target.RootPlacement();
+  config.clip = read.clip;
+  config.sourceRest = *read.sourceRest;
+  config.options.requiredBones = vrmRig::GetRequiredBones();
+  if (config.clip.samples.empty()) throw std::runtime_error("the motion clip is empty");
+  start = config.clip.samples.front().timestamp;
+  end = config.clip.samples.back().timestamp;
+  return std::make_unique<avatarMotion::ClipPoseAdapter>(std::move(config));
+}
 
 std::string Channel(const std::string& expression) {
   return "expr:" + expression;
 }
 
 ArSnapshot Evaluate(Runtime& runtime, Diagnostics& diagnostics,
-    std::uint64_t frame_id, std::uint64_t generation, const Frame& frame) {
+    std::uint64_t frame_id, std::uint64_t generation, double seconds, const Frame& frame) {
   std::deque<std::string> channels;
   std::vector<ArScalarInput> scalars;
   for (const auto& [name, value] : frame.weights) {
@@ -195,6 +264,7 @@ ArSnapshot Evaluate(Runtime& runtime, Diagnostics& diagnostics,
   ArInputFrame input{AR_HEADER(ArInputFrame)};
   input.frame_id = frame_id;
   input.generation = generation;
+  input.evaluation_seconds = seconds;
   input.scalars = scalars.data();
   input.scalar_count = static_cast<std::uint32_t>(scalars.size());
   input.input_revision = frame_id;
@@ -751,8 +821,17 @@ int Run(const Options& options) {
       stage->GetDefaultPrim().GetPath(), {}, "toon.provider-check", 1};
   const avatarVrmUsd::ExpressionBinding expressions(stage, {humanoid, {}});
   const avatarVrmUsd::LookAtBinding look(stage, {humanoid, options.look_at});
+  // The clip poses the avatar before gaze reads its working head.
+  double clip_start = 0.0, clip_end = 0.0;
+  std::unique_ptr<avatarMotion::ClipPoseAdapter> motion;
+  std::vector<std::string> after;
+  if (!options.motion.empty()) {
+    motion = MotionProvider(stage, humanoid, options.motion, expressions.Baseline(),
+        clip_start, clip_end);
+    after.push_back(kMotion);
+  }
   avatarVrm::ExpressionAdapterConfig config =
-      look.AdapterConfig("toon.provider-check.vrm", {kSource, kActor, kGaze});
+      look.AdapterConfig("toon.provider-check.vrm", {kSource, kActor, kGaze}, after);
   expressions.ApplyTo(config);
   for (const auto& expression : expressions.Rig().GetExpressions()) {
     config.inputs.push_back({{kSource, kActor, Channel(expression.name)}, expression.name});
@@ -760,27 +839,37 @@ int Run(const Options& options) {
   const std::string head_skeleton = config.headSkeleton;
   const std::string head_joint = config.headJoint;
   const avatarVrm::ExpressionAdapter provider(config);
-  const ArEvaluatorDesc descriptor = provider.Descriptor();
+  std::vector<ArEvaluatorDesc> descriptors{provider.Descriptor()};
+  if (motion) descriptors.push_back(motion->Descriptor());
 
   Runtime runtime;
   ArDiagnosticSink sink = diagnostics.Sink();
   const ArStateView& baseline = expressions.Baseline();
   if (!Check(arGetApi(AR_ABI_VERSION, sizeof(runtime.api), &runtime.api) == AR_OK &&
-                 runtime.api.create_runtime(&runtime.runtime) == AR_OK &&
-                 runtime.api.register_evaluator(runtime.runtime, &descriptor, &sink) == AR_OK,
-          "cannot register the provider in the runtime")) {
+                 runtime.api.create_runtime(&runtime.runtime) == AR_OK,
+          "cannot create the runtime")) {
     return 1;
+  }
+  std::vector<const char*> evaluators;
+  std::vector<ArCapability> capabilities;
+  for (const ArEvaluatorDesc& descriptor : descriptors) {
+    if (!Check(runtime.api.register_evaluator(runtime.runtime, &descriptor, &sink) == AR_OK,
+            std::string("cannot register ") + descriptor.id + " in the runtime")) {
+      return 1;
+    }
+    evaluators.push_back(descriptor.id);
+    capabilities.insert(capabilities.end(), descriptor.supplies,
+        descriptor.supplies + descriptor.supply_count);
   }
   ArInstanceDesc instance{AR_HEADER(ArInstanceDesc)};
   instance.generation = 1;
   instance.initial_state = baseline;
   instance.layout_id = baseline.layout_id;
   instance.layout_version = baseline.layout_version;
-  const char* evaluators[] = {descriptor.id};
-  instance.evaluators = evaluators;
-  instance.evaluator_count = 1;
-  instance.bound_capabilities = descriptor.supplies;
-  instance.bound_capability_count = descriptor.supply_count;
+  instance.evaluators = evaluators.data();
+  instance.evaluator_count = static_cast<std::uint32_t>(evaluators.size());
+  instance.bound_capabilities = capabilities.data();
+  instance.bound_capability_count = static_cast<std::uint32_t>(capabilities.size());
   if (!Check(runtime.api.create_instance(runtime.runtime, &instance, &sink,
                  &runtime.instance) == AR_OK,
           "cannot create the runtime instance")) {
@@ -817,8 +906,12 @@ int Run(const Options& options) {
   Toon::FrameSnapshot rest;
   Totals totals;
   std::uint64_t generation = 1, frame_id = 0;
-  std::size_t gaze_posed = 0, gaze_weighted = 0;
-  for (const Frame& frame : frames) {
+  std::size_t gaze_posed = 0, gaze_weighted = 0, pose_samples = 0;
+  for (std::size_t index = 0; index < frames.size(); ++index) {
+    const Frame& frame = frames[index];
+    // With a clip, the frames walk through it, ending on its last sample.
+    const double seconds = clip_start + (clip_end - clip_start) *
+        static_cast<double>(index) / static_cast<double>(frames.size() - 1);
     if (frame.reset) {
       if (!Check(runtime.api.reset_instance(runtime.runtime, runtime.instance, ++generation) == AR_OK,
               "cannot reset the runtime instance")) {
@@ -826,7 +919,8 @@ int Run(const Options& options) {
       }
       frame_id = 0;
     }
-    const ArSnapshot handle = Evaluate(runtime, diagnostics, ++frame_id, generation, frame);
+    const ArSnapshot handle =
+        Evaluate(runtime, diagnostics, ++frame_id, generation, seconds, frame);
     Toon::RetainedAvatarSnapshot held;
     std::string error;
     const bool retained = handle != 0 && held.Reset(runtime.api, handle, error);
@@ -835,6 +929,9 @@ int Run(const Options& options) {
       return 1;
     }
     const ArStateView& view = *held.View();
+    for (std::uint32_t i = 0; i < view.sample_count; ++i) {
+      pose_samples += view.samples[i].kind == AR_SOURCE_POSE;
+    }
     if (frame_id == 1 && generation == 1) {
       // Match the published result's identities, then bind them once.
       match = HdToonMatchAvatarTargets(view, resident, HdToonCanonicalMaterialInputs());
@@ -843,7 +940,7 @@ int Run(const Options& options) {
       }
       if (!Check(match.mismatches.empty(), "every runtime output must match a resident target") ||
           !Check(adapter.Bind(view, bound, 1, match.bindings, error), "bind: " + error) ||
-          !Check(oracle.Prepare(stage, host.Time(), view) && oracle.CheckRest(view),
+          !Check(oracle.Prepare(stage, host.Time(), view) && (motion || oracle.CheckRest(view)),
               "cannot prepare the oracle")) {
         return 1;
       }
@@ -894,6 +991,10 @@ int Run(const Options& options) {
   for (const auto& [code, count] : diagnostics.counts) {
     std::cout << "  " << code << " x" << count << '\n';
   }
+  if (motion) {
+    std::cout << "  motion: clip " << clip_start << " to " << clip_end << " s, "
+              << pose_samples << " retained pose samples\n";
+  }
   if (!Check(totals.frames == frames.size(), "every result must be compared") ||
       !Check(options.expect_gaze != "bone" || gaze_posed > 0,
           "bone gaze must move a bound palette") ||
@@ -903,7 +1004,11 @@ int Run(const Options& options) {
                  (!match.bindings.materials.empty() && totals.coloured > 0),
           "material outputs must bind and change a material") ||
       !Check(!options.expect_images || (gpu && images.Changed() > 0),
-          "the fast images must show the results")) {
+          "the fast images must show the results") ||
+      !Check(!motion || pose_samples == frames.size(),
+          "every result must retain the clip's pose sample") ||
+      !Check(!options.expect_motion || totals.posed > gaze_posed,
+          "the clip must pose a bound palette")) {
     return 1;
   }
   return 0;
@@ -925,6 +1030,10 @@ int main(int argc, char** argv) {
       options.expect_images = true;
     } else if (arg == "--shaders" && i + 1 < argc) {
       options.shaders = argv[++i];
+    } else if (arg == "--motion" && i + 1 < argc) {
+      options.motion = argv[++i];
+    } else if (arg == "--expect-motion") {
+      options.expect_motion = true;
     } else if (options.stage.empty() && arg.rfind("--", 0) != 0) {
       options.stage = arg;
     } else {
@@ -935,6 +1044,7 @@ int main(int argc, char** argv) {
   if (options.stage.empty()) {
     std::cerr << "usage: toon-hydra2-avatar-provider-test <stage> [--lookat <prim>]\n"
                  "         [--expect-gaze bone|expression] [--expect-materials]\n"
+                 "         [--motion <stage> [--expect-motion]]\n"
                  "         [--shaders <directory> [--expect-images]]\n";
     return 2;
   }

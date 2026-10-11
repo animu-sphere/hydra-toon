@@ -2,6 +2,8 @@
 
 Later: [report 48](48-2026-10-11-avatar-emissive-factor.md) binds
 `emissiveFactor`, scaled by the resident material's `emissiveStrength`.
+[Report 50](50-2026-10-11-avatar-motion-provider.md) syncs only the drawn
+render tags, so the images here also held usdSkelImaging's skeleton guide.
 
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18

@@ -5,14 +5,20 @@
 
 #include "avatar_binding.hpp"
 
+#include <avatarMotion/ClipPoseAdapter.h>
+#include <avatarMotionUsd/ReadStageClip.h>
 #include <avatarVrm/ExpressionAdapter.h>
 #include <avatarVrmUsd/ExpressionBinding.h>
+#include <avatarVrmUsd/HumanoidBinding.h>
 #include <avatarVrmUsd/LookAtBinding.h>
+#include <vrmRig/RequiredBones.h>
 
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/quatd.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usdSkel/skeleton.h>
 
 #include <toon/vulkan_backend.hpp>
 
@@ -40,6 +46,7 @@ constexpr const char* kSource = "toon.viewport";
 constexpr const char* kActor = "avatar";
 constexpr const char* kGaze = "gaze:point";
 constexpr const char* kEvaluator = "toon.viewport.vrm";
+constexpr const char* kMotion = "toon.viewport.motion";
 
 std::string Channel(const std::string& expression) {
   return "expr:" + expression;
@@ -99,6 +106,44 @@ std::optional<GfVec3d> HeadPosition(const ArStateView& state,
   return std::nullopt;
 }
 
+// The runtime's motion clip provider: the clip of the one skeleton in the
+// stage at `path`, read by the motion owner and retargeted onto the avatar's
+// humanoid. Clip seconds are runtime seconds. VRM's required bones are the
+// target's, so a partial humanoid is reported by the owner, not refused.
+std::unique_ptr<avatarMotion::ClipPoseAdapter> MotionProvider(const UsdStageRefPtr& avatar,
+    const avatarVrmUsd::HumanoidBindingConfig& humanoid, const std::string& path,
+    const ArStateView& baseline, double& start, double& end) {
+  UsdStageRefPtr stage = UsdStage::Open(path);
+  if (!stage) throw std::runtime_error("cannot open the motion " + path);
+  SdfPath skeleton;
+  for (const UsdPrim& prim : stage->Traverse()) {
+    if (!prim.IsA<UsdSkelSkeleton>()) continue;
+    if (!skeleton.IsEmpty()) throw std::runtime_error("the motion must hold one skeleton");
+    skeleton = prim.GetPath();
+  }
+  if (skeleton.IsEmpty()) throw std::runtime_error("the motion holds no skeleton");
+  const auto read = avatarMotionUsd::ReadStageClip(stage, skeleton);
+  stage.Reset();
+  const avatarVrmUsd::HumanoidBinding binding(avatar, humanoid);
+  const avatarUsd::SkeletonBinding& target = binding.Skeleton();
+  avatarMotion::ClipPoseAdapterConfig config;
+  config.evaluatorId = kMotion;
+  config.layoutId = baseline.layout_id;
+  config.layoutVersion = baseline.layout_version;
+  config.skeletonId = target.SkeletonId();
+  config.skeleton = target.Skeleton();
+  config.map = target.HumanoidMap();
+  config.jointIds = target.JointIds();
+  config.rootPlacement = target.RootPlacement();
+  config.clip = read.clip;
+  config.sourceRest = *read.sourceRest;
+  config.options.requiredBones = vrmRig::GetRequiredBones();
+  if (config.clip.samples.empty()) throw std::runtime_error("the motion clip is empty");
+  start = config.clip.samples.front().timestamp;
+  end = config.clip.samples.back().timestamp;
+  return std::make_unique<avatarMotion::ClipPoseAdapter>(std::move(config));
+}
+
 const char* FieldName(Toon::AvatarMaterialField field) {
   using F = Toon::AvatarMaterialField;
   switch (field) {
@@ -146,8 +191,16 @@ public:
         avatarVrmUsd::ExpressionBindingConfig{humanoid, {}});
     look_ = std::make_unique<avatarVrmUsd::LookAtBinding>(stage_,
         avatarVrmUsd::LookAtBindingConfig{humanoid, SdfPath(options.look_at)});
+    // The clip poses the avatar before gaze reads its working head.
+    std::vector<std::string> after;
+    if (!options.motion.empty()) {
+      motion_ = MotionProvider(stage_, humanoid, options.motion, expressions_->Baseline(),
+          status_.clip_start, status_.clip_end);
+      status_.motion = options.motion;
+      after.push_back(kMotion);
+    }
     avatarVrm::ExpressionAdapterConfig config =
-        look_->AdapterConfig(kEvaluator, {kSource, kActor, kGaze});
+        look_->AdapterConfig(kEvaluator, {kSource, kActor, kGaze}, after);
     expressions_->ApplyTo(config);
     for (const auto& expression : expressions_->Rig().GetExpressions()) {
       names_.push_back(expression.name);
@@ -161,22 +214,31 @@ public:
     head_ = *head;
 
     ArDiagnosticSink sink = diagnostics_.Sink();
-    const ArEvaluatorDesc descriptor = provider_->Descriptor();
+    std::vector<ArEvaluatorDesc> descriptors{provider_->Descriptor()};
+    if (motion_) descriptors.push_back(motion_->Descriptor());
     if (arGetApi(AR_ABI_VERSION, sizeof(runtime_.api), &runtime_.api) != AR_OK ||
-        runtime_.api.create_runtime(&runtime_.handle) != AR_OK ||
-        runtime_.api.register_evaluator(runtime_.handle, &descriptor, &sink) != AR_OK) {
-      throw std::runtime_error("cannot register the VRM provider in the runtime");
+        runtime_.api.create_runtime(&runtime_.handle) != AR_OK) {
+      throw std::runtime_error("cannot create the runtime");
+    }
+    std::vector<const char*> evaluators;
+    std::vector<ArCapability> capabilities;
+    for (const ArEvaluatorDesc& descriptor : descriptors) {
+      if (runtime_.api.register_evaluator(runtime_.handle, &descriptor, &sink) != AR_OK) {
+        throw std::runtime_error(std::string("cannot register ") + descriptor.id);
+      }
+      evaluators.push_back(descriptor.id);
+      capabilities.insert(capabilities.end(), descriptor.supplies,
+          descriptor.supplies + descriptor.supply_count);
     }
     ArInstanceDesc instance{AR_HEADER(ArInstanceDesc)};
     instance.generation = generation_;
     instance.initial_state = baseline;
     instance.layout_id = baseline.layout_id;
     instance.layout_version = baseline.layout_version;
-    const char* evaluators[] = {descriptor.id};
-    instance.evaluators = evaluators;
-    instance.evaluator_count = 1;
-    instance.bound_capabilities = descriptor.supplies;
-    instance.bound_capability_count = descriptor.supply_count;
+    instance.evaluators = evaluators.data();
+    instance.evaluator_count = static_cast<std::uint32_t>(evaluators.size());
+    instance.bound_capabilities = capabilities.data();
+    instance.bound_capability_count = static_cast<std::uint32_t>(capabilities.size());
     if (runtime_.api.create_instance(runtime_.handle, &instance, &sink, &runtime_.instance) != AR_OK) {
       throw std::runtime_error("cannot create the runtime instance");
     }
@@ -266,8 +328,13 @@ public:
            << " held=" << status_.held << " refused=" << status_.refused
            << " resets=" << status_.resets << " epoch=" << status_.binding_epoch
            << " generation=" << status_.generation
-           << " frame=" << status_.frame << '\n'
-           << "Avatar runtime: layout joints=" << status_.joints
+           << " frame=" << status_.frame << '\n';
+    if (!status_.motion.empty()) {
+      report << "Avatar runtime: motion=" << status_.motion << " clip=" << status_.clip_start
+             << ".." << status_.clip_end << "s pose_samples=" << status_.pose_samples
+             << " held_poses=" << status_.held_poses << '\n';
+    }
+    report << "Avatar runtime: layout joints=" << status_.joints
            << " shapes=" << status_.shapes << " material_inputs=" << status_.material_inputs
            << " expressions=" << status_.expressions << " matched skins=" << status_.skins
            << " morphs=" << status_.morphs << " materials=" << status_.materials
@@ -296,8 +363,12 @@ private:
     Toon::RetainedAvatarSnapshot snapshot;
     std::uint64_t sequence = 0;
     std::int64_t published = 0;
-    // Newest retained sample times on the steady clock; zero when absent.
+    // Newest retained input sample times on the steady clock; zero when
+    // absent. A clip pose has no production time and leaves pose at zero.
     std::int64_t expression = 0, look_at = 0, pose = 0;
+    // The clip pose sample, in clip seconds; negative without one.
+    double clip_seconds = -1.0;
+    bool held_pose = false;
     std::vector<std::pair<std::string, std::vector<double>>> inputs;
   };
 
@@ -361,7 +432,9 @@ private:
     ArInputFrame input{AR_HEADER(ArInputFrame)};
     input.frame_id = ++frame_id_;
     input.generation = generation_;
-    input.evaluation_seconds = now;
+    // The clip is sampled at the evaluation time: wall time on the thread,
+    // the result count at a zero rate.
+    input.evaluation_seconds = t;
     input.scalars = scalars.data();
     input.scalar_count = static_cast<std::uint32_t>(scalars.size());
     input.input_revision = results_ + 1;
@@ -387,13 +460,17 @@ private:
     const ArStateView& view = *result.snapshot.View();
     for (std::uint32_t i = 0; i < view.sample_count; ++i) {
       const ArSourceSample& sample = view.samples[i];
+      if (sample.kind == AR_SOURCE_POSE) {
+        result.clip_seconds = sample.source_seconds;
+        result.held_pose = sample.resolution == AR_SAMPLE_HELD;
+        continue;
+      }
       // Runtime seconds are the host's steady clock from origin_: every
       // input here maps with scale 1 and offset 0.
       const auto time = origin_ +
           static_cast<std::int64_t>(std::llround(sample.runtime_seconds * 1e9));
       std::int64_t* slot = sample.kind == AR_SOURCE_SCALAR ? &result.expression
           : sample.kind == AR_SOURCE_GAZE                  ? &result.look_at
-          : sample.kind == AR_SOURCE_POSE                  ? &result.pose
                                                            : nullptr;
       if (slot) *slot = std::max(*slot, time);
     }
@@ -417,6 +494,10 @@ private:
       status_.resets = resets_;
     }
     if (!taken) return false;
+    if (taken->clip_seconds >= 0.0) {
+      ++status_.pose_samples;
+      status_.held_poses += taken->held_pose;
+    }
     const std::int64_t newest = std::max(taken->expression, taken->look_at);
     if (newest != 0) {
       status_.sample_publish.Push(static_cast<double>(taken->published - newest) * 1e-6);
@@ -437,6 +518,12 @@ private:
     status_.layout_version = identity.layout_version;
     status_.binding_epoch = identity.binding_epoch;
     status_.evaluation_seconds = view.evaluation_seconds;
+    if (current_->clip_seconds >= 0.0) {
+      std::ostringstream pose;
+      pose << "clip " << std::fixed << std::setprecision(3) << current_->clip_seconds
+           << " s, " << (current_->held_pose ? "held" : "interpolated");
+      status_.pose_sample = pose.str();
+    }
     {
       const std::lock_guard lock(diagnostics_.mutex);
       status_.diagnostics.assign(diagnostics_.counts.begin(), diagnostics_.counts.end());
@@ -477,7 +564,8 @@ private:
   UsdStageRefPtr stage_;
   std::unique_ptr<avatarVrmUsd::ExpressionBinding> expressions_;
   std::unique_ptr<avatarVrmUsd::LookAtBinding> look_;
-  // Registration borrows the provider until the runtime is destroyed.
+  // Registration borrows the providers until the runtime is destroyed.
+  std::unique_ptr<avatarMotion::ClipPoseAdapter> motion_;
   std::unique_ptr<avatarVrm::ExpressionAdapter> provider_;
   std::vector<std::string> names_;
   std::deque<std::string> channels_; // stable c_str() for the inputs

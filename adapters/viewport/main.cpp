@@ -90,6 +90,7 @@ struct Arguments {
   std::string avatar_look_at;
   double avatar_rate = 120.0;
   std::uint64_t avatar_reset_every = 0;
+  std::string avatar_motion;
 };
 
 std::uint64_t ReadUnsigned(std::string_view value, std::string_view name) {
@@ -247,6 +248,8 @@ Arguments ParseArguments(int argc, char** argv) {
       }
     } else if (option == "--avatar-reset-every") {
       result.avatar_reset_every = ReadUnsigned(next(), option);
+    } else if (option == "--avatar-motion") {
+      result.avatar_motion = next();
     } else if (option == "--help") {
       std::cout << "Usage: toon-viewport [options]\n"
                    "  --width N --height N     window size (default 1280x720)\n"
@@ -295,6 +298,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "                           frame, after extraction\n"
                    "  --avatar-reset-every N   reset the runtime instance every\n"
                    "                           N results\n"
+                   "  --avatar-motion <stage>  pose the avatar with the runtime's\n"
+                   "                           motion provider from this clip\n"
 #endif
                    "Left drag orbits, middle or Shift+left drag pans; right\n"
                    "drag to the right zooms in, to the left zooms out; the\n"
@@ -357,6 +362,9 @@ Arguments ParseArguments(int argc, char** argv) {
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
   if (result.avatar_runtime && result.usd.empty() && result.switch_file.empty()) {
     throw std::invalid_argument("--avatar-runtime needs --usd <stage>");
+  }
+  if (!result.avatar_motion.empty() && !result.avatar_runtime) {
+    throw std::invalid_argument("--avatar-motion needs --avatar-runtime");
   }
 #else
   if (result.avatar_runtime) {
@@ -594,7 +602,8 @@ int RunViewport(int argc, char** argv) {
       std::unique_ptr<Toon::viewport::AvatarRuntime> started;
       if (!arguments.avatar_runtime) return started;
       started = Toon::viewport::AvatarRuntime::Start(scene, bound, ++avatar_epoch,
-          {arguments.avatar_look_at, arguments.avatar_rate, arguments.avatar_reset_every});
+          {arguments.avatar_look_at, arguments.avatar_rate, arguments.avatar_reset_every,
+              arguments.avatar_motion});
       std::string failure;
       if (!started->Apply(bound, false, failure)) {
         throw std::runtime_error("avatar runtime: " + failure);

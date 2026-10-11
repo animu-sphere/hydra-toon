@@ -71,7 +71,7 @@ toon_copy_shaders(toon-viewport)
 # owners, which toon-viewport does not; it is opt-in and never installed.
 if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
   find_package(AvatarRuntime CONFIG REQUIRED
-    COMPONENTS vrm_expression_usd vrm_lookat_usd)
+    COMPONENTS vrm_expression_usd vrm_lookat_usd vrm_usd motion motion_usd)
   add_executable(toon-viewport-avatar
     avatar_runtime.cpp
     camera.cpp
@@ -93,6 +93,9 @@ if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
     toon-hydra2-avatar-binding
     AvatarRuntime::avatarVrmExpressionUsdBinding
     AvatarRuntime::avatarVrmLookAtUsdBinding
+    AvatarRuntime::avatarVrmUsdBinding
+    AvatarRuntime::avatarMotionAdapter
+    AvatarRuntime::avatarMotionUsdBinding
     AvatarRuntime::avatarRuntime
     usdImaging usdSkel usdGeom usd nfd)
   target_compile_features(toon-viewport-avatar PRIVATE cxx_std_20)
@@ -374,8 +377,15 @@ if(TOON_BUILD_TESTS)
           "-DARGUMENTS=--hidden|--frames|120|--vsync|off|--overlay|off|--usd|${_avatar_stage}|--avatar-runtime|--avatar-lookat|/Avatar/LookAtExpression|--avatar-rate|240|--switch-file|${_avatar_stage}"
           "-DEXPECT=Opened file:|refused=0 resets=0 epoch=2 |mismatches=0|Late latch: applied=120 rejected=0|avatar sample_publish"
           -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+      # The runtime's motion clip provider poses the avatar first; its pose
+      # samples follow the clip, one result per frame, all applied late.
+      add_test(NAME toon-viewport-avatar-runtime-motion
+        COMMAND "${CMAKE_COMMAND}" ${_avatar_run}
+          "-DARGUMENTS=--hidden|--frames|48|--vsync|off|--overlay|off|--usd|${_avatar_stage}|--avatar-runtime|--avatar-lookat|/Avatar/LookAtBone|--avatar-rate|0|--avatar-motion|${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/avatar-motion.usda"
+          "-DEXPECT=results=49 extracted=49 late=48 held=0 refused=0|clip=0..1s pose_samples=49 held_poses=0|mismatches=0|static_uploads=0 poses=[1-9][0-9]*|Hydra syncs=1 "
+          -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
       set_tests_properties(toon-viewport-avatar-runtime-late toon-viewport-avatar-runtime-thread
-        PROPERTIES
+        toon-viewport-avatar-runtime-motion PROPERTIES
         LABELS "gpu;viewport;presentation;hydra"
         SKIP_REGULAR_EXPRESSION "SKIP: no Vulkan device" TIMEOUT 120
         ENVIRONMENT_MODIFICATION

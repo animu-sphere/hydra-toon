@@ -1,5 +1,8 @@
 # Runtime results in the dedicated viewport, arriving after extraction
 
+Later: [report 50](50-2026-10-11-avatar-motion-provider.md) adds the runtime's
+motion clip provider to this host and to report 47's.
+
 - Date: 2026-10-11
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev; `usd-avatar-runtime`

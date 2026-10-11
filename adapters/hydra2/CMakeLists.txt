@@ -183,7 +183,7 @@ if(TOON_BUILD_TESTS)
         "TOON_AVATAR_RUNTIME_PROVIDERS requires TOON_ENABLE_AVATAR_STATE")
     endif()
     find_package(AvatarRuntime CONFIG REQUIRED
-      COMPONENTS vrm_expression_usd vrm_lookat_usd)
+      COMPONENTS vrm_expression_usd vrm_lookat_usd vrm_usd motion motion_usd)
     add_executable(toon-hydra2-avatar-provider-test
       tests/avatar_provider_test.cpp)
     toon_configure_warnings(toon-hydra2-avatar-provider-test)
@@ -191,6 +191,9 @@ if(TOON_BUILD_TESTS)
       toon-hydra2-avatar-binding
       AvatarRuntime::avatarVrmExpressionUsdBinding
       AvatarRuntime::avatarVrmLookAtUsdBinding
+      AvatarRuntime::avatarVrmUsdBinding
+      AvatarRuntime::avatarMotionAdapter
+      AvatarRuntime::avatarMotionUsdBinding
       AvatarRuntime::avatarRuntime
       usdImaging usdSkel usdGeom usd Toon::Vulkan)
     target_compile_features(toon-hydra2-avatar-provider-test PRIVATE cxx_std_20)
@@ -208,9 +211,18 @@ if(TOON_BUILD_TESTS)
     if(TOON_VRM_IMAGING_RESOURCES)
       set(_toon_provider_stage
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/avatar-provider.usda")
-      foreach(_toon_case IN ITEMS bone expression gpu)
+      set(_toon_motion "${CMAKE_CURRENT_SOURCE_DIR}/tests/avatar-motion.usda")
+      foreach(_toon_case IN ITEMS bone expression gpu motion motion-gpu)
         set(_toon_arguments "--expect-materials")
-        if(_toon_case STREQUAL "gpu")
+        if(_toon_case MATCHES "^motion")
+          # The runtime's clip provider poses the avatar before bone gaze.
+          string(APPEND _toon_arguments
+            "|--lookat|/Avatar/LookAtBone|--motion|${_toon_motion}|--expect-motion")
+          if(_toon_case STREQUAL "motion-gpu")
+            string(APPEND _toon_arguments
+              "|--expect-images|--shaders|${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+          endif()
+        elseif(_toon_case STREQUAL "gpu")
           string(APPEND _toon_arguments
             "|--expect-images|--lookat|/Avatar/LookAtBone|--shaders|${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
         else()
@@ -232,7 +244,8 @@ if(TOON_BUILD_TESTS)
         set_tests_properties(toon-renderer-hydra-avatar-providers-${_toon_case}
           PROPERTIES ENVIRONMENT_MODIFICATION "${_toon_pxr_runtime_modifications}")
       endforeach()
-      set_tests_properties(toon-renderer-hydra-avatar-providers-gpu PROPERTIES
+      set_tests_properties(toon-renderer-hydra-avatar-providers-gpu
+        toon-renderer-hydra-avatar-providers-motion-gpu PROPERTIES
         LABELS "gpu" SKIP_REGULAR_EXPRESSION "SKIP: no Vulkan device")
     else()
       message(STATUS

@@ -289,6 +289,13 @@ void RuntimeRows(const char* id, const char* source, const char* target,
 // matched the resident targets, owner diagnostics, inputs and outputs.
 void AvatarRuntimePanel(const AvatarRuntimeStatus& avatar, float scale) {
   ImGui::Text("%s, LookAt %s", avatar.avatar.c_str(), avatar.look_at.c_str());
+  if (!avatar.motion.empty()) {
+    ImGui::TextWrapped("Motion %s, clip %.3f to %.3f s", avatar.motion.c_str(),
+        avatar.clip_start, avatar.clip_end);
+    ImGui::Text("Pose sample: %s (%llu held of %llu)", avatar.pose_sample.c_str(),
+        static_cast<unsigned long long>(avatar.held_poses),
+        static_cast<unsigned long long>(avatar.pose_samples));
+  }
   ImGui::Text("Instance %llu generation %llu frame %llu (input revision %llu)",
       static_cast<unsigned long long>(avatar.instance),
       static_cast<unsigned long long>(avatar.generation),
