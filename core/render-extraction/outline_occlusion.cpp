@@ -81,14 +81,20 @@ void OutlineOcclusion::Update(const DrawList& draws, std::uint32_t width,
     if (!mesh.visible || mesh.influences_per_point || IsMorphed(mesh) || !mesh.points || !mesh.indices ||
         mesh.indices->empty() || mesh.indices->size() > 64 * 3 || !Affine(mesh.transform))
       continue;
-    const auto material = std::lower_bound(draws.materials.begin(), draws.materials.end(), mesh.material,
-        [](const MaterialSnapshot& item, MaterialId id) { return item.id < id; });
-    if (material != draws.materials.end() && material->id == mesh.material &&
-        material->material.model == ToonShadingModel::MToon &&
-        (material->material.alpha_mode != ToonAlphaMode::Opaque || !material->material.double_sided))
-      continue;
+    const auto excluded = [&](MaterialId id) {
+      const auto material = std::lower_bound(draws.materials.begin(), draws.materials.end(), id,
+          [](const MaterialSnapshot& item, MaterialId key) { return item.id < key; });
+      return material != draws.materials.end() && material->id == id &&
+          material->material.model == ToonShadingModel::MToon &&
+          (material->material.alpha_mode != ToonAlphaMode::Opaque || !material->material.double_sided);
+    };
     // Unlit fallback meshes are opaque and unculled, regardless of the
-    // unused material parameters. MToon must be Opaque and double-sided.
+    // unused material parameters. MToon must be Opaque and double-sided,
+    // in every part a mesh's face subsets divide it into.
+    if (mesh.parts ? std::any_of(mesh.parts->begin(), mesh.parts->end(),
+                         [&](const MeshPart& part) { return excluded(part.material); })
+                   : excluded(mesh.material))
+      continue;
     const auto matrix = Multiply(clip_from_world, mesh.transform);
     const auto magnitude = Product(world_magnitude, Absolute(mesh.transform));
     for (std::size_t first = 0; first + 2 < mesh.indices->size(); first += 3) {

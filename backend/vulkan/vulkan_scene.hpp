@@ -513,13 +513,15 @@ public:
   // Upload whatever `draws` changed and release meshes it no longer draws.
   // No frame that reads these buffers may be in flight.
   bool Update(const DrawList& draws, std::string& detail, bool fast_values = true);
-  // Unlit draws first; then the outline hull of every opaque MToon draw
-  // that asks for one (design policy §10's first pass); then every opaque
-  // draw whose material selected MToon, a Mask one by alpha to coverage
-  // when `pipelines` are multisampled. Transparent MToon draws come last,
-  // ordered by their material's render queue and then as `draws` lists
-  // them, each surface followed by its hull (material policy §6). `record`,
-  // when given, counts what was drawn and marks where each part ends.
+  // A draw is one part of a mesh, a range of its triangles with the
+  // material its face subset binds. Unlit draws first; then the outline
+  // hull of every opaque MToon draw that asks for one (design policy §10's
+  // first pass); then every opaque draw whose material selected MToon, a
+  // Mask one by alpha to coverage when `pipelines` are multisampled.
+  // Transparent MToon draws come last, ordered by their material's render
+  // queue and then as `draws` and each mesh's parts list them, each surface
+  // followed by its hull (material policy §6). `record`, when given, counts
+  // what was drawn and marks where each pass ends.
   void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws,
       VkExtent2D extent, SceneRecord* record = nullptr);
@@ -598,9 +600,9 @@ private:
   // Skin sets come from fixed-size pools, a new one when the last is full.
   std::vector<VkDescriptorPool> skin_pools_;
   std::vector<Matrix4> joint_scratch_;
-  // This frame's transparent draws, as indices into `draws.draws`, kept so
-  // a steady frame sorts without allocating.
-  std::vector<std::size_t> transparent_scratch_;
+  // This frame's transparent draws, as a mesh's index into `draws.draws`
+  // and its part's index, kept so a steady frame sorts without allocating.
+  std::vector<std::pair<std::size_t, std::size_t>> transparent_scratch_;
   OutlineOcclusion outline_occlusion_;
   std::unordered_map<MeshId, Entry> entries_;
   std::uint64_t generation_ = 0;

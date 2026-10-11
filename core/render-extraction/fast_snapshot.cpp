@@ -52,7 +52,7 @@ bool ApplyFastSnapshot(const FrameSnapshot& latest, DrawList& draws, std::string
     if (!Drawable(mesh)) continue;
     if (index == draws.draws.size()) return reject("late frame changed draw membership");
     const auto& old = draws.draws[index++];
-    if (mesh.id != old.id || mesh.material != old.material ||
+    if (mesh.id != old.id || mesh.material != old.material || mesh.parts != old.parts ||
         mesh.points != old.points || mesh.normals != old.normals || mesh.indices != old.indices ||
         mesh.uvs != old.uvs || mesh.influences != old.influences ||
         mesh.morph_offsets != old.morph_offsets || mesh.morph_ranges != old.morph_ranges ||

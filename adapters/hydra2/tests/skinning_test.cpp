@@ -276,6 +276,9 @@ bool GpuNormals(const std::vector<Toon::FrameSnapshot>& frames,
         actual.meshes = {mesh};
         actual.meshes[0].indices = indices;
         actual.meshes[0].material = mat;
+        // The parts the commit divided the old triangle list into.
+        actual.meshes[0].parts = std::make_shared<const std::vector<Toon::MeshPart>>(
+            std::vector<Toon::MeshPart>{{0, static_cast<std::uint32_t>(triangles.size()), mat}});
         actual.materials = {{mat, material, 1, 1}};
         actual.view = view;
         Toon::ToonSkin skin;

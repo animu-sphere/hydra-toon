@@ -44,6 +44,39 @@ std::vector<Float3> SmoothNormals(const std::vector<Float3>& points,
   return normals;
 }
 
+// The draws a triangle list of `index_count` indices makes: the valid
+// subsets, sorted by their first index, and each gap between them with
+// `material`, adjacent draws of one material merged.
+std::vector<MeshPart> DivideParts(const std::vector<MeshPart>& subsets,
+    std::uint32_t index_count, MaterialId material) {
+  std::vector<MeshPart> parts;
+  const auto append = [&parts](MeshPart part) {
+    if (!parts.empty() && parts.back().material == part.material) {
+      parts.back().index_count += part.index_count;
+    } else {
+      parts.push_back(part);
+    }
+  };
+  std::uint32_t covered = 0;
+  for (const MeshPart& subset : subsets) {
+    if (subset.index_count == 0 || subset.first_index % 3U != 0 ||
+        subset.index_count % 3U != 0 || subset.first_index < covered ||
+        subset.first_index > index_count ||
+        subset.index_count > index_count - subset.first_index) {
+      continue;
+    }
+    if (subset.first_index > covered) {
+      append({covered, subset.first_index - covered, material});
+    }
+    append(subset);
+    covered = subset.first_index + subset.index_count;
+  }
+  if (covered < index_count) {
+    append({covered, index_count - covered, material});
+  }
+  return parts;
+}
+
 } // namespace
 
 Matrix4 Multiply(const Matrix4& left, const Matrix4& right) {
@@ -100,6 +133,7 @@ void RenderWorld::SetMeshTopology(MeshId mesh,
         std::make_shared<const std::vector<std::uint32_t>>(std::move(triangles));
     snapshot.topology_revision = Stamp();
     record->normals_stale = true;
+    record->parts_stale = true;
     dirty_ = true;
   }
 }
@@ -160,6 +194,21 @@ void RenderWorld::SetMeshMaterial(MeshId mesh, MaterialId material) {
   MeshRecord* record = Find(mesh);
   if (record != nullptr && record->snapshot.material != material) {
     record->snapshot.material = material;
+    record->parts_stale = true;
+    dirty_ = true;
+  }
+}
+
+void RenderWorld::SetMeshSubsets(MeshId mesh, std::vector<MeshPart> subsets) {
+  // Kept in triangle-list order, so subsets given in another order are equal.
+  std::stable_sort(subsets.begin(), subsets.end(),
+      [](const MeshPart& left, const MeshPart& right) {
+        return left.first_index < right.first_index;
+      });
+  MeshRecord* record = Find(mesh);
+  if (record != nullptr && record->subsets != subsets) {
+    record->subsets = std::move(subsets);
+    record->parts_stale = true;
     dirty_ = true;
   }
 }
@@ -558,6 +607,19 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
       }
       mesh.authored_normals = authored;
       record.normals_stale = false;
+    }
+    if (record.parts_stale) {
+      MeshSnapshot& mesh = record.snapshot;
+      std::vector<MeshPart> parts = DivideParts(record.subsets,
+          mesh.indices == nullptr
+              ? 0U
+              : static_cast<std::uint32_t>(mesh.indices->size()),
+          mesh.material);
+      if (mesh.parts == nullptr || *mesh.parts != parts) {
+        mesh.parts =
+            std::make_shared<const std::vector<MeshPart>>(std::move(parts));
+      }
+      record.parts_stale = false;
     }
     snapshot.meshes.push_back(record.snapshot);
     if (record.morph_weights_override) {

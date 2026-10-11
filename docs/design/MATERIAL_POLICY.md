@@ -102,6 +102,12 @@ which is 1, VRM's unit, until it does.
 
 ## 6. Transparency and draw order
 
+A draw is one material's part of a mesh. A mesh whose `GeomSubset`s bind
+materials draws once per such subset, with that subset's material, and once
+more for the faces none of them binds, with the mesh's own; the scene lists
+a mesh's draws in its subsets' order. That is generic USD, not a model's
+semantics, and both models' ordering below applies to draws.
+
 - **MToon** sorts by alpha mode, then `renderQueueOffsetNumber`, and writes
   depth for transparent materials only with `transparentWithZWrite`. The
   sort key is MToon's render queue: Opaque 2000, Mask 2450, Blend with

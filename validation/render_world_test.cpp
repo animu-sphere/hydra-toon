@@ -19,9 +19,98 @@ bool Check(bool condition, const char* message) {
   return condition;
 }
 
+using Parts = std::vector<Toon::MeshPart>;
+
+const Parts& PartsOf(const Toon::FrameSnapshot& snapshot) {
+  static const Parts none;
+  return snapshot.meshes.empty() || snapshot.meshes[0].parts == nullptr
+             ? none
+             : *snapshot.meshes[0].parts;
+}
+
+// A mesh's face subsets divide its triangle list into parts: each subset
+// with its own material, every gap with the mesh's, adjacent parts of one
+// material merged; a range that is not whole triangles within the list, or
+// overlaps an earlier one, is ignored.
+int CheckSubsets() {
+  Toon::RenderWorld world;
+  const Toon::MeshId mesh = world.CreateMesh();
+  // Four triangles.
+  world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3, 0, 1, 2, 0, 2, 3});
+  world.SetMeshPoints(mesh, {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}});
+  world.SetMeshMaterial(mesh, 7);
+  const Toon::FrameSnapshot whole = world.Commit();
+  if (!Check(PartsOf(whole) == Parts{{0, 12, 7}},
+          "a mesh without subsets must be one part with its material")) {
+    return 1;
+  }
+
+  // Subsets set in any order; the second triangle and the last are not in
+  // one, and the mesh's own material draws them.
+  world.SetMeshSubsets(mesh, {{6, 3, 9}, {0, 3, 8}});
+  const Toon::FrameSnapshot divided = world.Commit();
+  if (!Check(divided.revision > whole.revision &&
+                 PartsOf(divided) ==
+                     Parts{{0, 3, 8}, {3, 3, 7}, {6, 3, 9}, {9, 3, 7}},
+          "subsets must divide the triangle list, gaps taking the mesh's "
+          "material") ||
+      !Check(divided.meshes[0].topology_revision ==
+                     whole.meshes[0].topology_revision &&
+                 divided.meshes[0].indices == whole.meshes[0].indices,
+          "subsets must not touch the topology")) {
+    return 1;
+  }
+
+  world.SetMeshSubsets(mesh, {{0, 3, 8}, {6, 3, 9}});
+  const Toon::FrameSnapshot same = world.Commit();
+  if (!Check(same.revision == divided.revision &&
+                 same.meshes[0].parts == divided.meshes[0].parts,
+          "equal subsets must change nothing")) {
+    return 1;
+  }
+
+  // A subset bound to the mesh's own material merges with its neighbours.
+  world.SetMeshMaterial(mesh, 9);
+  if (!Check(PartsOf(world.Commit()) == Parts{{0, 3, 8}, {3, 9, 9}},
+          "a mesh material edit must reach its gaps and merge them")) {
+    return 1;
+  }
+
+  world.SetMeshSubsets(mesh, {{0, 0, 1}, {1, 3, 2}, {0, 4, 3}, {9, 6, 4},
+                                 {3, 6, 5}, {6, 3, 6}});
+  if (!Check(PartsOf(world.Commit()) == Parts{{0, 3, 9}, {3, 6, 5}, {9, 3, 9}},
+          "an empty, misaligned, overlapping or overlong subset must be "
+          "ignored")) {
+    return 1;
+  }
+
+  // A shorter topology drops a subset past its end at the next commit.
+  world.SetMeshSubsets(mesh, {{0, 3, 8}, {6, 3, 6}});
+  world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3});
+  const Toon::FrameSnapshot shorter = world.Commit();
+  if (!Check(PartsOf(shorter) == Parts{{0, 3, 8}, {3, 3, 9}},
+          "a topology edit must divide its new triangle list again")) {
+    return 1;
+  }
+
+  world.SetMeshSubsets(mesh, {});
+  const Toon::FrameSnapshot cleared = world.Commit();
+  const Toon::DrawList cleared_draws = Toon::ExtractDrawList(cleared);
+  if (!Check(PartsOf(cleared) == Parts{{0, 6, 9}} &&
+                 cleared_draws.draws.size() == 1 &&
+                 cleared_draws.draws[0].parts == cleared.meshes[0].parts,
+          "clearing subsets must draw the mesh whole again")) {
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
+  if (CheckSubsets() != 0) {
+    return 1;
+  }
   Toon::RenderWorld world;
   const Toon::MeshId mesh = world.CreateMesh();
   world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3});
