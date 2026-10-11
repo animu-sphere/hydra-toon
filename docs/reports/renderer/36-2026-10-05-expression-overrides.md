@@ -4,7 +4,7 @@
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 19.51;
   OpenUSD 26.08, CY2026 lookdev runtime
 - Scope: the evaluated expression update boundary of
-  [v0.3.0](../../roadmap/v0.3.0.md)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## Scene and transient values
 

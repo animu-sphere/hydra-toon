@@ -1,31 +1,7 @@
-# After v0.3.0
+# After v0.4.0
 
 The milestones after the avatar path, and platform coverage, in less detail
-than the next two. Each gets its own page when it becomes next.
-
-## v0.4.0 — MMD realization
-
-MMD's material and toon look as a first-class capability, drawn from the
-canonical USD stage `usd-mmd-plugins` authors. Parsing PMX, PMD, VMD and VPD,
-and MMD's semantics, stay there
-([integration scope](../design/INTEGRATION_SCOPE_POLICY.md)). It is built on
-the material, morph and animation infrastructure v0.2.0 and v0.3.0 establish
-for MToon, not on an MMD-specific architecture.
-
-- **Before it starts:** MAT-Q1 agreed with `usd-mmd-plugins`, and MAT-Q2 and
-  MAT-Q3 decided
-  ([material policy §9](../design/MATERIAL_POLICY.md#9-open-questions)).
-- **Materials:** MMD material normalization; diffuse, ambient, specular, the
-  toon texture, the sphere texture, the edge and its outline semantics,
-  alpha and MMD transparency, double-sidedness and MMD's material flags, in
-  `mmd_opaque`, `mmd_transparent` and `mmd_outline`, sharing only what
-  [material policy §7](../design/MATERIAL_POLICY.md#7-pipelines-and-parameter-buffers)
-  says is common.
-- **Morphs:** MMD's vertex and material morphs through v0.3.0's morph and
-  parameter paths.
-
-**Done when** a representative MMD model's look is reproduced at practical
-quality from the canonical USD stage.
+than the next one. Each gets its own page when it becomes next.
 
 ## v0.5.0 — UsdPreviewSurface and generic USD fallback
 

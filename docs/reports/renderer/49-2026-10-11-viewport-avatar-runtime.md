@@ -11,7 +11,7 @@ motion clip provider to this host and to report 47's.
   `vrmImaging` 0.10.0 lookdev package; `usdVrmFileFormat` 0.10.0 for the
   `.vrm` avatar
 - Scope: the dedicated viewport, late arrival and runtime-frame diagnostics
-  of [v0.3.0](../../roadmap/v0.3.0.md)
+  of [v0.3.0](../../releases/v0.3.0.md)
 
 ## The gap
 

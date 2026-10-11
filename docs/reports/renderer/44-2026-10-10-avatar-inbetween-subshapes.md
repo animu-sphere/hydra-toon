@@ -6,7 +6,7 @@
   local sibling working tree's experimental runtime C ABI revision 3 headers
 - Scope: mapping the runtime's resolved blend-shape weights onto resident
   subshape slots in
-  [v0.3.0](../../roadmap/v0.3.0.md#evaluated-state-adapter-and-representative-avatar-evidence)
+  [v0.3.0](../../releases/v0.3.0.md)
 
 ## The gap
 

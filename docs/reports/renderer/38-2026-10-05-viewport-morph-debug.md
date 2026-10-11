@@ -6,7 +6,7 @@ edits can reach the current submit after extraction.
 - Date: 2026-10-05
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Runtime: canonical CY2026 OpenUSD 26.08 lookdev
-- Scope: the morph diagnostics of [v0.3.0](../../roadmap/v0.3.0.md)
+- Scope: the morph diagnostics of [v0.3.0](../../releases/v0.3.0.md)
 
 ## Panel and host boundary
 

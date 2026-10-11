@@ -8,6 +8,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
 ### Added
 
 - The provider host check compares both paths' draw packets, in order, and

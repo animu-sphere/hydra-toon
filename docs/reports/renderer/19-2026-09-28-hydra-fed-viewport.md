@@ -171,7 +171,7 @@ background, the clear colour, is encoded too and so lighter.
 Interactive use: the camera was driven only by framing, in hidden windows,
 and orbit, pan, dolly and the P key were not exercised on screen. A stage
 with animation, which is shown at its start time; playback is
-[v0.3.0](../../roadmap/v0.3.0.md)'s. A Z-up stage. A surface format other
+[v0.3.0](../../releases/v0.3.0.md)'s. A Z-up stage. A surface format other
 than the A5000's, which a capture refuses unless it is 8-bit RGBA or BGRA.
 Picking and a reference check, the other readbacks design policy §31
 allows. The `usd` runtime profile, Linux and macOS.
