@@ -2196,8 +2196,11 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
 // saturates. Lit from behind, toon01 from the renderer's shared set shades
 // by 205 / 255, to 156, while a material without a ramp stays 255. A grey
 // base texel of 128, sampled undecoded, reads 55 rather than 10. A sphere
-// texel of 64 added to an ambient of 0.5 reads 134 and multiplied 4; a
-// specular colour of 0.25 at power 0 adds everywhere, to 133. Two halves
+// texel of 64 added to an ambient of 0.5 reads 134 and multiplied 4. A
+// sub-texture multiplies at the mesh's additional UV 1, not where the
+// normal points: of a sphere texture 64 on the left and 192 on the right,
+// whose middle the normal would blend to 13, UV 1 at x 0.75 reads 30 and at
+// 0.25 reads 4. A specular colour of 0.25 at power 0 adds everywhere, to 133. Two halves
 // of one mesh at alpha 0.5, the nearer red listed first but second in
 // MMD's material order, blend green then red, the red writing depth; in the
 // other order the green would fail the depth test. Last, an ambient edit
@@ -2315,6 +2318,24 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
   world.SetMaterial(material, mmd);
   if (!render() || !grey(4)) {
     return {id, "fail", "a multiply sphere must multiply by its texel"};
+  }
+  const Toon::TextureId halves_texture = world.CreateTexture();
+  texels.width = 2;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{64, 64, 64, 255, 192, 192, 192, 255});
+  world.SetTexture(halves_texture, texels);
+  mmd.mmd.sphere_texture.texture = halves_texture;
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::SubTexture;
+  world.SetMaterial(material, mmd);
+  world.SetMeshSubTextureUVs(mesh, std::vector<Toon::Float2>(3, {0.75F, 0.5F}));
+  if (!render() || !grey(30)) {
+    return {id, "fail",
+        "a sub-texture sphere must multiply by its texel at additional UV 1"};
+  }
+  world.SetMeshSubTextureUVs(mesh, std::vector<Toon::Float2>(3, {0.25F, 0.5F}));
+  if (!render() || !grey(4)) {
+    return {id, "fail",
+        "a sub-texture sphere must follow its mesh's additional UV 1"};
   }
   mmd.mmd.sphere_mode = Toon::ToonSphereMode::Disabled;
   mmd.mmd.specular_color = {0.25F, 0.25F, 0.25F};

@@ -9,16 +9,16 @@
 #include "mmd_common.slang"
 
 [shader("vertex")]
-VertexStageOutput vertex_main(VertexInput input) {
-  return SurfaceVertex(input);
+MmdVertexOutput vertex_main(MmdVertexInput input) {
+  return MmdSurfaceVertex(input);
 }
 
 [shader("fragment")]
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    float3 view_position : TEXCOORD1)
+    float3 view_position : TEXCOORD1, float2 sub_uv : TEXCOORD2)
     : SV_Target {
   const MmdSurface surface = ShadeMmd(mmd_materials[draw.material_slot],
-      view_normal, view_position, st);
+      view_normal, view_position, st, sub_uv);
   if (surface.alpha <= 0.0) {
     discard;
   }

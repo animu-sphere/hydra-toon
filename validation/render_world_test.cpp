@@ -433,6 +433,26 @@ int main() {
     return 1;
   }
 
+  // So have MMD's sub-texture UVs.
+  world.SetMeshSubTextureUVs(quad, {{0, 0}, {1, 0}, {1, 1}, {0, 1}});
+  const Toon::MeshSnapshot subbed = world.Commit().meshes[0];
+  world.SetMeshSubTextureUVs(quad, {{0, 0}, {1, 0}, {1, 1}, {0, 1}});
+  const Toon::MeshSnapshot resubbed = world.Commit().meshes[0];
+  if (!Check(mapped.sub_texture_uvs != nullptr &&
+                 mapped.sub_texture_uvs->empty(),
+          "a mesh without sub-texture UVs must carry none") ||
+      !Check(subbed.sub_texture_uvs_revision !=
+                     rescaled.sub_texture_uvs_revision &&
+                 subbed.sub_texture_uvs->size() == 4 &&
+                 subbed.uvs_revision == rescaled.uvs_revision &&
+                 subbed.edge_scales_revision == rescaled.edge_scales_revision,
+          "a sub-texture UV edit must advance its own revision alone") ||
+      !Check(resubbed.sub_texture_uvs_revision ==
+                 subbed.sub_texture_uvs_revision,
+          "setting the same sub-texture UVs must change nothing")) {
+    return 1;
+  }
+
   // A texture's pixels have their own revision; a material that starts or
   // stops sampling one changes structurally, one that only moves its UV
   // transform does not (material policy §8).

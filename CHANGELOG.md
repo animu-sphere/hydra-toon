@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MMD sub-texture spheres draw: a material whose sphere mode is
+  `subTexture` multiplies by its sphere texture sampled at the mesh's
+  additional UV 1, as MikuMikuEffect's `full.fx` does. The hydra adapter
+  reads `primvars:mmd:uv1`'s x and y; `RenderWorld::SetMeshSubTextureUVs`
+  and `MeshSnapshot::sub_texture_uvs` carry them to `mmd_opaque` and
+  `mmd_transparent` as a fourth vertex stream. The headless check
+  `renderer.material.mmd` covers it
+  ([renderer report 59](docs/reports/renderer/59-2026-10-12-mmd-sub-texture.md)).
 - MMD edges draw: `mmd_outline`, the seventh scene pipeline, adds an
   inverted hull for every MMD draw whose material draws its edge, after
   every surface, `edgeSize` × the mesh's `primvars:mmd:edgeScale` wide, in

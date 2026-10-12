@@ -105,6 +105,8 @@ MeshId RenderWorld::CreateMesh() {
   mesh.uvs_revision = Stamp();
   mesh.edge_scales = std::make_shared<const std::vector<float>>();
   mesh.edge_scales_revision = Stamp();
+  mesh.sub_texture_uvs = std::make_shared<const std::vector<Float2>>();
+  mesh.sub_texture_uvs_revision = Stamp();
   mesh.influences = std::make_shared<const std::vector<ToonJointInfluence>>();
   mesh.skin_revision = Stamp();
   mesh.joints = std::make_shared<const std::vector<Matrix4>>();
@@ -169,6 +171,17 @@ void RenderWorld::SetMeshEdgeScales(MeshId mesh, std::vector<float> scales) {
   record->snapshot.edge_scales =
       std::make_shared<const std::vector<float>>(std::move(scales));
   record->snapshot.edge_scales_revision = Stamp();
+  dirty_ = true;
+}
+
+void RenderWorld::SetMeshSubTextureUVs(MeshId mesh, std::vector<Float2> uvs) {
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || *record->snapshot.sub_texture_uvs == uvs) {
+    return;
+  }
+  record->snapshot.sub_texture_uvs =
+      std::make_shared<const std::vector<Float2>>(std::move(uvs));
+  record->snapshot.sub_texture_uvs_revision = Stamp();
   dirty_ = true;
 }
 

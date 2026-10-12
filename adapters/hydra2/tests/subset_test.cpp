@@ -4,7 +4,8 @@
 // and scene index emulation as a host drives them: each subset that binds a
 // material becomes one part of the mesh's triangle list, and faces no such
 // subset names draw with the mesh's own binding. MMD's per-vertex edge
-// scale, `primvars:mmd:edgeScale`, reaches the mesh with them.
+// scale, `primvars:mmd:edgeScale`, and the x and y of its additional UV 1,
+// `primvars:mmd:uv1`, reach the mesh with them.
 #include "adapter.hpp"
 
 #include <pxr/pxr.h>
@@ -144,6 +145,37 @@ int main(int argc, char** argv) {
                      mesh.topology_revision &&
                  rescaled.meshes[0].uvs_revision == mesh.uvs_revision,
           "an edge scale edit must not touch the points, topology or UVs")) {
+    return 1;
+  }
+
+  // So is the sub-texture UV, from additional UV 1's x and y, and an edit
+  // of it changes nothing else.
+  std::vector<Toon::Float2> sub_uvs;
+  for (int point = 0; point < 13; ++point) {
+    sub_uvs.push_back(
+        {static_cast<float>(point), -static_cast<float>(point)});
+  }
+  if (!Check(mesh.sub_texture_uvs != nullptr &&
+                 *mesh.sub_texture_uvs == sub_uvs,
+          "the mesh must carry additional UV 1's x and y, one per point")) {
+    return 1;
+  }
+  UsdGeomPrimvarsAPI(stage->GetPrimAtPath(SdfPath("/Root/Body")))
+      .GetPrimvar(TfToken("mmd:uv1"))
+      .Set(VtVec4fArray(13, GfVec4f(0.25F, 0.75F, 0.0F, 0.0F)));
+  const Toon::FrameSnapshot resubbed = sync();
+  if (!Check(resubbed.meshes.size() == 1 &&
+                 *resubbed.meshes[0].sub_texture_uvs ==
+                     std::vector<Toon::Float2>(13, {0.25F, 0.75F}) &&
+                 resubbed.meshes[0].sub_texture_uvs_revision !=
+                     rescaled.meshes[0].sub_texture_uvs_revision,
+          "an additional UV 1 edit must reach the mesh") ||
+      !Check(resubbed.meshes[0].points_revision == mesh.points_revision &&
+                 resubbed.meshes[0].uvs_revision == mesh.uvs_revision &&
+                 resubbed.meshes[0].edge_scales_revision ==
+                     rescaled.meshes[0].edge_scales_revision,
+          "an additional UV 1 edit must not touch the points, UVs or edge "
+          "scales")) {
     return 1;
   }
 

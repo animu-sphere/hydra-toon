@@ -172,6 +172,7 @@ static_assert(sizeof(MToonParameters) == 544);
 constexpr std::uint32_t kSphereNone = 0U;
 constexpr std::uint32_t kSphereMultiply = 1U;
 constexpr std::uint32_t kSphereAdd = 2U;
+constexpr std::uint32_t kSphereSubTexture = 3U;
 
 // One material's slot in the MMD parameter buffer. Must match
 // MmdParameters in shaders/mmd_common.slang. Colours are MMD's as stored.
@@ -237,7 +238,8 @@ struct ScenePipeline {
 // the unlit mesh pipeline, mtoon_opaque, mtoon_transparent, mtoon_outline,
 // mmd_opaque, mmd_transparent and mmd_outline. The transparent ones and the
 // outlines blend their source's alpha over the target; mmd_outline also
-// reads the mesh's edge scale as a fourth stream. Multisampled, mtoon_opaque
+// reads the mesh's edge scale as a fourth stream, and mmd_opaque and
+// mmd_transparent its sub-texture UV. Multisampled, mtoon_opaque
 // turns its alpha into coverage. The MToon and MMD ones read their model's
 // parameter buffer, the texture table and the wrap samplers through
 // `material_layout` (set 0), in both stages, since the outline's width is
@@ -616,6 +618,7 @@ private:
     HostBuffer normals;
     HostBuffer uvs;
     HostBuffer edge_scales;
+    HostBuffer sub_texture_uvs;
     HostBuffer indices;
     HostBuffer influences;
     HostBuffer joints;
@@ -629,6 +632,7 @@ private:
     std::uint64_t normals_revision = 0;
     std::uint64_t uvs_revision = 0;
     std::uint64_t edge_scales_revision = 0;
+    std::uint64_t sub_texture_uvs_revision = 0;
     std::uint64_t topology_revision = 0;
     std::uint64_t skin_revision = 0;
     std::uint64_t pose_revision = 0;
@@ -638,6 +642,10 @@ private:
     // Whether `edge_scales` holds a scale for every vertex the indices
     // reach; mmd_outline otherwise scales every vertex by 1.
     bool has_edge_scales = false;
+    // Whether `sub_texture_uvs` holds a UV for every vertex the indices
+    // reach; mmd_opaque and mmd_transparent otherwise sample a sub-texture
+    // sphere at (0, 0).
+    bool has_sub_texture_uvs = false;
     // Whether this frame's draw skins the mesh, and the flags that say how.
     bool skinned = false;
     bool morphed = false;
@@ -662,7 +670,8 @@ private:
   VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
   VkDevice device_ = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout_ = VK_NULL_HANDLE;
-  // Bound with stride 0 in place of a mesh's missing UVs.
+  // Bound with stride 0 in place of a mesh's missing UVs or sub-texture
+  // UVs.
   HostBuffer zero_uv_;
   // Bound with stride 0 in place of a mesh's missing edge scales: 1.
   HostBuffer unit_edge_scale_;
