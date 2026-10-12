@@ -239,7 +239,8 @@ public:
   // `toon:msaaSamples`: MSAA samples per pixel, 4 by default; 1 turns
   // anti-aliasing off. `toon:metersPerUnit`: the stage's metersPerUnit,
   // which Hydra does not carry, 1 by default: it turns a world-coordinates
-  // outline's width in metres into the stage's units.
+  // outline's width in metres into the stage's units. `toon:mmdSelfShadow`:
+  // MMD's self-shadow, on by default, as MMD's own switch is.
   HdRenderSettingDescriptorList GetRenderSettingDescriptors() const override;
   void SetTerminalSceneIndex(
       const HdSceneIndexBaseRefPtr& terminal_scene_index) override;

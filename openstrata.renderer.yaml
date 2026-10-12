@@ -35,6 +35,7 @@ validation:
     - renderer.material.mtoon_transparent
     - renderer.material.mmd
     - renderer.material.mmd_outline
+    - renderer.material.mmd_self_shadow
     - renderer.antialiasing.msaa
     - renderer.skinning.gpu
     - renderer.install_tree

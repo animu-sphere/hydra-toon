@@ -72,7 +72,8 @@ Each measured configuration is a [report](../reports/) and a row of
 Candidates, none required before the milestones above are settled, and the
 GPU-driven ones only after a measurement asks for them
 ([design policy §22](../design/DESIGN_POLICY.md#22-gpu-driven-rendering)):
-shadow mapping, multiple lights, environment lighting, HDR, bloom, colour
+general shadow mapping (MMD's self-shadow, which MMD materials ask for, is
+v0.4.0's), multiple lights, environment lighting, HDR, bloom, colour
 grading, advanced temporal reconstruction, GPU-driven rendering, indirect
 draw, bindless textures, meshlets, a visibility buffer, GPU culling, compute
 skinning and morphs, async compute, pipeline caching and shader pre-warming,

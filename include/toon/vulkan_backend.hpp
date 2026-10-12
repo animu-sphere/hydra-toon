@@ -76,6 +76,11 @@ struct SceneShaders {
   // after every surface (material policy §5).
   std::string mmd_outline_vertex;
   std::string mmd_outline_fragment;
+  // mmd_shadow: the depth of every MMD draw whose material casts MMD's
+  // self-shadow, seen from the light, before the scene (material policy
+  // §10).
+  std::string mmd_shadow_vertex;
+  std::string mmd_shadow_fragment;
   // overlay: a present session's 2D overlay (OverlayDrawList). The offscreen
   // renderer draws none and does not read these.
   std::string overlay_vertex;
@@ -130,6 +135,9 @@ struct OffscreenStatistics {
   std::string late_rejection;
   // Hull draw calls in the last frame, after width and frustum omission.
   std::uint32_t outline_draws = 0;
+  // Draws into MMD's self-shadow map in the last frame: 0 when the map was
+  // not drawn.
+  std::uint32_t shadow_draws = 0;
   std::uint64_t frames_rendered = 0;
   // The last completed frame's timeline value.
   std::uint64_t completion = 0;

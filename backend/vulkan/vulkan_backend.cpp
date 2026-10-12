@@ -36,6 +36,8 @@ SceneShaders SceneShadersIn(const std::string& directory) {
       (root / "mmd_transparent.frag.spv").string(),
       (root / "mmd_outline.vert.spv").string(),
       (root / "mmd_outline.frag.spv").string(),
+      (root / "mmd_shadow.vert.spv").string(),
+      (root / "mmd_shadow.frag.spv").string(),
       (root / "overlay.vert.spv").string(),
       (root / "overlay.frag.spv").string()};
 }
@@ -77,6 +79,7 @@ using vulkan_internal::InvalidateIfNeeded;
 using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
+using vulkan_internal::ShadowMap;
 using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
 using vulkan_internal::SceneShaderWords;
@@ -160,6 +163,7 @@ private:
   MaterialCache materials_;
   TextureCache textures_;
   MeshCache meshes_;
+  ShadowMap shadow_;
   std::uint32_t width_ = 0;
   std::uint32_t height_ = 0;
   // The products, read back: single-sampled, the pass's own attachments;
@@ -276,7 +280,9 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
       !textures_.Initialize(physical_device_, device_,
           materials_.descriptor_set(), detail) ||
       !meshes_.Initialize(physical_device_, device_, pipelines_.skin_layout,
-          detail)) {
+          detail) ||
+      !shadow_.Initialize(physical_device_, device_,
+          materials_.descriptor_set(), detail)) {
     return FrameStatus::Fail;
   }
   statistics_.pipelines_created += ScenePipelines::kCount;
@@ -319,7 +325,9 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   const DrawList* frame = nullptr;
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
-  if (!meshes_.Update(draws, error) || !materials_.Update(draws, textures_, error)) {
+  if (!meshes_.Update(draws, error) ||
+      !materials_.Update(draws, textures_, error) ||
+      !shadow_.Update(draws, meshes_, materials_, error)) {
     return false;
   }
   statistics_.latency.buffers_written = SteadyNanoseconds();
@@ -338,6 +346,8 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
     return false;
   }
   textures_.RecordUploads(command_);
+  statistics_.shadow_draws =
+      shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
 
   // Every attachment is cleared, so none keeps its contents. Multisampled,
   // the depth product is written by the resolve, at the colour output stage
@@ -564,6 +574,7 @@ void VulkanOffscreenRenderer::Destroy() {
   if (device_ != VK_NULL_HANDLE) {
     // Teardown, not an ordinary frame: waiting for the device is allowed here.
     vkDeviceWaitIdle(device_);
+    shadow_.Destroy();
     meshes_.Destroy();
     textures_.Destroy();
     materials_.Destroy();

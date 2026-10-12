@@ -525,6 +525,9 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
     }
     controls.outlines = frame.outlines;
     controls.outlines_changed = ImGui::Checkbox("Outlines", &controls.outlines);
+    controls.mmd_self_shadow = frame.mmd_self_shadow;
+    controls.mmd_self_shadow_changed =
+        ImGui::Checkbox("MMD self-shadow", &controls.mmd_self_shadow);
     controls.lighting = frame.lighting;
     if (ImGui::CollapsingHeader("Lighting and material")) {
       ImGui::Text("%zu scene lights (up to 32 direct)", frame.lights);

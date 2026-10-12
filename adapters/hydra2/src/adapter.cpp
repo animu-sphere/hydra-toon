@@ -114,7 +114,8 @@ void AppendHostEvidence(std::uint64_t frame_index,
   // And how many draws this frame made, one per part of a mesh its face
   // subsets divide it into; how many of those selected MToon, went through
   // mtoon_transparent, added mtoon_outline's hull, selected MMD, added
-  // mmd_outline's edge, were skinned on the GPU and drew authored normals.
+  // mmd_outline's edge, were skinned on the GPU and drew authored normals;
+  // and, from the renderer, how many draws went into MMD's self-shadow map.
   std::size_t part_draws{};
   std::size_t mtoon_draws{};
   std::size_t transparent_draws{};
@@ -184,6 +185,7 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " draws_outline=" << outline_draws
          << " draws_mmd=" << mmd_draws
          << " draws_mmd_outline=" << mmd_outline_draws
+         << " draws_mmd_shadow=" << statistics.shadow_draws
          << " draws_skinned=" << skinned_draws
          << " draws_authored_normals=" << authored_normal_draws << '\n';
 }
@@ -238,7 +240,8 @@ TF_DEFINE_PRIVATE_TOKENS(SkinTokens,
 TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
     ((msaaSamples, "toon:msaaSamples"))
     ((metersPerUnit, "toon:metersPerUnit"))
-    ((timeSeconds, "toon:timeSeconds")));
+    ((timeSeconds, "toon:timeSeconds"))
+    ((mmdSelfShadow, "toon:mmdSelfShadow")));
 
 constexpr int kDefaultSamples = static_cast<int>(Toon::RenderOptions{}.samples);
 
@@ -263,6 +266,14 @@ float RequestedMetersPerUnit(const HdRenderDelegate& delegate) {
   return value.IsHolding<double>()
              ? static_cast<float>(value.UncheckedGet<double>())
              : 1.0F;
+}
+
+// Whether `toon:mmdSelfShadow` turns MMD's self-shadow on, as MMD's own
+// switch does: on unless a host sets it false.
+bool RequestedMmdSelfShadow(const HdRenderDelegate& delegate) {
+  const VtValue value = VtValue::Cast<bool>(
+      delegate.GetRenderSetting(SettingTokens->mmdSelfShadow));
+  return !value.IsHolding<bool>() || value.UncheckedGet<bool>();
 }
 
 double RequestedTimeSeconds(const HdRenderDelegate& delegate) {
@@ -559,7 +570,8 @@ public:
   }
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
-      std::uint32_t samples, float meters_per_unit, double time_seconds) {
+      std::uint32_t samples, float meters_per_unit, double time_seconds,
+      bool mmd_self_shadow) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
         pass_state->GetAovBindings();
@@ -586,6 +598,7 @@ public:
     world_.SetTimeSeconds(time_seconds);
     world_.Commit(snapshot_);
     Toon::ExtractDrawList(snapshot_, draws_);
+    draws_.mmd_self_shadow = mmd_self_shadow;
     std::string error;
     if (!renderer_->Render(draws_, width, height, color_, depth_, error)) {
       TF_RUNTIME_ERROR("Toon Hydra frame failed: %s", error.c_str());
@@ -1638,7 +1651,8 @@ private:
     (void)render_tags;
     const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
     state_->Render(render_pass_state, RequestedSamples(delegate),
-        RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate));
+        RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate),
+        RequestedMmdSelfShadow(delegate));
   }
 
   std::shared_ptr<HdToonAdapterState> state_;
@@ -1992,7 +2006,8 @@ HdToonRenderDelegate::GetRenderSettingDescriptors() const {
       {"Stage meters per unit", SettingTokens->metersPerUnit,
           VtValue(1.0F)},
       {"Evaluation time in seconds", SettingTokens->timeSeconds,
-          VtValue(0.0F)}};
+          VtValue(0.0F)},
+      {"MMD self-shadow", SettingTokens->mmdSelfShadow, VtValue(true)}};
 }
 
 HdToonRenderDelegate::~HdToonRenderDelegate() = default;

@@ -155,6 +155,9 @@ mmd_opaque    mmd_transparent    mmd_outline
 preview_surface
 ```
 
+Beside them, `mmd_shadow` draws MMD's self-shadow map, depth alone, before
+the scene (§10); it shades nothing.
+
 MToon and MMD are separate shaders, not one shader with a model switch. They
 share what is truly common — skinning, morph evaluation, the texture table,
 light data, the outline's hull, math helpers — as included Slang modules.
@@ -198,3 +201,38 @@ structural.
 | MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | resolved 2026-10-11: `hydra-toon` generates its own ten ramps, under its own licence, from the colours MMD's `toon01`–`toon10` show, and maps the index to them; no MMD image is copied or shipped ([report 56](../reports/renderer/56-2026-10-11-mmd-surface.md)) | v0.4.0 |
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | resolved 2026-10-11: MMD computes its terms on the values as stored and writes them undecoded and unencoded; lowering its light colour scales a model's pixels by the factor its lighting term computes on stored values, flat across brightness ([report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md)). The MMD path samples its textures without sRGB decoding, computes MMD's terms on them and the factors as authored, and converts the result from sRGB to linear once, so the host's encoding writes MMD's values. Blending stays in the linear target, so a partly transparent material approximates MMD's | v0.4.0 |
 | MAT-Q4 | How wide MMD draws an edge of a given `edgeSize` × `edgeScale`: MMD states no unit, and on its own frames an edge of size 0.4 is 0.6 pixels wide from 45 MMD units and 1.57 from 9 at a 30° field of view and 1,080 pixels, neither a constant length nor a constant number of pixels ([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)) | resolved 2026-10-12: a share of the target's height, `edgeSize` × `edgeScale` × (0.00108 + 0.0203 / the vertex's view depth in MMD units). On MMD's frames a 15° field of view leaves an edge as many pixels wide as 30° does, a 2,160-pixel frame doubles it, and from 9, 18 and 30 MMD units it falls as a constant share plus one over the depth; the constants make hdToon's edge MMD's width at those cameras ([report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md)) | v0.4.0 |
+| MAT-Q5 | What MMD's self-shadow map covers and how far behind its depth a point falls into shadow. `full.fx` compares in MMD's own map depth, 1,500 per unit and shadowed from 0.3, but MMD states neither that depth's range nor how its map follows its camera and its self-shadow distance, which the stage does not carry (§10) | provisional 2026-10-12: a 2,048-texel map fitted along the light to every MMD draw that casts or receives the self-shadow, and the comparison in MMD units, 15 per unit and shadowed from 0.3. On one model's MMD capture with self-shadow, hdToon's frame is within 4 levels on 73% of the pixels, as near as its frame without is to MMD's without, and 5 or 50 per unit move the mean difference by under 0.11 ([report 60](../reports/renderer/60-2026-10-12-mmd-self-shadow.md)). Settled when captures of a contact or grazing shadow tell the comparison apart | v0.4.0 |
+
+## 10. MMD's self-shadow
+
+MMD's self-shadow is MMD's semantics, asked for by a material's
+`castSelfShadow` and `receiveSelfShadow`, not a general shadow system
+([DESIGN_POLICY.md](DESIGN_POLICY.md) §26, §32). The renderer draws it as
+MikuMikuEffect's `full.fx` does, while it is on: on unless the host turns
+it off, as MMD's own switch is (`DrawList::mmd_self_shadow`, the render
+setting `toon:mmdSelfShadow`).
+
+- **The map.** Each frame, before the scene, a depth map is drawn from the
+  light MMD's shading reads, the scene's first direct light, when it is
+  directional; from a point or spot light, or with no direct light, there
+  is no map and nothing is shadowed. Every MMD draw whose material casts
+  draws into it, both faces, no texel's alpha cutting it away, as `full.fx`
+  draws its map.
+- **What it covers.** The map looks along the light at the box around every
+  MMD draw that casts or receives, so it does not move with the camera.
+  MMD's own map follows its camera and its self-shadow distance, which the
+  stage does not carry (MAT-Q5).
+- **A receiver.** A material that receives is shaded as `full.fx`'s
+  self-shadow pass shades it: its colour, the lighting term with its
+  textures and sphere, is not toned by the ramp, and where the light is
+  cut — by the map, or by the surface turning from the light over the first
+  third of N·L — it falls to that colour times the ramp's far-side texel,
+  without the specular. A point the map does not cover is lit. A material
+  that does not receive is shaded as §5–§7 and
+  [MAT-Q3](#9-open-questions) describe, ramp and all.
+- **How far behind.** A point falls into shadow from 0.02 MMD units behind
+  what the map saw first and wholly by 0.087, `full.fx`'s form on a depth in
+  MMD units (MAT-Q5).
+
+`groundShadow`, MMD's shadow on its floor, is not drawn: a stage has no
+floor for it.

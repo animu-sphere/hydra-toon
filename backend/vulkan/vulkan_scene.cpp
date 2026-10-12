@@ -45,18 +45,29 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
              "shaderSampledImageArrayDynamicIndexing";
     return false;
   }
-  // Two material buffers, the frame buffer and five skin/morph buffers,
-  // plus the texture table and samplers. Each vertex stage counts the
-  // complete shared layout.
+  // Two material buffers, the frame buffer, MMD's self-shadow parameters
+  // and five skin/morph buffers, plus the texture table, the self-shadow
+  // map and samplers. Each vertex stage counts the complete shared layout.
   const VkPhysicalDeviceLimits& limits = properties.limits;
-  if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity ||
-      limits.maxDescriptorSetSampledImages < kTextureCapacity ||
+  if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity + 1U ||
+      limits.maxDescriptorSetSampledImages < kTextureCapacity + 1U ||
       limits.maxPerStageDescriptorSamplers < kSamplerCount ||
-      limits.maxPerStageDescriptorStorageBuffers < 8U ||
-      limits.maxDescriptorSetStorageBuffers < 8U ||
-      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 8U) {
+      limits.maxPerStageDescriptorStorageBuffers < 9U ||
+      limits.maxDescriptorSetStorageBuffers < 9U ||
+      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 10U) {
     detail = std::string(properties.deviceName) + " cannot bind a table of " +
-             std::to_string(kTextureCapacity) + " textures and eight scene storage buffers";
+             std::to_string(kTextureCapacity) +
+             " textures, a shadow map and nine scene storage buffers";
+    return false;
+  }
+  VkFormatProperties shadow{};
+  vkGetPhysicalDeviceFormatProperties(device, kShadowFormat, &shadow);
+  const VkFormatFeatureFlags shadow_features =
+      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+      VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+  if ((shadow.optimalTilingFeatures & shadow_features) != shadow_features) {
+    detail = std::string(properties.deviceName) +
+             " cannot draw and sample a D32_SFLOAT shadow map";
     return false;
   }
   return true;
@@ -124,6 +135,9 @@ struct PipelineDescription {
   // Pushed away from the camera by a depth resolution step and the slope's
   // worth of one, so a surface at the same depth wins the test.
   bool depth_bias = false;
+  // Depth alone, single-sampled whatever the scene's sample count, for a
+  // target with no colour attachment.
+  bool depth_only = false;
 };
 
 // Every scene pipeline shares the set layouts, material then skin, so a
@@ -217,7 +231,8 @@ bool CreateScenePipeline(VkDevice device,
   }
   VkPipelineMultisampleStateCreateInfo multisample{
       VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-  multisample.rasterizationSamples = pipelines.samples;
+  multisample.rasterizationSamples =
+      description.depth_only ? VK_SAMPLE_COUNT_1_BIT : pipelines.samples;
   multisample.alphaToCoverageEnable =
       description.alpha_to_coverage && pipelines.samples != VK_SAMPLE_COUNT_1_BIT
           ? VK_TRUE
@@ -242,7 +257,7 @@ bool CreateScenePipeline(VkDevice device,
       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
   VkPipelineColorBlendStateCreateInfo blend{
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-  blend.attachmentCount = 1;
+  blend.attachmentCount = description.depth_only ? 0U : 1U;
   blend.pAttachments = &blend_attachment;
   // Cull mode, front face, depth writes and vertex strides are core dynamic
   // state in Vulkan 1.3; a stride of 0 stands in for a mesh's missing UVs
@@ -257,7 +272,7 @@ bool CreateScenePipeline(VkDevice device,
   dynamic.pDynamicStates = dynamic_states;
   VkPipelineRenderingCreateInfo rendering{
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-  rendering.colorAttachmentCount = 1;
+  rendering.colorAttachmentCount = description.depth_only ? 0U : 1U;
   rendering.pColorAttachmentFormats = &color_format;
   rendering.depthAttachmentFormat = depth_format;
   VkGraphicsPipelineCreateInfo pipeline_create{
@@ -470,6 +485,7 @@ void WriteParameters(const ToonMaterial& material,
   slot.textures[3] = SamplerIndex(material.mmd.sphere_texture);
   slot.modes[0] = entries.toon;
   slot.modes[1] = sphere;
+  slot.modes[2] = material.mmd.receive_self_shadow ? 1U : 0U;
   WriteUvRows(material.base_texture, slot.base_uv);
   slot.edge_color[0] = material.outline_color.x;
   slot.edge_color[1] = material.outline_color.y;
@@ -533,6 +549,66 @@ bool Fits(const MeshPart& part, std::uint32_t index_count) {
          part.index_count <= index_count - part.first_index;
 }
 
+// MMD's unit on the stage (usd-mmd-plugins stage contract §6), as
+// shaders/mmd_outline.slang states it.
+constexpr double kMetersPerMmdUnit = 0.08;
+
+// The inverse of an affine matrix: its 3x3 inverted, the translation
+// moved back through it. The identity when the 3x3 is singular.
+Matrix4 AffineInverse(const Matrix4& matrix) {
+  const auto& m = matrix.m;
+  const float c00 = m[5] * m[10] - m[9] * m[6];
+  const float c01 = m[8] * m[6] - m[4] * m[10];
+  const float c02 = m[4] * m[9] - m[8] * m[5];
+  const float determinant = m[0] * c00 + m[1] * c01 + m[2] * c02;
+  Matrix4 inverse;
+  if (determinant == 0.0F || !std::isfinite(determinant)) {
+    return inverse;
+  }
+  const float scale = 1.0F / determinant;
+  auto& r = inverse.m;
+  r[0] = c00 * scale;
+  r[4] = c01 * scale;
+  r[8] = c02 * scale;
+  r[1] = (m[9] * m[2] - m[1] * m[10]) * scale;
+  r[5] = (m[0] * m[10] - m[8] * m[2]) * scale;
+  r[9] = (m[8] * m[1] - m[0] * m[9]) * scale;
+  r[2] = (m[1] * m[6] - m[5] * m[2]) * scale;
+  r[6] = (m[4] * m[2] - m[0] * m[6]) * scale;
+  r[10] = (m[0] * m[5] - m[4] * m[1]) * scale;
+  for (int row = 0; row < 3; ++row) {
+    r[12 + row] = -(r[row] * m[12] + r[4 + row] * m[13] + r[8 + row] * m[14]);
+  }
+  return inverse;
+}
+
+// The direction, in the scene's space, that the light MMD's shading reads
+// travels along: the first visible direct light, as MaterialCache writes
+// the frame buffer, or the fallback key, which is in view space. False
+// when that light is not directional, or there is none.
+bool SelfShadowLightDirection(const DrawList& draws, Float3& direction) {
+  if (!draws.lighting.scene_lights || draws.lights.empty()) {
+    Float3 key{-draws.lighting.key_direction.x,
+        -draws.lighting.key_direction.y, -draws.lighting.key_direction.z};
+    if (key == Float3{}) {
+      key = {-0.25F, -0.5F, -1.0F};
+    }
+    const auto& w = AffineInverse(draws.view.view).m;
+    direction = {w[0] * key.x + w[4] * key.y + w[8] * key.z,
+        w[1] * key.x + w[5] * key.y + w[9] * key.z,
+        w[2] * key.x + w[6] * key.y + w[10] * key.z};
+    return true;
+  }
+  for (const LightSnapshot& light : draws.lights) {
+    if (!light.light.visible || light.light.type == ToonLightType::Ambient) {
+      continue;
+    }
+    direction = light.light.direction;
+    return light.light.type == ToonLightType::Directional;
+  }
+  return false;
+}
+
 } // namespace
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -558,6 +634,10 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
          LoadSpirv(shaders.mmd_outline_vertex, words.mmd_outline_vertex,
              detail) &&
          LoadSpirv(shaders.mmd_outline_fragment, words.mmd_outline_fragment,
+             detail) &&
+         LoadSpirv(shaders.mmd_shadow_vertex, words.mmd_shadow_vertex,
+             detail) &&
+         LoadSpirv(shaders.mmd_shadow_fragment, words.mmd_shadow_fragment,
              detail);
 }
 
@@ -585,10 +665,11 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
 
   // mtoon_outline's vertex stage reads the width, its mode and its texture
   // from the same slot and table the fragment stages do. Binding 0 is the
-  // MToon parameter buffer and 4 the MMD one.
+  // MToon parameter buffer and 4 the MMD one; 5 is MMD's self-shadow map
+  // and 6 its parameters.
   const VkShaderStageFlags material_stages =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding material_bindings[5]{};
+  VkDescriptorSetLayoutBinding material_bindings[7]{};
   material_bindings[0].binding = 0;
   material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[0].descriptorCount = 1;
@@ -610,9 +691,17 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   material_bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[4].descriptorCount = 1;
   material_bindings[4].stageFlags = material_stages;
+  material_bindings[5].binding = 5;
+  material_bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  material_bindings[5].descriptorCount = 1;
+  material_bindings[5].stageFlags = material_stages;
+  material_bindings[6].binding = 6;
+  material_bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  material_bindings[6].descriptorCount = 1;
+  material_bindings[6].stageFlags = material_stages;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create.bindingCount = 5;
+  set_layout_create.bindingCount = 7;
   set_layout_create.pBindings = material_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.material_layout),
@@ -691,6 +780,14 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd_outline.fragment_words = &words.mmd_outline_fragment;
   mmd_outline.vertex_streams = 4;
   mmd_outline.sub_texture_uvs = false;
+  // mmd_shadow reads the points alone and draws depth alone, both faces,
+  // pushed back by the slope, so a lit surface does not shadow itself.
+  PipelineDescription mmd_shadow;
+  mmd_shadow.vertex_words = &words.mmd_shadow_vertex;
+  mmd_shadow.fragment_words = &words.mmd_shadow_fragment;
+  mmd_shadow.push_constant_size = sizeof(SurfaceDrawConstants);
+  mmd_shadow.depth_bias = true;
+  mmd_shadow.depth_only = true;
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
@@ -705,10 +802,14 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
          CreateScenePipeline(device, mmd_transparent, pipelines, color_format,
              depth_format, pipelines.mmd_transparent, detail) &&
          CreateScenePipeline(device, mmd_outline, pipelines, color_format,
-             depth_format, pipelines.mmd_outline, detail);
+             depth_format, pipelines.mmd_outline, detail) &&
+         CreateScenePipeline(device, mmd_shadow, pipelines,
+             VK_FORMAT_UNDEFINED, kShadowFormat, pipelines.mmd_shadow,
+             detail);
 }
 
 void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines) {
+  DestroyScenePipeline(device, pipelines.mmd_shadow);
   DestroyScenePipeline(device, pipelines.mmd_outline);
   DestroyScenePipeline(device, pipelines.mmd_transparent);
   DestroyScenePipeline(device, pipelines.mmd);
@@ -1198,9 +1299,9 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
   device_ = device;
   VkDescriptorPoolSize pool_sizes[3]{};
   pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_sizes[0].descriptorCount = 3;
+  pool_sizes[0].descriptorCount = 4;
   pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-  pool_sizes[1].descriptorCount = kTextureCapacity;
+  pool_sizes[1].descriptorCount = kTextureCapacity + 1U;
   pool_sizes[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
   pool_sizes[2].descriptorCount = kSamplerCount;
   VkDescriptorPoolCreateInfo pool_create{
@@ -1352,6 +1453,12 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.depth_write = WritesDepth(material.material);
       entry.draw_order = material.material.mmd.draw_order;
       entry.mmd_translucent = material.material.alpha < 1.0F;
+      entry.cast_self_shadow =
+          material.material.model == ToonShadingModel::MMD &&
+          material.material.mmd.cast_self_shadow;
+      entry.receive_self_shadow =
+          material.material.model == ToonShadingModel::MMD &&
+          material.material.mmd.receive_self_shadow;
       ++writes_;
       written = true;
       parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
@@ -2054,6 +2161,104 @@ void MeshCache::Record(VkCommandBuffer command,
   }
 }
 
+bool MeshCache::SelfShadowBounds(const DrawList& draws,
+    const MaterialCache& materials, const Matrix4& light_from_world,
+    std::array<double, 3>& low, std::array<double, 3>& high,
+    bool& receivers) const {
+  receivers = false;
+  bool bounded = false;
+  MeshPart whole;
+  for (const MeshSnapshot& mesh : draws.draws) {
+    const auto found = entries_.find(mesh.id);
+    if (found == entries_.end()) {
+      continue;
+    }
+    const Entry& entry = found->second;
+    bool casts = false;
+    bool receives = false;
+    for (const MeshPart& part : PartsOf(mesh, entry.index_count, whole)) {
+      const MaterialCache::Entry* material = materials.Find(part.material);
+      if (material == nullptr || material->model != ToonShadingModel::MMD ||
+          !Fits(part, entry.index_count)) {
+        continue;
+      }
+      casts = casts || material->cast_self_shadow;
+      receives = receives || material->receive_self_shadow;
+    }
+    std::array<double, 3> mesh_low{};
+    std::array<double, 3> mesh_high{};
+    if ((!casts && !receives) ||
+        !entry.outline_bounds.SceneBounds(mesh, mesh_low, mesh_high)) {
+      continue;
+    }
+    receivers = receivers || receives;
+    const auto& m = light_from_world.m;
+    for (unsigned corner = 0; corner < 8U; ++corner) {
+      std::array<double, 3> point{};
+      for (std::size_t axis = 0; axis < 3; ++axis) {
+        point[axis] = (corner & (1U << axis)) ? mesh_high[axis] : mesh_low[axis];
+      }
+      for (std::size_t row = 0; row < 3; ++row) {
+        const double value = m[12 + row] + m[row] * point[0] +
+                             m[4 + row] * point[1] + m[8 + row] * point[2];
+        low[row] = bounded ? std::min(low[row], value) : value;
+        high[row] = bounded ? std::max(high[row], value) : value;
+      }
+      bounded = true;
+    }
+  }
+  return bounded;
+}
+
+std::uint32_t MeshCache::RecordSelfShadow(VkCommandBuffer command,
+    const ScenePipelines& pipelines, const MaterialCache& materials,
+    const DrawList& draws, const Matrix4& clip_from_world) const {
+  std::uint32_t recorded = 0;
+  MeshPart whole;
+  vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      pipelines.mmd_shadow.pipeline);
+  const VkDescriptorSet material_set = materials.descriptor_set();
+  vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      pipelines.mmd_shadow.layout, 0, 1, &material_set, 0, nullptr);
+  for (const MeshSnapshot& mesh : draws.draws) {
+    const auto found = entries_.find(mesh.id);
+    if (found == entries_.end()) {
+      continue;
+    }
+    const Entry& entry = found->second;
+    bool bound = false;
+    for (const MeshPart& part : PartsOf(mesh, entry.index_count, whole)) {
+      const MaterialCache::Entry* material = materials.Find(part.material);
+      if (material == nullptr || !material->cast_self_shadow ||
+          !Fits(part, entry.index_count)) {
+        continue;
+      }
+      if (!bound) {
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command, 0, 1, &entry.vertices.buffer, &offset);
+        vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
+            VK_INDEX_TYPE_UINT32);
+        const VkDescriptorSet skin_set =
+            (entry.skinned || entry.morphed) ? entry.skin_set : unskinned_set_;
+        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelines.mmd_shadow.layout, 1, 1, &skin_set, 0, nullptr);
+        SurfaceDrawConstants constants{};
+        const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
+        std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
+            sizeof(constants.clip_from_object));
+        constants.flags = entry.skin_flags;
+        vkCmdPushConstants(command, pipelines.mmd_shadow.layout,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+            sizeof(constants), &constants);
+        bound = true;
+      }
+      vkCmdDrawIndexed(command, part.index_count, 1, part.first_index, 0, 0);
+      ++recorded;
+    }
+  }
+  return recorded;
+}
+
 void MeshCache::Destroy() {
   for (auto& entry : entries_) {
     Release(entry.second);
@@ -2082,6 +2287,171 @@ bool MeshCache::Upload(HostBuffer& buffer, VkBufferUsageFlags usage,
   }
   std::memcpy(buffer.mapped, data, static_cast<std::size_t>(size));
   return FlushIfNeeded(device_, buffer, detail);
+}
+
+bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
+    VkDescriptorSet set, std::string& detail) {
+  device_ = device;
+  if (!CreateDeviceImage(physical_device, device, kShadowFormat,
+          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+              VK_IMAGE_USAGE_SAMPLED_BIT,
+          VK_IMAGE_ASPECT_DEPTH_BIT, kShadowMapSize, kShadowMapSize, image_,
+          detail) ||
+      !CreateHostBuffer(physical_device, device, sizeof(MmdShadowParameters),
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, buffer_, detail)) {
+    return false;
+  }
+  // Off until a frame draws the map.
+  std::memset(buffer_.mapped, 0, sizeof(MmdShadowParameters));
+  VkDescriptorImageInfo image_info{};
+  image_info.imageView = image_.view;
+  image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkDescriptorBufferInfo buffer_info{buffer_.buffer, 0,
+      sizeof(MmdShadowParameters)};
+  VkWriteDescriptorSet writes[2]{};
+  writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[0].dstSet = set;
+  writes[0].dstBinding = 5;
+  writes[0].descriptorCount = 1;
+  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  writes[0].pImageInfo = &image_info;
+  writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[1].dstSet = set;
+  writes[1].dstBinding = 6;
+  writes[1].descriptorCount = 1;
+  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  writes[1].pBufferInfo = &buffer_info;
+  vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+  return FlushIfNeeded(device_, buffer_, detail);
+}
+
+// The map looks along the light with an orthographic projection fitted to
+// the box around every MMD draw that casts or receives the self-shadow,
+// padded so a caster on the box's face is not clipped. It is square, so a
+// texel covers as much across the light either way, and its depth runs
+// from the box's face nearest the light.
+bool ShadowMap::Update(const DrawList& draws, const MeshCache& meshes,
+    const MaterialCache& materials, std::string& detail) {
+  active_ = false;
+  MmdShadowParameters parameters{};
+  Float3 travel;
+  std::array<double, 3> low{};
+  std::array<double, 3> high{};
+  bool receivers = false;
+  const auto length = [](Float3 value) {
+    return std::sqrt(double(value.x) * value.x + double(value.y) * value.y +
+                     double(value.z) * value.z);
+  };
+  if (draws.mmd_self_shadow && SelfShadowLightDirection(draws, travel) &&
+      length(travel) > 0.0 && std::isfinite(length(travel))) {
+    const double travel_length = length(travel);
+    // The light's frame: it looks down its -z, along the travel.
+    const std::array<double, 3> z{-travel.x / travel_length,
+        -travel.y / travel_length, -travel.z / travel_length};
+    const std::array<double, 3> up = std::abs(z[1]) < 0.99
+                                         ? std::array<double, 3>{0.0, 1.0, 0.0}
+                                         : std::array<double, 3>{1.0, 0.0, 0.0};
+    std::array<double, 3> x{up[1] * z[2] - up[2] * z[1],
+        up[2] * z[0] - up[0] * z[2], up[0] * z[1] - up[1] * z[0]};
+    const double x_length = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+    for (double& value : x) {
+      value /= x_length;
+    }
+    const std::array<double, 3> y{z[1] * x[2] - z[2] * x[1],
+        z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+    Matrix4 light_from_world;
+    for (std::size_t column = 0; column < 3; ++column) {
+      light_from_world.m[column * 4 + 0] = static_cast<float>(x[column]);
+      light_from_world.m[column * 4 + 1] = static_cast<float>(y[column]);
+      light_from_world.m[column * 4 + 2] = static_cast<float>(z[column]);
+    }
+    if (meshes.SelfShadowBounds(draws, materials, light_from_world, low, high,
+            receivers) &&
+        receivers) {
+      const double across = std::max({high[0] - low[0], high[1] - low[1],
+                                1e-4}) * 1.02;
+      const double depth = std::max(high[2] - low[2], 1e-4) * 1.04;
+      const double center_x = 0.5 * (low[0] + high[0]);
+      const double center_y = 0.5 * (low[1] + high[1]);
+      const double nearest = high[2] + 0.02 * depth;
+      Matrix4 clip;
+      clip.m[0] = static_cast<float>(2.0 / across);
+      clip.m[12] = static_cast<float>(-2.0 * center_x / across);
+      clip.m[5] = static_cast<float>(2.0 / across);
+      clip.m[13] = static_cast<float>(-2.0 * center_y / across);
+      clip.m[10] = static_cast<float>(-1.0 / depth);
+      clip.m[14] = static_cast<float>(nearest / depth);
+      clip_from_world_ = Multiply(clip, light_from_world);
+      const Matrix4 clip_from_view =
+          Multiply(clip_from_world_, AffineInverse(draws.view.view));
+      std::memcpy(parameters.clip_from_view, clip_from_view.m.data(),
+          sizeof(parameters.clip_from_view));
+      parameters.parameters[0] = 1.0F;
+      parameters.parameters[1] = static_cast<float>(
+          depth * draws.meters_per_unit / kMetersPerMmdUnit);
+      parameters.parameters[2] = static_cast<float>(kShadowMapSize);
+      active_ = true;
+    }
+  }
+  std::memcpy(buffer_.mapped, &parameters, sizeof(parameters));
+  return FlushIfNeeded(device_, buffer_, detail);
+}
+
+std::uint32_t ShadowMap::Record(VkCommandBuffer command,
+    const ScenePipelines& pipelines, const MaterialCache& materials,
+    const MeshCache& meshes, const DrawList& draws) {
+  if (!active_ && ready_) {
+    return 0;
+  }
+  // The map is drawn whole each time, so what it held is not kept; the
+  // last frame that read it has completed.
+  Barrier(command, ImageBarrier(image_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_NONE,
+                       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                           VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                       VK_IMAGE_LAYOUT_UNDEFINED,
+                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
+  VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  depth.imageView = image_.view;
+  depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  depth.clearValue.depthStencil = {1.0F, 0};
+  const VkExtent2D extent{kShadowMapSize, kShadowMapSize};
+  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
+  rendering.renderArea.extent = extent;
+  rendering.layerCount = 1;
+  rendering.pDepthAttachment = &depth;
+  vkCmdBeginRendering(command, &rendering);
+  std::uint32_t recorded = 0;
+  if (active_) {
+    const VkViewport viewport{0.0F, 0.0F, static_cast<float>(extent.width),
+        static_cast<float>(extent.height), 0.0F, 1.0F};
+    const VkRect2D scissor{{0, 0}, extent};
+    vkCmdSetViewport(command, 0, 1, &viewport);
+    vkCmdSetScissor(command, 0, 1, &scissor);
+    recorded = meshes.RecordSelfShadow(command, pipelines, materials, draws,
+        clip_from_world_);
+  }
+  vkCmdEndRendering(command);
+  Barrier(command, ImageBarrier(image_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                       VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+  ready_ = true;
+  return recorded;
+}
+
+void ShadowMap::Destroy() {
+  DestroyDeviceImage(device_, image_);
+  DestroyHostBuffer(device_, buffer_);
+  active_ = false;
+  ready_ = false;
 }
 
 } // namespace Toon::vulkan_internal
