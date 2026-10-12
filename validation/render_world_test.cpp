@@ -725,5 +725,13 @@ int main() {
       return 1;
     }
   }
+  auto tinted = defaults;
+  tinted.mmd.texture_tint.multiply = {0.0F, 0.0F, 0.0F, 0.0F};
+  tinted.mmd.sphere_tint.add = {1.0F, 1.0F, 1.0F, 1.0F};
+  tinted.mmd.toon_tint.multiply = {3.0F, 3.0F, 3.0F, 3.0F};
+  if (!Check(tinted != defaults && !Toon::IsStructuralChange(defaults, tinted),
+          "an MMD material morph's tints are value-only")) {
+    return 1;
+  }
   return 0;
 }

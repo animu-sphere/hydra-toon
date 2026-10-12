@@ -24,6 +24,15 @@ struct Float3 {
   friend bool operator==(const Float3&, const Float3&) = default;
 };
 
+struct Float4 {
+  float x = 0.0F;
+  float y = 0.0F;
+  float z = 0.0F;
+  float w = 0.0F;
+
+  friend bool operator==(const Float4&, const Float4&) = default;
+};
+
 // A 4x4 matrix stored column-major, for column vectors:
 // clip = projection * view * transform * point.
 struct Matrix4 {
@@ -390,6 +399,19 @@ struct ToonMaterial {
     bool draw_lines = false;
     // The material-table index MMD draws in (material policy §6).
     std::int32_t draw_order = 0;
+    // What MMD's material morphs have made of a texture's contribution, as
+    // the evaluated product of every multiply morph and sum of every add
+    // morph; the stage carries no input for them, so they arrive as
+    // evaluated values (material policy §11). The defaults change nothing.
+    struct TextureTint {
+      Float4 multiply{1.0F, 1.0F, 1.0F, 1.0F};
+      Float4 add;
+
+      friend bool operator==(const TextureTint&, const TextureTint&) = default;
+    };
+    TextureTint texture_tint;
+    TextureTint sphere_tint;
+    TextureTint toon_tint;
 
     friend bool operator==(const MMD&, const MMD&) = default;
   } mmd;

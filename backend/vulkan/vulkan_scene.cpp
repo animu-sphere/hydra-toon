@@ -464,6 +464,18 @@ std::uint32_t SphereMode(const ToonMaterial& material) {
   return kSphereNone;
 }
 
+// A tint's multiply RGBA, then its add RGBA.
+void WriteTint(const ToonMaterial::MMD::TextureTint& tint, float (&row)[8]) {
+  row[0] = tint.multiply.x;
+  row[1] = tint.multiply.y;
+  row[2] = tint.multiply.z;
+  row[3] = tint.multiply.w;
+  row[4] = tint.add.x;
+  row[5] = tint.add.y;
+  row[6] = tint.add.z;
+  row[7] = tint.add.w;
+}
+
 void WriteParameters(const ToonMaterial& material,
     const MaterialEntries& entries, MmdParameters& slot) {
   slot = {};
@@ -492,6 +504,9 @@ void WriteParameters(const ToonMaterial& material,
   slot.edge_color[2] = material.outline_color.z;
   slot.edge_color[3] = material.mmd.edge_alpha;
   slot.edge[0] = material.outline_width;
+  WriteTint(material.mmd.texture_tint, slot.texture_tint);
+  WriteTint(material.mmd.sphere_tint, slot.sphere_tint);
+  WriteTint(material.mmd.toon_tint, slot.toon_tint);
 }
 
 // Every level down to 1x1.
