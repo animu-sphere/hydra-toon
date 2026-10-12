@@ -10,6 +10,18 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MMD's self-shadow draws: `mmd_shadow`, the eighth scene pipeline, draws
+  a depth map of every MMD draw whose material casts it from the first
+  directional light, before the scene, fitted along the light to the MMD
+  draws that cast or receive; a material that receives it is shaded as
+  `full.fx`'s self-shadow pass shades it. On unless
+  `DrawList::mmd_self_shadow`, the render setting `toon:mmdSelfShadow` or
+  the viewport's `--mmd-self-shadow` turns it off; the comparison's depth
+  is provisional (MAT-Q5, open). `OutlineBounds::SceneBounds`,
+  `OffscreenStatistics::shadow_draws`, the headless check
+  `renderer.material.mmd_self_shadow`, and `draws_mmd_shadow` in
+  `TOON_HYDRA_EVIDENCE`
+  ([renderer report 60](docs/reports/renderer/60-2026-10-12-mmd-self-shadow.md)).
 - MMD sub-texture spheres draw: a material whose sphere mode is
   `subTexture` multiplies by its sphere texture sampled at the mesh's
   additional UV 1, as MikuMikuEffect's `full.fx` does. The hydra adapter
@@ -68,6 +80,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- An MMD material that receives the self-shadow is no longer toned by its
+  ramp at `v = 0.5 − 0.5 N·L` while the self-shadow is on, which it is by
+  default, but shaded as `full.fx`'s self-shadow pass shades it.
+- The material descriptor set has two more bindings, MMD's self-shadow map
+  and its parameters, and a device needs D32_SFLOAT to be drawable and
+  sampled.
 - Setting the UVs a mesh already has changes nothing, so an edit of another
   primvar, which Hydra reports through the same dirty bit, no longer gives
   them a new revision.

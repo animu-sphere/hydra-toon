@@ -56,6 +56,25 @@ int main() {
   mesh.transform.m[12] = std::numeric_limits<float>::infinity();
   if (!Check(!outside(), "nonfinite transforms must retain hulls"))
     return 1;
+  std::array<double, 3> low{};
+  std::array<double, 3> high{};
+  if (!Check(!bounds.SceneBounds(mesh, low, high),
+          "nonfinite transforms must not be bounded in the scene"))
+    return 1;
+  mesh.transform = {};
+  mesh.transform.m[0] = 2;
+  mesh.transform.m[12] = 1;
+  mesh.transform.m[13] = 2;
+  mesh.transform.m[14] = 3;
+  const auto near = [](double value, double expected) {
+    return std::abs(value - expected) < 1e-5;
+  };
+  if (!Check(bounds.SceneBounds(mesh, low, high) && near(low[0], 0.8) &&
+                 near(high[0], 1.2) && near(low[1], 1.9) && near(high[1], 2.1) &&
+                 near(low[2], 3) && near(high[2], 3),
+          "scene bounds must follow the mesh's transform"))
+    return 1;
+  mesh.transform = {};
 
   // Explicit finite/infinite perspective depth ranges. A hull reaching
   // back across a plane must survive even when every rest point is outside.

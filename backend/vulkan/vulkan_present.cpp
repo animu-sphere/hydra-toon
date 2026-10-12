@@ -69,6 +69,7 @@ using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::LoadSpirv;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
+using vulkan_internal::ShadowMap;
 using vulkan_internal::OverlayRenderer;
 using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
@@ -237,6 +238,7 @@ private:
   MaterialCache materials_;
   TextureCache textures_;
   MeshCache meshes_;
+  ShadowMap shadow_;
   bool reset_scene_ = false;
   std::vector<std::uint32_t> overlay_vertex_words_;
   std::vector<std::uint32_t> overlay_fragment_words_;
@@ -471,6 +473,8 @@ PresentSetupStatus VulkanPresentSession::Initialize(
           materials_.descriptor_set(), error) ||
       !meshes_.Initialize(physical_device_, device_, pipelines_.skin_layout,
           error) ||
+      !shadow_.Initialize(physical_device_, device_,
+          materials_.descriptor_set(), error) ||
       !overlay_.Initialize(physical_device_, device_, overlay_vertex_words_,
           overlay_fragment_words_, surface_format_.format,
           statistics_.srgb_encoded, error)) {
@@ -749,7 +753,11 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   const DrawList* frame = nullptr;
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
-  if (!meshes_.Update(draws, error) || !materials_.Update(draws, textures_, error)) return false;
+  if (!meshes_.Update(draws, error) ||
+      !materials_.Update(draws, textures_, error) ||
+      !shadow_.Update(draws, meshes_, materials_, error)) {
+    return false;
+  }
   statistics_.latency.buffers_written = SteadyNanoseconds();
   statistics_.latency.pose_write_ms = meshes_.pose_write_ms() - pose_before;
   statistics_.latency.morph_write_ms = meshes_.morph_write_ms() - morph_before;
@@ -798,6 +806,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   WriteTimestamp(kFrameStart);
   textures_.RecordUploads(command_);
   overlay_.RecordUploads(command_);
+  shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
   WriteTimestamp(kUploadsEnd);
   // The colour transitions wait at the stage the acquire semaphore gates;
   // a resolve into the swapchain image writes it at that stage too.
@@ -1101,6 +1110,7 @@ void VulkanPresentSession::Destroy() {
     vkDeviceWaitIdle(device_);
     DestroySwapchainObjects();
     DestroyHostBuffer(device_, capture_);
+    shadow_.Destroy();
     meshes_.Destroy();
     textures_.Destroy();
     materials_.Destroy();

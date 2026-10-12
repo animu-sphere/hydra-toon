@@ -42,6 +42,11 @@ struct DrawList {
   bool outline_frustum_culling = true;
   // Current-frame opaque-triangle occlusion; no history or GPU readback.
   bool outline_occlusion_culling = true;
+  // MMD's self-shadow, as MMD's own switch turns it on or off: whether MMD
+  // materials that cast it draw into a shadow map and those that receive
+  // it shade by it (material policy §10). A per-frame value, like
+  // `outlines`.
+  bool mmd_self_shadow = true;
   std::vector<MeshSnapshot> draws;
   // Every material of the snapshot, ordered by id, so a consumer keeps one
   // parameter slot per material whether or not a draw binds it this frame.
@@ -73,6 +78,11 @@ public:
   // (no depth clamp); raster depth bias does not change this decision.
   [[nodiscard]] bool OutsideView(const MeshSnapshot& mesh, const ToonView& view,
       float width, ToonOutlineWidthMode mode, float meters_per_unit) const;
+  // The mesh's points as its pose and transform place them, in the scene's
+  // space, from the same envelopes; false when they cannot be bounded.
+  // Unlike OutsideView it bounds a morphed mesh, without its offsets.
+  [[nodiscard]] bool SceneBounds(const MeshSnapshot& mesh,
+      std::array<double, 3>& low, std::array<double, 3>& high) const;
 
 private:
   friend class OutlineOcclusion;
@@ -86,6 +96,8 @@ private:
   double min_weight_ = 0;
   double max_weight_ = 0;
   bool valid_skin_ = false;
+  // The posed points in the mesh's space.
+  [[nodiscard]] bool ObjectBounds(const MeshSnapshot& mesh, Box& bounds) const;
   [[nodiscard]] bool ViewBounds(const MeshSnapshot& mesh, const ToonView& view,
       float width, ToonOutlineWidthMode mode, float meters_per_unit,
       Box& bounds, double& radius) const;

@@ -4,6 +4,7 @@
 // textures, and the material and frame/light buffers. Private to backend/vulkan.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -184,7 +185,8 @@ struct MmdParameters {
   // x base texture entry, y its sampler; z sphere texture entry, w its
   // sampler.
   std::uint32_t textures[4];
-  // x the toon ramp's entry, 0 without one; y the sphere mode.
+  // x the toon ramp's entry, 0 without one; y the sphere mode; z 1 when
+  // the material receives MMD's self-shadow.
   std::uint32_t modes[4];
   float base_uv[8];
   // rgb the edge colour, a its alpha.
@@ -193,6 +195,21 @@ struct MmdParameters {
   float edge[4];
 };
 static_assert(sizeof(MmdParameters) == 144);
+
+// Where MMD's self-shadow map was drawn from this frame. Must match
+// MmdShadowParameters in shaders/mmd_common.slang.
+struct MmdShadowParameters {
+  // The map's Vulkan clip space from view space, column-major.
+  float clip_from_view[16];
+  // x 1 when the map was drawn this frame; y MMD units per unit of the
+  // map's depth; z the map's size in texels.
+  float parameters[4];
+};
+static_assert(sizeof(MmdShadowParameters) == 80);
+
+// MMD's self-shadow map: one square depth image, sampled texel by texel.
+constexpr std::uint32_t kShadowMapSize = 2048;
+constexpr VkFormat kShadowFormat = VK_FORMAT_D32_SFLOAT;
 
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
 // pass or framebuffer to rebuild on resize), Synchronization2 and timeline
@@ -236,7 +253,9 @@ struct ScenePipeline {
 
 // The scene pipelines for one colour/depth format pair and sample count:
 // the unlit mesh pipeline, mtoon_opaque, mtoon_transparent, mtoon_outline,
-// mmd_opaque, mmd_transparent and mmd_outline. The transparent ones and the
+// mmd_opaque, mmd_transparent and mmd_outline; and mmd_shadow, which draws
+// depth alone into MMD's self-shadow map, single-sampled, whatever the
+// scene's count. The transparent ones and the
 // outlines blend their source's alpha over the target; mmd_outline also
 // reads the mesh's edge scale as a fourth stream, and mmd_opaque and
 // mmd_transparent its sub-texture UV. Multisampled, mtoon_opaque
@@ -257,6 +276,7 @@ struct ScenePipelines {
   ScenePipeline mmd;
   ScenePipeline mmd_transparent;
   ScenePipeline mmd_outline;
+  ScenePipeline mmd_shadow;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
@@ -264,7 +284,7 @@ struct ScenePipelines {
   // What every pipeline rasterizes at; the targets must match it.
   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
-  static constexpr std::uint32_t kCount = 7;
+  static constexpr std::uint32_t kCount = 8;
 };
 
 // The SPIR-V of every scene pipeline, loaded before any device exists so a
@@ -284,6 +304,8 @@ struct SceneShaderWords {
   std::vector<std::uint32_t> mmd_transparent_fragment;
   std::vector<std::uint32_t> mmd_outline_vertex;
   std::vector<std::uint32_t> mmd_outline_fragment;
+  std::vector<std::uint32_t> mmd_shadow_vertex;
+  std::vector<std::uint32_t> mmd_shadow_fragment;
 };
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -498,6 +520,10 @@ public:
     std::int32_t draw_order = 0;
     // An MMD material's diffuse alpha is below 1.
     bool mmd_translucent = false;
+    // An MMD material draws into MMD's self-shadow map, and is shaded by
+    // it.
+    bool cast_self_shadow = false;
+    bool receive_self_shadow = false;
     std::uint64_t generation = 0;
   };
 
@@ -607,6 +633,19 @@ public:
     return pose_writes_;
   }
 
+  // The box, in `light_from_world`'s space, around every MMD draw whose
+  // material casts or receives MMD's self-shadow, as its pose places it
+  // (OutlineBounds::SceneBounds); false when there is none. `receivers`
+  // says whether any of them receives it.
+  bool SelfShadowBounds(const DrawList& draws, const MaterialCache& materials,
+      const Matrix4& light_from_world, std::array<double, 3>& low,
+      std::array<double, 3>& high, bool& receivers) const;
+  // Draw every MMD draw whose material casts MMD's self-shadow through
+  // mmd_shadow, inside rendering into the map, and return how many.
+  std::uint32_t RecordSelfShadow(VkCommandBuffer command,
+      const ScenePipelines& pipelines, const MaterialCache& materials,
+      const DrawList& draws, const Matrix4& clip_from_world) const;
+
   [[nodiscard]] std::uint64_t morph_uploads() const { return morph_uploads_; }
   [[nodiscard]] std::uint64_t morph_weight_writes() const { return morph_weight_writes_; }
   double pose_write_ms() const { return pose_write_ms_; }
@@ -693,6 +732,42 @@ private:
   std::uint64_t pose_writes_ = 0;
   std::uint64_t morph_uploads_ = 0;
   std::uint64_t morph_weight_writes_ = 0;
+};
+
+// MMD's self-shadow (material policy §10): a depth map of every MMD draw
+// whose material casts it, drawn each frame from the scene's first direct
+// light when that light is directional, before the scene, and read by the
+// MMD surfaces whose materials receive it. The map covers the box around
+// every MMD draw that casts or receives it, seen along the light, so it
+// does not move with the camera. Its parameters, and the map, sit in the
+// material descriptor set, at bindings 6 and 5.
+class ShadowMap {
+public:
+  bool Initialize(VkPhysicalDevice physical_device, VkDevice device,
+      VkDescriptorSet set, std::string& detail);
+  // Decide whether this frame draws the map, and from where. No frame that
+  // reads the parameters may be in flight, and `meshes` and `materials`
+  // have been updated for the same draws.
+  bool Update(const DrawList& draws, const MeshCache& meshes,
+      const MaterialCache& materials, std::string& detail);
+  // Record the map's pass, outside any other rendering, and return its
+  // draws. A frame that draws no map records nothing, once the map has
+  // been readable since a first, empty pass.
+  std::uint32_t Record(VkCommandBuffer command,
+      const ScenePipelines& pipelines, const MaterialCache& materials,
+      const MeshCache& meshes, const DrawList& draws);
+  void Destroy();
+
+  [[nodiscard]] bool active() const { return active_; }
+
+private:
+  VkDevice device_ = VK_NULL_HANDLE;
+  DeviceImage image_;
+  HostBuffer buffer_;
+  Matrix4 clip_from_world_;
+  bool active_ = false;
+  // Whether the image has been laid out for reading.
+  bool ready_ = false;
 };
 
 } // namespace Toon::vulkan_internal

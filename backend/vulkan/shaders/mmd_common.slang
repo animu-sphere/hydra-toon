@@ -23,8 +23,8 @@ struct MmdParameters {
   // sampler. Entry 0 is white.
   uint4 textures;
   // x the toon ramp's entry, 0 for a material without one; y the sphere
-  // mode, kSphereNone, kSphereMultiply, kSphereAdd or kSphereSubTexture; zw
-  // unused.
+  // mode, kSphereNone, kSphereMultiply, kSphereAdd or kSphereSubTexture; z
+  // 1 when the material receives MMD's self-shadow; w unused.
   uint4 modes;
   float4 base_uv[2];
   // rgb the edge colour, as stored; a its alpha.
@@ -43,6 +43,34 @@ static const uint kSphereSubTexture = 3;
 static const uint kClampSampler = 4;
 
 [[vk::binding(4, 0)]] StructuredBuffer<MmdParameters> mmd_materials;
+
+// Must match vulkan_internal::MmdShadowParameters: where MMD's self-shadow
+// map was drawn from this frame.
+struct MmdShadowParameters {
+  // The map's clip space, Vulkan's, from view space: x and y in [-1, 1]
+  // across the map, z its depth in [0, 1] from the light.
+  float4x4 clip_from_view;
+  // x 1 when the map was drawn this frame and 0 when MMD's self-shadow is
+  // off; y MMD units per unit of the map's depth; z the map's size in
+  // texels; w unused.
+  float4 parameters;
+};
+
+// The self-shadow map's depth, read texel by texel.
+[[vk::binding(5, 0)]] Texture2D<float> mmd_shadow_map;
+[[vk::binding(6, 0)]] StructuredBuffer<MmdShadowParameters> mmd_shadow;
+
+// How far behind the map's depth, in MMD units, a point falls into MMD's
+// self-shadow, in full.fx's form 1 - saturate(depth behind * sharpness -
+// 0.3): it starts 0.3 / sharpness behind and is whole 1 / sharpness
+// later. full.fx's sharpness is 1500 per unit of MMD's own map depth,
+// whose range MMD does not state, so this one is in MMD units (material
+// policy MAT-Q5).
+static const float kShadowSharpness = 15.0;
+static const float kShadowStart = 0.3;
+// full.fx's Toon: the lit side's share of the light rises from 0 to 1 over
+// the first third of N·L.
+static const float kShadowToon = 3.0;
 
 // VertexInput's streams at locations 0-2, in its order, and a fourth.
 struct MmdVertexInput {
@@ -96,6 +124,24 @@ float3 SrgbToLinear(float3 value) {
   return lerp(high, low, step(value, float3(0.04045)));
 }
 
+// How much of the light reaches a view-space point past MMD's self-shadow
+// map: 1 outside the map, 0 well behind what the map saw first. Point
+// sampled, as MMD's map is.
+float SelfShadowLight(float3 view_position) {
+  const MmdShadowParameters shadow = mmd_shadow[0];
+  const float4 clip = mul(shadow.clip_from_view, float4(view_position, 1.0));
+  const float3 map = clip.xyz / clip.w;
+  const float2 uv = map.xy * 0.5 + 0.5;
+  if (any(uv < 0.0) || any(uv > 1.0)) {
+    return 1.0;
+  }
+  const float size = shadow.parameters.z;
+  const int2 texel = int2(min(uv * size, float2(size - 1.0)));
+  const float first = mmd_shadow_map.Load(int3(texel, 0));
+  const float behind = max(map.z - first, 0.0) * shadow.parameters.y;
+  return 1.0 - saturate(behind * kShadowSharpness - kShadowStart);
+}
+
 // MMD's shading, as MikuMikuEffect's full.fx reproduces MMD's own, under
 // one light: the scene's first direct light. Its colour, attenuated as
 // MToon's lights are, is MMD's light colour, so a light of 0.302 is MMD's
@@ -103,6 +149,12 @@ float3 SrgbToLinear(float3 value) {
 // light the material shows its ambient term alone. A back face is shaded
 // with its front's normal, as MMD shades it. Every sample comes first, in
 // uniform control flow.
+//
+// A material that receives MMD's self-shadow, while it is on, is shaded as
+// full.fx's object_ss pass shades it instead: its colour is not toned by
+// the ramp; where the light is cut, by the self-shadow map or by the
+// surface turning from the light over N·L's first third, it falls to the
+// same colour times the ramp's far-side texel, without the specular.
 MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
     float3 view_position, float2 st, float2 sub_uv) {
   const float3 normal = normalize(view_normal);
@@ -126,6 +178,9 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   // The ramp's top row is the lit side, its bottom row the far side.
   const float4 toon_texel = textures[material.modes.x].Sample(
       samplers[kClampSampler], float2(0.0, 0.5 - 0.5 * lambert));
+  // full.fx's TOONCOLOR: the far side's texel.
+  const float4 toon_far = textures[material.modes.x].SampleLevel(
+      samplers[kClampSampler], float2(0.0, 1.0), 0.0);
 
   // MMD's light reaches the diffuse colour, the ambient colour stands in
   // for its emission, and the sum saturates before any texture applies.
@@ -143,7 +198,6 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   if (sphere != kSphereNone) {
     color.a *= sphere_texel.a;
   }
-  color *= toon_texel;
   // Blinn-Phong under the light's colour, added last. A power of 0 adds
   // the specular colour everywhere, as MMD's does.
   const float3 halfway = ViewDirection(view_position) + light_direction;
@@ -152,7 +206,15 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   const float power = material.specular.a;
   const float highlight =
       power > 0.0 ? pow(max(dot(half_vector, normal), 0.0), power) : 1.0;
-  color.rgb += highlight * material.specular.rgb * light;
+  const float3 specular = highlight * material.specular.rgb * light;
+  if (material.modes.z != 0 && mmd_shadow[0].parameters.x != 0.0) {
+    const float lit = min(saturate(lambert * kShadowToon),
+        SelfShadowLight(view_position));
+    color.rgb = lerp(color.rgb * toon_far.rgb, color.rgb + specular, lit);
+  } else {
+    color *= toon_texel;
+    color.rgb += specular;
+  }
 
   // The material debug views, as MToon's: base colour, normal, direct
   // light, and the ambient colour that stands in for MMD's ambient light.

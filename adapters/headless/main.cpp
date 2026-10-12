@@ -2569,6 +2569,138 @@ Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
           " px"};
 }
 
+// MMD's self-shadow (material policy §10), through SetOrthographicView: a
+// white MMD wall at z 0 with toon01's shared ramp, and in front of it, at
+// z 0.4, a square to its left, under a light travelling along (1, 0, -1),
+// so the square's shadow falls on the wall's centre. The wall faces the
+// light at N·L 0.71, past the first third, so where the light reaches it
+// it is white, and in the shadow it is toon01's far side, 156 decoded, as
+// full.fx's object_ss pass shades it. The wall casts too and does not
+// shadow itself. MMD's switch off, a wall that does not receive, a square
+// that does not cast, or a point light as the first direct light each
+// leave the centre as lit as the rest of the wall.
+Check MmdSelfShadowCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mmd_self_shadow";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const auto add_square = [&](float left, float right, float bottom,
+                              float top, float z) {
+    const Toon::MeshId mesh = world.CreateMesh();
+    world.SetMeshPoints(mesh, {{left, bottom, z}, {right, bottom, z},
+                                  {right, top, z}, {left, top, z}});
+    world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3});
+    return mesh;
+  };
+  const Toon::MeshId wall = add_square(-0.9F, 0.9F, -0.9F, 0.9F, 0.0F);
+  const Toon::MeshId square = add_square(-0.6F, -0.2F, -0.3F, 0.3F, 0.4F);
+  const Toon::LightId key = world.CreateLight();
+  Toon::ToonLight light;
+  light.direction = {1.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+  Toon::ToonMaterial wall_values;
+  wall_values.model = Toon::ToonShadingModel::MMD;
+  wall_values.base_color = {0.0F, 0.0F, 0.0F};
+  wall_values.mmd.ambient_color = {1.0F, 1.0F, 1.0F};
+  wall_values.mmd.toon_source = Toon::ToonRampSource::Shared;
+  wall_values.mmd.shared_toon_index = 0;
+  wall_values.mmd.cast_self_shadow = true;
+  wall_values.mmd.receive_self_shadow = true;
+  Toon::ToonMaterial square_values = wall_values;
+  square_values.mmd.receive_self_shadow = false;
+  const Toon::MaterialId wall_material = world.CreateMaterial();
+  const Toon::MaterialId square_material = world.CreateMaterial();
+  world.SetMaterial(wall_material, wall_values);
+  world.SetMaterial(square_material, square_values);
+  world.SetMeshMaterial(wall, wall_material);
+  world.SetMeshMaterial(square, square_material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  std::array<std::uint8_t, 4> center{};
+  std::array<std::uint8_t, 4> lit{};
+  // x 0.6 on the centre row: the wall, outside the shadow.
+  const auto render = [&](bool enabled = true) {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.mmd_self_shadow = enabled;
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
+      return false;
+    }
+    center = CenterPixel(color);
+    lit = PixelAt(color, 51U, 32U);
+    return true;
+  };
+  const auto grey = [](const std::array<std::uint8_t, 4>& pixel, int value) {
+    return std::abs(pixel[0] - value) <= 2 && std::abs(pixel[1] - value) <= 2 &&
+           std::abs(pixel[2] - value) <= 2;
+  };
+  const auto unshadowed = [&]() { return grey(center, lit[0]); };
+
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  if (!grey(lit, 255) || !grey(center, 156)) {
+    return {id, "fail",
+        "a wall that receives MMD's self-shadow must be white where the "
+        "light reaches it and toon01's far side, 156, in the square's "
+        "shadow: " + std::to_string(lit[0]) + " and " +
+            std::to_string(center[0])};
+  }
+  if (renderer->statistics().shadow_draws != 2U) {
+    return {id, "fail",
+        "both casters must draw into the self-shadow map, not " +
+            std::to_string(renderer->statistics().shadow_draws)};
+  }
+  if (!render(false) || !unshadowed() ||
+      renderer->statistics().shadow_draws != 0U) {
+    return {id, "fail",
+        "with MMD's self-shadow off nothing must draw into the map or be "
+        "shadowed"};
+  }
+  wall_values.mmd.receive_self_shadow = false;
+  world.SetMaterial(wall_material, wall_values);
+  if (!render() || !unshadowed()) {
+    return {id, "fail", "a material that does not receive must not be shadowed"};
+  }
+  wall_values.mmd.receive_self_shadow = true;
+  world.SetMaterial(wall_material, wall_values);
+  square_values.mmd.cast_self_shadow = false;
+  world.SetMaterial(square_material, square_values);
+  if (!render() || !unshadowed() || !grey(lit, 255)) {
+    return {id, "fail", "a material that does not cast must cast no shadow"};
+  }
+  square_values.mmd.cast_self_shadow = true;
+  world.SetMaterial(square_material, square_values);
+  const Toon::LightId point = world.CreateLight();
+  Toon::ToonLight point_light;
+  point_light.type = Toon::ToonLightType::Point;
+  point_light.position = {0.0F, 0.0F, 1.0F};
+  point_light.color = {0.0F, 0.0F, 0.0F};
+  world.SetLight(point, point_light);
+  // Lights go in id order, so the directional one, made again, is second.
+  world.RemoveLight(key);
+  const Toon::LightId after = world.CreateLight();
+  world.SetLight(after, light);
+  if (!render() || renderer->statistics().shadow_draws != 0U) {
+    return {id, "fail",
+        "the map must be drawn only from a directional first direct light"};
+  }
+  world.RemoveLight(point);
+  if (!render() || !grey(center, 156)) {
+    return {id, "fail", detail};
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass", "lit 255, shadowed 156 on a 64x64 target"};
+}
+
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
 // the default, 4, through SetOrthographicView. The first scene is
 // AddOctahedron's diamond in unlit red under an unlit green world outline
@@ -2940,13 +3072,13 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: the seven scene pipelines, one target
+    // 1,000 frames on one device: the eight scene pipelines, one target
     // allocation and one upload of the unchanged mesh, every later frame
     // reusing them.
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 7 &&
+                     statistics.pipelines_created == 8 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;
@@ -2997,6 +3129,7 @@ int main(int argc, char** argv) {
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(MmdCheck(shaders));
     checks.push_back(MmdOutlineCheck(shaders));
+    checks.push_back(MmdSelfShadowCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
@@ -3018,6 +3151,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
     checks.push_back({"renderer.material.mmd", "skip", dependent});
     checks.push_back({"renderer.material.mmd_outline", "skip", dependent});
+    checks.push_back({"renderer.material.mmd_self_shadow", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }
