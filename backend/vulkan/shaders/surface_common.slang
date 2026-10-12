@@ -22,10 +22,8 @@ struct DrawConstants {
   // Read by a screen-space outline width alone. Scalars, not a uint2, which
   // could align past 128 bytes.
   float projection_scale;
-  // What an outline width is multiplied by: for mtoon_outline's
-  // world-coordinates width, the scene's units per metre, 1 / its
-  // metersPerUnit; for mmd_outline's width in pixels, 1 / the target's
-  // height in pixels.
+  // What mtoon_outline's world-coordinates width is multiplied by: the
+  // scene's units per metre, 1 / its metersPerUnit.
   float outline_scale;
 };
 

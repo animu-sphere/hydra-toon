@@ -2381,14 +2381,17 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
 }
 
 // mmd_outline (material policy §5), on AddOctahedron's diamond in red under
-// one light. An edge of size 4 in a stored green of 0.5, which decodes to
-// 55, reaches the pixel at x = 0.58 on the centre row on a 64x64 target,
-// while the centre stays the surface's; the edge is unlit, so a light ten
-// times dimmer leaves it as it is. MMD gives the edge's width in pixels, so
-// on a 128x128 target the same edge is half as wide in the scene and the
-// pixel at the same x is background. An edge scale of 0 at every vertex,
-// or drawEdge off, takes it away. Last, an edge colour edit rewrites one
-// slot and nothing else.
+// one light. Under the orthographic camera at the origin the rim's depth is
+// taken as one MMD unit, so an edge of size 4 is 0.086 of the target's
+// height and, in a stored green of 0.5, which decodes to 55, reaches the
+// pixel at x = 0.58 on the centre row on a 64x64 target, while the centre
+// stays the surface's; the edge is unlit, so a light ten times dimmer
+// leaves it as it is. The width is a share of the target's height, so on a
+// 128x128 target the same edge reaches the same pixel. An edge scale of 0
+// at every vertex, or drawEdge off, takes it away, and an edge colour edit
+// rewrites one slot and nothing else. Last, under a perspective camera an
+// edge of size 40 is as many pixels wide at twice the zoom, and narrower
+// from four times as far, zoomed to keep the diamond's size (MAT-Q4).
 Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
   const std::string id = "renderer.material.mmd_outline";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
@@ -2452,10 +2455,10 @@ Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
   if (!render(64) || !edge()) {
     return {id, "fail", "an MMD edge must not be lit"};
   }
-  if (!render(128) || !background()) {
+  if (!render(128) || !edge()) {
     return {id, "fail",
-        "an MMD edge's width must be in pixels, so half as wide in the "
-        "scene on a target twice as tall"};
+        "an MMD edge's width must be a share of the target's height, so as "
+        "wide in the scene on a target twice as tall"};
   }
   world.SetMeshEdgeScales(mesh, std::vector<float>(6, 0.0F));
   if (!render(64) || !background()) {
@@ -2494,7 +2497,55 @@ Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
     return {id, "fail",
         "an MMD edge edit must rewrite one slot and nothing else"};
   }
-  return {id, "pass", ""};
+
+  // The edge's width in pixels on the centre row of a 128x128 target: its
+  // rightmost green pixel past the surface's rightmost red one. A camera
+  // `distance` units from the diamond, zoomed by `zoom`, near 0.1, far 10.
+  mmd.outline_width = 40.0F;
+  mmd.outline_color = {0.0F, 1.0F, 0.0F};
+  world.SetMaterial(material, mmd);
+  const auto perspective = [&](float distance, float zoom) {
+    Toon::ToonView view;
+    view.view.m[14] = -distance;
+    view.projection.m[0] = view.projection.m[5] = zoom;
+    view.projection.m[10] = -10.1F / 9.9F;
+    view.projection.m[11] = -1.0F;
+    view.projection.m[14] = -2.0F / 9.9F;
+    view.projection.m[15] = 0.0F;
+    world.SetView(view);
+    if (!render(128)) {
+      return -1;
+    }
+    int hull = -1;
+    int surface = -1;
+    for (std::uint32_t column = 0; column < color.width; ++column) {
+      const auto pixel = PixelAt(color, column, color.height / 2U);
+      if (pixel[1] > 128U) {
+        hull = static_cast<int>(column);
+      }
+      if (pixel[0] > 128U) {
+        surface = static_cast<int>(column);
+      }
+    }
+    return hull >= 0 && surface >= 0 ? hull - surface : -1;
+  };
+  const int wide = perspective(1.5F, 1.0F);
+  const int zoomed = perspective(1.5F, 2.0F);
+  const int far = perspective(6.0F, 4.0F);
+  const std::string widths = std::to_string(wide) + "/" +
+                             std::to_string(zoomed) + "/" +
+                             std::to_string(far);
+  if (wide < 6 || std::abs(wide - zoomed) > 1 || far < 1 || far > wide - 3) {
+    return {id, "fail",
+        "an MMD edge must keep its pixels when the view zooms and narrow "
+        "with depth: " + widths + " px"};
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass",
+      "128px target, size 40 at distance/zoom 1.5/1, 1.5/2, 6/4: " + widths +
+          " px"};
 }
 
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
