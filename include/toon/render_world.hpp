@@ -186,6 +186,12 @@ struct MeshSnapshot {
   // none; its edge then scales by 1 everywhere.
   FloatArray edge_scales;
   std::uint64_t edge_scales_revision = 0;
+  // MMD's additional UV 1 (`primvars:mmd:uv1`), its x and y, one per point,
+  // where an MMD material whose sphere mode is SubTexture samples its sphere
+  // texture. Raw, as PMX authors it: origin at the image's top left. Empty
+  // when the mesh has none; such a material then samples at (0, 0).
+  TexCoordArray sub_texture_uvs;
+  std::uint64_t sub_texture_uvs_revision = 0;
   // The skin, when the mesh is skinned: `points` and `normals` are then its
   // rest pose, and a draw moves them by `joints` (see IsSkinned). Empty
   // influences when it is not.
@@ -472,6 +478,10 @@ public:
   // MMD's edge scale, one per point; any other count, or none, scales an
   // MMD edge by 1. Setting the scales a mesh already has changes nothing.
   void SetMeshEdgeScales(MeshId mesh, std::vector<float> scales);
+  // MMD's sub-texture UVs, one per point; any other count, or none, samples
+  // a sub-texture sphere at (0, 0). Setting the UVs a mesh already has
+  // changes nothing.
+  void SetMeshSubTextureUVs(MeshId mesh, std::vector<Float2> uvs);
   // Authored normals, one per point. Fewer than the topology reaches, or
   // none, derive smooth normals instead. Setting the normals a mesh already
   // has changes nothing.

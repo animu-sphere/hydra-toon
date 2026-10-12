@@ -108,8 +108,10 @@ struct PipelineDescription {
   const std::vector<std::uint32_t>* fragment_words = nullptr;
   std::uint32_t push_constant_size = 0;
   // Position, then normal and UV when there are three, and MMD's edge
-  // scale when there are four.
+  // scale when there are four, or its sub-texture UV with
+  // `sub_texture_uvs`.
   std::uint32_t vertex_streams = 1;
+  bool sub_texture_uvs = false;
   // Cull mode, front face, depth writes and vertex strides set per draw
   // rather than baked in.
   bool dynamic_draw_state = false;
@@ -167,9 +169,12 @@ bool CreateScenePipeline(VkDevice device,
   stages[1].pName = "main";
   const VkFormat stream_formats[4] = {VK_FORMAT_R32G32B32_SFLOAT,
       VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32_SFLOAT,
-      VK_FORMAT_R32_SFLOAT};
+      description.sub_texture_uvs ? VK_FORMAT_R32G32_SFLOAT
+                                  : VK_FORMAT_R32_SFLOAT};
   const std::uint32_t stream_strides[4] = {sizeof(Float3), sizeof(Float3),
-      sizeof(Float2), sizeof(float)};
+      sizeof(Float2),
+      description.sub_texture_uvs ? std::uint32_t{sizeof(Float2)}
+                                  : std::uint32_t{sizeof(float)}};
   VkVertexInputBindingDescription bindings[4]{};
   VkVertexInputAttributeDescription attributes[4]{};
   for (std::uint32_t stream = 0; stream < description.vertex_streams;
@@ -436,9 +441,8 @@ std::uint32_t SphereMode(const ToonMaterial& material) {
     return kSphereMultiply;
   case ToonSphereMode::Add:
     return kSphereAdd;
-  // A sub-texture samples the mesh's additional UV, which no draw carries
-  // yet, so it applies nothing.
   case ToonSphereMode::SubTexture:
+    return kSphereSubTexture;
   case ToonSphereMode::Disabled:
     break;
   }
@@ -668,12 +672,14 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   // faces are meant to lie behind it. The bias makes the surface win that tie
   // whichever draws first, instead of the outline colour showing across it.
   outline.depth_bias = true;
-  // MMD's pipelines share MToon's streams, constants and dynamic state.
-  // mmd_opaque blends nothing and covers every sample: what it draws has
-  // no alpha below 1.
+  // MMD's pipelines share MToon's streams, constants and dynamic state,
+  // and the surfaces also read the mesh's sub-texture UV. mmd_opaque blends
+  // nothing and covers every sample: what it draws has no alpha below 1.
   PipelineDescription mmd = mtoon;
   mmd.vertex_words = &words.mmd_vertex;
   mmd.fragment_words = &words.mmd_fragment;
+  mmd.vertex_streams = 4;
+  mmd.sub_texture_uvs = true;
   PipelineDescription mmd_transparent = mmd;
   mmd_transparent.vertex_words = &words.mmd_transparent_vertex;
   mmd_transparent.fragment_words = &words.mmd_transparent_fragment;
@@ -684,6 +690,7 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd_outline.vertex_words = &words.mmd_outline_vertex;
   mmd_outline.fragment_words = &words.mmd_outline_fragment;
   mmd_outline.vertex_streams = 4;
+  mmd_outline.sub_texture_uvs = false;
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
@@ -1518,6 +1525,21 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail, bool fast_val
     }
     entry.has_edge_scales = edge_scales_present &&
                             mesh.edge_scales->size() >= mesh.index_bound;
+    // And so are sub-texture UVs.
+    const bool sub_texture_uvs_present =
+        mesh.sub_texture_uvs != nullptr && !mesh.sub_texture_uvs->empty();
+    if (entry.sub_texture_uvs_revision != mesh.sub_texture_uvs_revision) {
+      if (sub_texture_uvs_present &&
+          !Upload(entry.sub_texture_uvs, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+              mesh.sub_texture_uvs->data(),
+              mesh.sub_texture_uvs->size() * sizeof(Float2), detail)) {
+        return false;
+      }
+      entry.sub_texture_uvs_revision = mesh.sub_texture_uvs_revision;
+    }
+    entry.has_sub_texture_uvs =
+        sub_texture_uvs_present &&
+        mesh.sub_texture_uvs->size() >= mesh.index_bound;
     if (!UpdateSkin(mesh, entry, detail, fast_values)) {
       return false;
     }
@@ -1693,6 +1715,7 @@ void MeshCache::Release(Entry& entry) {
   DestroyHostBuffer(device_, entry.normals);
   DestroyHostBuffer(device_, entry.uvs);
   DestroyHostBuffer(device_, entry.edge_scales);
+  DestroyHostBuffer(device_, entry.sub_texture_uvs);
   DestroyHostBuffer(device_, entry.indices);
   DestroyHostBuffer(device_, entry.influences);
   DestroyHostBuffer(device_, entry.joints);
@@ -1822,16 +1845,28 @@ void MeshCache::Record(VkCommandBuffer command,
                               VkCullModeFlags cull) {
     bind(pipeline);
     const bool edge = &pipeline == &pipelines.mmd_outline;
+    const bool mmd_surface = &pipeline == &pipelines.mmd ||
+                             &pipeline == &pipelines.mmd_transparent;
+    // The fourth stream: an MMD edge's scale, or an MMD surface's
+    // sub-texture UV.
+    VkBuffer fourth = VK_NULL_HANDLE;
+    VkDeviceSize fourth_stride = 0;
+    if (edge) {
+      fourth = entry.has_edge_scales ? entry.edge_scales.buffer
+                                     : unit_edge_scale_.buffer;
+      fourth_stride = entry.has_edge_scales ? sizeof(float) : 0U;
+    } else if (mmd_surface) {
+      fourth = entry.has_sub_texture_uvs ? entry.sub_texture_uvs.buffer
+                                         : zero_uv_.buffer;
+      fourth_stride = entry.has_sub_texture_uvs ? sizeof(Float2) : 0U;
+    }
     const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
-        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer,
-        entry.has_edge_scales ? entry.edge_scales.buffer
-                              : unit_edge_scale_.buffer};
+        entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer, fourth};
     const VkDeviceSize offsets[] = {0, 0, 0, 0};
     const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
-        entry.has_uvs ? sizeof(Float2) : 0U,
-        entry.has_edge_scales ? sizeof(float) : 0U};
-    vkCmdBindVertexBuffers2(command, 0, edge ? 4U : 3U, streams, offsets,
-        nullptr, strides);
+        entry.has_uvs ? sizeof(Float2) : 0U, fourth_stride};
+    vkCmdBindVertexBuffers2(command, 0, edge || mmd_surface ? 4U : 3U,
+        streams, offsets, nullptr, strides);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
         VK_INDEX_TYPE_UINT32);
     const VkDescriptorSet skin_set =

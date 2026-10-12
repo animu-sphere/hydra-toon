@@ -8,7 +8,7 @@
 # `Red`, a triangle through `Blue`, and a triangle in a subset without a
 # binding, which takes the mesh's own `Base`. Each face has its own points,
 # so a face's triangles are known by the points they index. The mesh also
-# carries MMD's per-vertex edge scale.
+# carries MMD's per-vertex edge scale and additional UV 1.
 def Xform "Root"
 {
     def Mesh "Body" (
@@ -25,6 +25,16 @@ def Xform "Root"
         ]
         # MMD's per-vertex edge scale, as usd-mmd-plugins authors it.
         float[] primvars:mmd:edgeScale = [2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5] (
+            interpolation = "vertex"
+        )
+        # MMD's additional UV 1, raw, as usd-mmd-plugins authors it: point i
+        # is (i, -i, 0.5, 1).
+        float4[] primvars:mmd:uv1 = [
+            (0, 0, 0.5, 1), (1, -1, 0.5, 1), (2, -2, 0.5, 1), (3, -3, 0.5, 1),
+            (4, -4, 0.5, 1), (5, -5, 0.5, 1), (6, -6, 0.5, 1),
+            (7, -7, 0.5, 1), (8, -8, 0.5, 1), (9, -9, 0.5, 1),
+            (10, -10, 0.5, 1), (11, -11, 0.5, 1), (12, -12, 0.5, 1)
+        ] (
             interpolation = "vertex"
         )
         rel material:binding = </Root/Looks/Base>

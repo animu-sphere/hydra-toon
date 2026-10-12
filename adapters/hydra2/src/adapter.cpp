@@ -371,6 +371,11 @@ public:
     world_.SetMeshEdgeScales(mesh, std::move(scales));
   }
 
+  void SetMeshSubTextureUVs(Toon::MeshId mesh, std::vector<Toon::Float2> uvs) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshSubTextureUVs(mesh, std::move(uvs));
+  }
+
   void SetMeshNormals(Toon::MeshId mesh, std::vector<Toon::Float3> normals) {
     std::scoped_lock lock(mutex_);
     world_.SetMeshNormals(mesh, std::move(normals));
@@ -813,6 +818,9 @@ public:
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, EdgeScaleToken())) {
       state_->SetMeshEdgeScales(mesh_, ReadEdgeScales(delegate));
+    }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, Uv1Token())) {
+      state_->SetMeshSubTextureUVs(mesh_, ReadSubTextureUVs(delegate));
     }
     if (HdChangeTracker::IsTransformDirty(*dirty_bits, id)) {
       state_->SetMeshTransform(mesh_, ToToon(delegate->GetTransform(id)));
@@ -1434,6 +1442,37 @@ private:
       }
     }
     return {};
+  }
+
+  static const TfToken& Uv1Token() {
+    static const TfToken uv1("mmd:uv1");
+    return uv1;
+  }
+
+  // MMD's additional UV 1, its x and y, where a sub-texture sphere samples:
+  // usd-mmd-plugins authors it raw, one float4 per point, when the PMX
+  // declares the channel (its stage contract §8.3, material policy §8).
+  std::vector<Toon::Float2> ReadSubTextureUVs(HdSceneDelegate* delegate) const {
+    std::vector<Toon::Float2> uvs;
+    for (const HdInterpolation interpolation :
+        {HdInterpolationVertex, HdInterpolationVarying}) {
+      for (const HdPrimvarDescriptor& descriptor :
+          GetPrimvarDescriptors(delegate, interpolation)) {
+        if (descriptor.name != Uv1Token()) {
+          continue;
+        }
+        const VtValue value = GetPrimvar(delegate, Uv1Token());
+        if (value.IsHolding<VtVec4fArray>()) {
+          const VtVec4fArray& source = value.UncheckedGet<VtVec4fArray>();
+          uvs.reserve(source.size());
+          for (const GfVec4f& uv : source) {
+            uvs.push_back({uv[0], uv[1]});
+          }
+        }
+        return uvs;
+      }
+    }
+    return uvs;
   }
 
   static std::vector<Toon::Float3> ReadPoints(const VtValue& value) {
