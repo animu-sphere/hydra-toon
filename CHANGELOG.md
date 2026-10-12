@@ -13,9 +13,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - MMD edges draw: `mmd_outline`, the seventh scene pipeline, adds an
   inverted hull for every MMD draw whose material draws its edge, after
   every surface, `edgeSize` × the mesh's `primvars:mmd:edgeScale` wide, in
-  the edge colour, unlit and decoded once. Its width is a length in MMD
-  units plus a width in pixels, fitted to MMD's own frames at two distances
-  (MAT-Q4, open). `RenderWorld::SetMeshEdgeScales` and
+  the edge colour, unlit and decoded once. Its width is a share of the
+  target's height that falls with the vertex's depth (MAT-Q4).
+  `RenderWorld::SetMeshEdgeScales` and
   `MeshSnapshot::edge_scales` carry the edge scale; `MmdParameters` is 144
   bytes with the edge colour and size. The headless check
   `renderer.material.mmd_outline`, and `draws_mmd_outline` in
@@ -50,6 +50,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
   shades its colours as stored, so the MMD path will compute on stored
   values and convert its result to linear once
   ([material policy §9](docs/design/MATERIAL_POLICY.md#9-open-questions)).
+- Renderer report 58 resolves MAT-Q4 against five more captures from MMD:
+  an edge of `edgeSize` × `edgeScale` is that size times (0.00108 + 0.0203 /
+  the vertex's view depth in MMD units) of the target's height, so a field
+  of view or a target size leaves its share alone, as MMD's does. The
+  headless check `renderer.material.mmd_outline` checks it under a
+  perspective camera
+  ([renderer report 58](docs/reports/renderer/58-2026-10-12-mat-q4-edge-width.md)).
 
 ### Changed
 

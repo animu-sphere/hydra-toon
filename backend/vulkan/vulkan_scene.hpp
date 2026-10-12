@@ -72,10 +72,8 @@ struct SurfaceDrawConstants {
   std::uint32_t flags;
   // |projection[1][1]|, for a screen-space outline width.
   float projection_scale;
-  // What an outline's width is multiplied by: for mtoon_outline's
-  // world-coordinates width, which MToon gives in metres, the scene's units
-  // per metre; for mmd_outline's, which MMD gives in pixels, 1 over the
-  // target's height in pixels.
+  // What mtoon_outline's world-coordinates width, which MToon gives in
+  // metres, is multiplied by: the scene's units per metre.
   float outline_scale;
 };
 static_assert(sizeof(SurfaceDrawConstants) == 128);

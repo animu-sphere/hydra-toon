@@ -1796,9 +1796,6 @@ void MeshCache::Record(VkCommandBuffer command,
   const VkDescriptorSet material_set = materials.descriptor_set();
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
   const float units_per_meter = 1.0F / draws.meters_per_unit;
-  // MMD's edge is a width in pixels: that share of the target's height.
-  const float pixel_height =
-      extent.height == 0 ? 0.0F : 1.0F / static_cast<float>(extent.height);
   // A perspective projection puts -z into w; an orthographic one keeps w 1.
   const bool orthographic = draws.view.projection.m[11] == 0.0F;
   // Only mtoon_opaque turns alpha into coverage, and only multisampled.
@@ -1854,7 +1851,7 @@ void MeshCache::Record(VkCommandBuffer command,
                       (&pipeline == &pipelines.mtoon ? coverage : 0U) |
                       entry.skin_flags;
     constants.projection_scale = projection_scale;
-    constants.outline_scale = edge ? pixel_height : units_per_meter;
+    constants.outline_scale = units_per_meter;
     vkCmdSetCullMode(command, cull);
     vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
                                         : VK_FRONT_FACE_COUNTER_CLOCKWISE);

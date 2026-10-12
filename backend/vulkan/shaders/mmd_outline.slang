@@ -19,22 +19,25 @@ struct MmdOutlineInput {
   uint vertex : SV_VulkanVertexID;
 };
 
-// MMD's edge width at a vertex whose clip w is `w`, as a length in view
-// space, for an edge size times edge scale of `size`. MMD units are 0.08 m
-// on the stage (usd-mmd-plugins stage contract §6).
+// MMD's edge width at a vertex whose clip w is `w` and whose view-space
+// depth is `depth`, as a length in view space, for an edge size times edge
+// scale of `size`. On MMD's own frames the edge is a share of the target's
+// height: a narrower field of view or a taller target leaves that share as
+// it is, and it falls with the vertex's depth. Per unit of size it is
+// kEdgeShare plus kEdgeShareMmdUnits over the depth in MMD units, fitted so
+// that hdToon's edge is as wide as MMD's on its frames from five cameras
+// (material policy MAT-Q4, renderer report 58). MMD units are
+// 0.08 m on the stage (usd-mmd-plugins stage contract §6). The depth is
+// taken as at least one MMD unit, which bounds the width at the camera and
+// gives a vertex at an orthographic camera's depth one.
 static const float kMetersPerMmdUnit = 0.08;
-// MMD's edge is neither a constant length nor a constant number of pixels
-// on its own frames: the width is taken as part a length in MMD units and
-// part a width in pixels, per unit of size, fitted to two distances
-// (material policy MAT-Q4, renderer report 57).
-static const float kEdgeMmdUnits = 0.0135;
-static const float kEdgePixels = 0.89;
+static const float kEdgeShare = 0.00108;
+static const float kEdgeShareMmdUnits = 0.0203;
 
-float EdgeWidth(float size, float w) {
-  const float units_per_meter = 1.0 / max(frame[0].w, 1e-12);
-  const float world = kEdgeMmdUnits * kMetersPerMmdUnit * units_per_meter;
-  const float screen = ScreenWidth(kEdgePixels * draw.outline_scale, w);
-  return size * (world + screen);
+float EdgeWidth(float size, float w, float depth) {
+  const float mmd_depth = max(depth * frame[0].w / kMetersPerMmdUnit, 1.0);
+  return ScreenWidth(
+      size * (kEdgeShare + kEdgeShareMmdUnits / mmd_depth), w);
 }
 
 [shader("vertex")]
@@ -47,8 +50,9 @@ VertexStageOutput vertex_main(MmdOutlineInput input) {
   const float3x3 normal_matrix = NormalMatrix();
   const float3 view_normal = mul(normal_matrix, normal);
   const float w = mul(draw.clip_from_object, float4(position, 1.0)).w;
+  const float depth = -ViewPosition(position).z;
   position = HullPosition(position, view_normal, normal_matrix,
-      EdgeWidth(material.edge.x * input.edge_scale, w));
+      EdgeWidth(material.edge.x * input.edge_scale, w, depth));
 
   output.position = mul(draw.clip_from_object, float4(position, 1.0));
   output.view_normal = view_normal;
