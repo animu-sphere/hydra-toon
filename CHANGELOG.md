@@ -10,6 +10,16 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MMD material morphs' texture, sphere and toon tints draw: the MMD
+  block of `ToonMaterial` carries each as the evaluated multiply and add
+  (`texture_tint`, `sphere_tint`, `toon_tint`, with `Toon::Float4`), and
+  `mmd_opaque` and `mmd_transparent` tint the base, sphere and toon texels
+  in MikuMikuEffect's `full.fx` form (MAT-Q6, provisional). An evaluated
+  override sets them, a tint edit rewrites one slot, and `MmdParameters` is
+  240 bytes. The viewport's Materials panel edits an MMD material's
+  specular, ambient, edge alpha and tints. The headless check
+  `renderer.material.mmd_morph` covers it
+  ([renderer report 61](docs/reports/renderer/61-2026-10-12-mmd-material-morph.md)).
 - MMD's self-shadow draws: `mmd_shadow`, the eighth scene pipeline, draws
   a depth map of every MMD draw whose material casts it from the first
   directional light, before the scene, fitted along the light to the MMD

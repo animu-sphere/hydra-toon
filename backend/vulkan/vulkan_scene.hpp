@@ -193,8 +193,13 @@ struct MmdParameters {
   float edge_color[4];
   // x the edge size, in pixels at an edge scale of 1.
   float edge[4];
+  // What MMD's material morphs make of the base, sphere and toon texels:
+  // each a multiply RGBA and an add RGBA.
+  float texture_tint[8];
+  float sphere_tint[8];
+  float toon_tint[8];
 };
-static_assert(sizeof(MmdParameters) == 144);
+static_assert(sizeof(MmdParameters) == 240);
 
 // Where MMD's self-shadow map was drawn from this frame. Must match
 // MmdShadowParameters in shaders/mmd_common.slang.

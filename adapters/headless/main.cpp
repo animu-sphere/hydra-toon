@@ -2401,6 +2401,177 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", ""};
 }
 
+// MMD's material morph tints (material policy §11, MAT-Q6), on a white
+// MMD material, diffuse 0 and ambient 1, under one light toward the camera.
+// A base texel of 128, which reads 55, multiplied by half reads 13 and with
+// 0.25 added 134; with the multiply's alpha at half too, it moves only
+// halfway from white, to 89; with every multiply 0 the texture contributes
+// nothing and the pixel is white, while a material without a base texture
+// stays white under any tint. A sphere tint of 0 takes away an add sphere's
+// 64, which read 134 over an ambient of 0.5, and a multiply sphere's alike,
+// to 55. Lit from behind, toon01's far side, 156, multiplied by half reads
+// 34 and by 0 is white. Last, a tint edit rewrites one slot and nothing
+// else.
+Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.material.mmd_morph";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const Toon::MeshId mesh = AddTriangle(world, 0.0F);
+  world.SetMeshUVs(mesh, {{0.25F, 0.75F}, {0.25F, 0.75F}, {0.25F, 0.75F}});
+  const Toon::LightId key = world.CreateLight();
+  Toon::ToonLight light;
+  light.color = {1.0F, 1.0F, 1.0F};
+  light.direction = {0.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+  const Toon::TextureId texture = world.CreateTexture();
+  Toon::ToonTexture texels;
+  texels.width = 1;
+  texels.height = 1;
+  texels.encoding = Toon::ToonTextureEncoding::Linear;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{128, 128, 128, 255});
+  world.SetTexture(texture, texels);
+  Toon::ToonMaterial mmd;
+  mmd.model = Toon::ToonShadingModel::MMD;
+  mmd.base_color = {0.0F, 0.0F, 0.0F};
+  mmd.mmd.ambient_color = {1.0F, 1.0F, 1.0F};
+  mmd.base_texture.texture = texture;
+  const Toon::MaterialId material = world.CreateMaterial();
+  world.SetMaterial(material, mmd);
+  world.SetMeshMaterial(mesh, material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  std::array<std::uint8_t, 4> pixel{};
+  const auto render = [&]() {
+    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
+            color, depth, detail)) {
+      return false;
+    }
+    pixel = CenterPixel(color);
+    return true;
+  };
+  const auto grey = [&](int value) {
+    return std::abs(pixel[0] - value) <= 2 && std::abs(pixel[1] - value) <= 2 &&
+           std::abs(pixel[2] - value) <= 2;
+  };
+  using Tint = Toon::ToonMaterial::MMD::TextureTint;
+  const auto tint = [](Toon::Float4 multiply, Toon::Float4 add) {
+    Tint result;
+    result.multiply = multiply;
+    result.add = add;
+    return result;
+  };
+
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  if (!grey(55)) {
+    return {id, "fail", "untinted, a base texel of 128 must read 55"};
+  }
+  mmd.mmd.texture_tint = tint({0.5F, 0.5F, 0.5F, 1.0F}, {});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(13)) {
+    return {id, "fail", "a texture tint must multiply the base texel"};
+  }
+  mmd.mmd.texture_tint =
+      tint({1.0F, 1.0F, 1.0F, 1.0F}, {0.25F, 0.25F, 0.25F, 0.0F});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(134)) {
+    return {id, "fail", "a texture tint must add to the base texel"};
+  }
+  mmd.mmd.texture_tint = tint({0.5F, 0.5F, 0.5F, 0.5F}, {});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(89)) {
+    return {id, "fail",
+        "a texture tint's alphas must move the texel from white toward the "
+        "tinted texel"};
+  }
+  mmd.mmd.texture_tint = tint({}, {});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(255)) {
+    return {id, "fail",
+        "a texture tint of 0 must leave the texture contributing nothing"};
+  }
+  mmd.base_texture.texture = 0;
+  mmd.mmd.texture_tint = tint({0.0F, 0.0F, 0.0F, 1.0F}, {});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(255)) {
+    return {id, "fail", "a material without a base texture must not be tinted"};
+  }
+
+  const Toon::TextureId sphere = world.CreateTexture();
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{64, 64, 64, 255});
+  world.SetTexture(sphere, texels);
+  mmd.mmd.texture_tint = {};
+  mmd.mmd.ambient_color = {0.5F, 0.5F, 0.5F};
+  mmd.mmd.sphere_texture.texture = sphere;
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Add;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(134)) {
+    return {id, "fail", "untinted, an add sphere must add its texel"};
+  }
+  mmd.mmd.sphere_tint = tint({}, {});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(55)) {
+    return {id, "fail", "a sphere tint of 0 must take an add sphere away"};
+  }
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Multiply;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(55)) {
+    return {id, "fail", "a sphere tint of 0 must take a multiply sphere away"};
+  }
+
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Disabled;
+  mmd.mmd.sphere_texture.texture = 0;
+  mmd.mmd.sphere_tint = {};
+  mmd.base_color = {0.8F, 0.8F, 0.8F};
+  mmd.mmd.ambient_color = {0.6F, 0.6F, 0.6F};
+  mmd.mmd.toon_source = Toon::ToonRampSource::Shared;
+  mmd.mmd.shared_toon_index = 0;
+  world.SetMaterial(material, mmd);
+  light.direction = {0.0F, 0.0F, 1.0F};
+  world.SetLight(key, light);
+  if (!render() || !grey(156)) {
+    return {id, "fail", "untinted, toon01's far side must read 156"};
+  }
+  mmd.mmd.toon_tint = tint({0.5F, 0.5F, 0.5F, 1.0F}, {});
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(34)) {
+    return {id, "fail", "a toon tint must multiply the ramp's texel"};
+  }
+
+  const Toon::OffscreenStatistics before = renderer->statistics();
+  mmd.mmd.toon_tint = tint({}, {});
+  world.SetMaterial(material, mmd);
+  if (!render()) {
+    return {id, "fail", detail};
+  }
+  const Toon::OffscreenStatistics& after = renderer->statistics();
+  if (after.validation_message_count != 0) {
+    return {id, "fail", after.validation_detail};
+  }
+  if (!grey(255)) {
+    return {id, "fail", "a toon tint of 0 must leave the ramp contributing nothing"};
+  }
+  if (after.material_writes != before.material_writes + 1U ||
+      after.pipelines_created != before.pipelines_created ||
+      after.point_uploads != before.point_uploads ||
+      after.topology_uploads != before.topology_uploads ||
+      after.texture_uploads != before.texture_uploads) {
+    return {id, "fail", "a tint edit must rewrite one slot and nothing else"};
+  }
+  return {id, "pass", ""};
+}
+
 // mmd_outline (material policy §5), on AddOctahedron's diamond in red under
 // one light. Under the orthographic camera at the origin the rim's depth is
 // taken as one MMD unit, so an edge of size 4 is 0.086 of the target's
@@ -3128,6 +3299,7 @@ int main(int argc, char** argv) {
     checks.push_back(MToonRimCheck(shaders));
     checks.push_back(MToonTransparentCheck(shaders));
     checks.push_back(MmdCheck(shaders));
+    checks.push_back(MmdMorphCheck(shaders));
     checks.push_back(MmdOutlineCheck(shaders));
     checks.push_back(MmdSelfShadowCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
@@ -3150,6 +3322,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mtoon_rim", "skip", dependent});
     checks.push_back({"renderer.material.mtoon_transparent", "skip", dependent});
     checks.push_back({"renderer.material.mmd", "skip", dependent});
+    checks.push_back({"renderer.material.mmd_morph", "skip", dependent});
     checks.push_back({"renderer.material.mmd_outline", "skip", dependent});
     checks.push_back({"renderer.material.mmd_self_shadow", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});

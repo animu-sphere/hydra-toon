@@ -72,7 +72,7 @@ model-specific block:
 | --- | --- |
 | common | shading model; base colour and alpha; base texture; normal texture and scale; alpha mode and cutoff; cull mode (double-sidedness); emissive and its texture; outline enable, width, colour; sort key |
 | MToon block | shade colour and texture; shading shift, its texture and contribution scale, and toony; GI equalization; MatCap; parametric rim and rim texture; outline width mode and lighting mix; UV animation and mask; render-queue offset; transparent-with-Z-write |
-| MMD block | specular colour and power; ambient; the edge colour's alpha; sphere texture and mode; toon source, texture or shared index; shadow flags; vertex-colour and draw-points / lines flags; draw order |
+| MMD block | specular colour and power; ambient; the edge colour's alpha; sphere texture and mode; toon source, texture or shared index; shadow flags; vertex-colour and draw-points / lines flags; draw order; the texture, sphere and toon tints of its material morphs (§11) |
 
 Only what is truly the same goes into the common part. MMD-only concepts —
 sphere modes, sub-texture UVs, shared toon slots, shadow flags, per-vertex edge
@@ -202,6 +202,7 @@ structural.
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | resolved 2026-10-11: MMD computes its terms on the values as stored and writes them undecoded and unencoded; lowering its light colour scales a model's pixels by the factor its lighting term computes on stored values, flat across brightness ([report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md)). The MMD path samples its textures without sRGB decoding, computes MMD's terms on them and the factors as authored, and converts the result from sRGB to linear once, so the host's encoding writes MMD's values. Blending stays in the linear target, so a partly transparent material approximates MMD's | v0.4.0 |
 | MAT-Q4 | How wide MMD draws an edge of a given `edgeSize` × `edgeScale`: MMD states no unit, and on its own frames an edge of size 0.4 is 0.6 pixels wide from 45 MMD units and 1.57 from 9 at a 30° field of view and 1,080 pixels, neither a constant length nor a constant number of pixels ([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)) | resolved 2026-10-12: a share of the target's height, `edgeSize` × `edgeScale` × (0.00108 + 0.0203 / the vertex's view depth in MMD units). On MMD's frames a 15° field of view leaves an edge as many pixels wide as 30° does, a 2,160-pixel frame doubles it, and from 9, 18 and 30 MMD units it falls as a constant share plus one over the depth; the constants make hdToon's edge MMD's width at those cameras ([report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md)) | v0.4.0 |
 | MAT-Q5 | What MMD's self-shadow map covers and how far behind its depth a point falls into shadow. `full.fx` compares in MMD's own map depth, 1,500 per unit and shadowed from 0.3, but MMD states neither that depth's range nor how its map follows its camera and its self-shadow distance, which the stage does not carry (§10) | provisional 2026-10-12: a 2,048-texel map fitted along the light to every MMD draw that casts or receives the self-shadow, and the comparison in MMD units, 15 per unit and shadowed from 0.3. On one model's MMD capture with self-shadow, hdToon's frame is within 4 levels on 73% of the pixels, as near as its frame without is to MMD's without, and 5 or 50 per unit move the mean difference by under 0.11 ([report 60](../reports/renderer/60-2026-10-12-mmd-self-shadow.md)). Settled when captures of a contact or grazing shadow tell the comparison apart | v0.4.0 |
+| MAT-Q6 | How MMD applies a material morph's texture, sphere and toon tints to a texel. PMX states a multiply and an add for each but not how they combine, and MikuMikuDance does not say (§11) | provisional 2026-10-12: as MikuMikuEffect's `full.fx` applies its `MULTIPLYINGTEXTURE` and `ADDINGTEXTURE` values, the texel's colour moves from what the texture adds when it contributes nothing, white or, for a sphere that adds, black, toward texel × multiply + add, by the sum of the two alphas, and its alpha is kept. It reads the local models' tinted morphs as their names say: every multiply 0 (`全灰モード`) leaves the materials their own colour, untextured and unshaded, and a sphere multiplied by 0 (`spa消`) is gone whether it multiplies or adds ([report 61](../reports/renderer/61-2026-10-12-mmd-material-morph.md)). Settled when MMD's frames of those morphs, at full and half weight, are compared | v0.4.0 |
 
 ## 10. MMD's self-shadow
 
@@ -236,3 +237,31 @@ setting `toon:mmdSelfShadow`).
 
 `groundShadow`, MMD's shadow on its floor, is not drawn: a stage has no
 floor for it.
+
+## 11. MMD's material morphs
+
+A material morph is MMD's semantics: the stage keeps it declarative, on its
+morph prim, and a runtime evaluates it
+([`usd-mmd-plugins` §11](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#11-material-morphs)).
+The renderer draws what the evaluation leaves; it reads no morph prim and
+weighs no morph.
+
+- **Values with a canonical input.** Diffuse, specular, specular power,
+  ambient, edge colour and edge size reach the material's own values, as a
+  runtime's opinion or time samples on the canonical inputs, which the
+  value-only path reads (§8), or as an evaluated override
+  (`RenderWorld::SetMaterialParametersOverride`). A morph that takes a
+  diffuse alpha below 1 moves the material to the transparent draws, which
+  is structural (§6).
+- **Tints.** The texture, sphere and toon tints have no canonical input;
+  they modulate a texture's contribution, which only an MMD-aware renderer
+  draws. The MMD block carries each as the evaluated multiply and add, the
+  product of every multiply morph's `lerp(1, value, weight)` and the sum of
+  every add morph's `value × weight`, and an evaluated override sets them.
+  They are values in the material's slot, never structural.
+- **How a tint applies.** The base texel, the sphere texel and the toon
+  ramp's texels, its far-side one included, are each tinted as `full.fx`
+  tints them (MAT-Q6): the colour moves from what the texture adds when it
+  contributes nothing toward texel × multiply + add, by the sum of the two
+  alphas, and the alpha is kept. A material without the texture is not
+  tinted.

@@ -48,6 +48,24 @@ bool MaterialColor(const char* label, Float3& value) {
   return true;
 }
 
+bool MaterialVector(const char* label, Float4& value) {
+  float edited[4] = {value.x, value.y, value.z, value.w};
+  if (!ImGui::DragFloat4(label, edited, 0.01F, 0.0F, 0.0F, "%.3f") ||
+      !std::all_of(std::begin(edited), std::end(edited),
+          [](float x) { return std::isfinite(x); })) return false;
+  value = {edited[0], edited[1], edited[2], edited[3]};
+  return true;
+}
+
+// An MMD material morph's evaluated tint (material policy §11).
+bool MaterialTint(const char* label, ToonMaterial::MMD::TextureTint& tint) {
+  if (!ImGui::TreeNode(label)) return false;
+  bool changed = MaterialVector("Multiply", tint.multiply);
+  changed |= MaterialVector("Add", tint.add);
+  ImGui::TreePop();
+  return changed;
+}
+
 bool MaterialTexture(const char* label, ToonTextureRef& texture) {
   if (!ImGui::TreeNode(label)) return false;
   ImGui::Text("Texture %u", texture.texture);
@@ -98,6 +116,17 @@ bool MaterialValues(ToonMaterial& values) {
     changed |= MaterialTexture("Rim texture", m.rim_multiply_texture);
     changed |= MaterialTexture("Outline width texture", m.outline_width_texture);
     changed |= MaterialTexture("UV animation mask", m.uv_animation_mask_texture);
+  }
+  if (values.model == ToonShadingModel::MMD) {
+    auto& m = values.mmd;
+    ImGui::TextDisabled("MMD (colours as stored)");
+    changed |= MaterialColor("Specular colour", m.specular_color);
+    changed |= MaterialScalar("Specular power", m.specular_power);
+    changed |= MaterialColor("Ambient colour", m.ambient_color);
+    changed |= MaterialScalar("Edge alpha", m.edge_alpha);
+    changed |= MaterialTint("Texture tint", m.texture_tint);
+    changed |= MaterialTint("Sphere tint", m.sphere_tint);
+    changed |= MaterialTint("Toon tint", m.toon_tint);
   }
   return changed;
 }
