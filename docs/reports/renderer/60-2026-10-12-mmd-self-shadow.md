@@ -1,5 +1,7 @@
 # MMD's self-shadow: a light's depth map, and receivers shaded as `full.fx`'s self-shadow pass
 
+> Followed by [report 63](63-2026-10-17-self-shadow-quality.md): the map follows the camera across the light and is read filtered, so §5's map that does not move with the camera and its unmeasured cost no longer hold.
+
 - Date: 2026-10-12
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Tooling: `ost 0.23.14`; the canonical runtime

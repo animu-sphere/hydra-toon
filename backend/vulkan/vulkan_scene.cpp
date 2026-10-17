@@ -2178,11 +2178,38 @@ void MeshCache::Record(VkCommandBuffer command,
 
 bool MeshCache::SelfShadowBounds(const DrawList& draws,
     const MaterialCache& materials, const Matrix4& light_from_world,
-    std::array<double, 3>& low, std::array<double, 3>& high,
-    bool& receivers) const {
-  receivers = false;
+    SelfShadowExtent& extent) const {
+  extent = {};
   bool bounded = false;
   MeshPart whole;
+  std::vector<OutlineBounds::SceneBox> pieces;
+  // OpenGL's clip space: a point is in the frustum where -w <= x, y, z <= w.
+  const Matrix4 clip_from_world = Multiply(draws.view.projection, draws.view.view);
+  const auto& c = clip_from_world.m;
+  const auto& v = draws.view.view.m;
+  const Matrix4 world_from_view = AffineInverse(draws.view.view);
+  const auto& w = world_from_view.m;
+  // An unskewed projection, perspective or orthographic, whose frustum a
+  // part's box is cut to.
+  const auto& p = draws.view.projection.m;
+  const bool unskewed = p[0] != 0.0F && p[5] != 0.0F && p[1] == 0.0F &&
+                        p[4] == 0.0F;
+  const bool perspective = unskewed && p[11] == -1.0F && p[15] == 0.0F;
+  const bool orthographic = unskewed && p[11] == 0.0F && p[15] == 1.0F;
+  const auto& m = light_from_world.m;
+  const auto light = [&](const std::array<double, 3>& point, std::size_t row) {
+    return m[12 + row] + m[row] * point[0] + m[4 + row] * point[1] +
+           m[8 + row] * point[2];
+  };
+  const auto corner_of = [](const std::array<double, 3>& low,
+                             const std::array<double, 3>& high,
+                             unsigned corner) {
+    std::array<double, 3> point{};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+      point[axis] = (corner & (1U << axis)) ? high[axis] : low[axis];
+    }
+    return point;
+  };
   for (const MeshSnapshot& mesh : draws.draws) {
     const auto found = entries_.find(mesh.id);
     if (found == entries_.end()) {
@@ -2206,20 +2233,93 @@ bool MeshCache::SelfShadowBounds(const DrawList& draws,
         !entry.outline_bounds.SceneBounds(mesh, mesh_low, mesh_high)) {
       continue;
     }
-    receivers = receivers || receives;
-    const auto& m = light_from_world.m;
+    extent.receivers = extent.receivers || receives;
     for (unsigned corner = 0; corner < 8U; ++corner) {
-      std::array<double, 3> point{};
-      for (std::size_t axis = 0; axis < 3; ++axis) {
-        point[axis] = (corner & (1U << axis)) ? mesh_high[axis] : mesh_low[axis];
-      }
+      const std::array<double, 3> point = corner_of(mesh_low, mesh_high, corner);
       for (std::size_t row = 0; row < 3; ++row) {
-        const double value = m[12 + row] + m[row] * point[0] +
-                             m[4 + row] * point[1] + m[8 + row] * point[2];
-        low[row] = bounded ? std::min(low[row], value) : value;
-        high[row] = bounded ? std::max(high[row], value) : value;
+        const double value = light(point, row);
+        extent.low[row] = bounded ? std::min(extent.low[row], value) : value;
+        extent.high[row] = bounded ? std::max(extent.high[row], value) : value;
       }
       bounded = true;
+    }
+    if (!receives) {
+      continue;
+    }
+    // The receiver's parts the frustum reaches: a part is left out only
+    // when every corner of its box lies beyond one of the frustum's planes.
+    if (!entry.outline_bounds.ScenePieces(mesh, pieces)) {
+      pieces.assign(1, {mesh_low, mesh_high});
+    }
+    for (const OutlineBounds::SceneBox& piece : pieces) {
+      std::array<std::array<double, 4>, 8> clip{};
+      for (unsigned corner = 0; corner < 8U; ++corner) {
+        const std::array<double, 3> point = corner_of(piece.low, piece.high, corner);
+        for (std::size_t row = 0; row < 4; ++row) {
+          clip[corner][row] = c[12 + row] + c[row] * point[0] +
+                              c[4 + row] * point[1] + c[8 + row] * point[2];
+        }
+      }
+      bool outside = false;
+      for (std::size_t row = 0; row < 3 && !outside; ++row) {
+        for (const double sign : {-1.0, 1.0}) {
+          bool beyond = true;
+          for (const auto& point : clip) {
+            beyond = beyond && sign * point[row] > point[3];
+          }
+          outside = outside || beyond;
+        }
+      }
+      if (outside) {
+        continue;
+      }
+      // The part's box in view space, cut to the frustum's cross-section
+      // at the part's far side, which holds every nearer one, so the parts
+      // the camera sees only the edge of add only that edge.
+      std::array<double, 3> view_low{};
+      std::array<double, 3> view_high{};
+      for (unsigned corner = 0; corner < 8U; ++corner) {
+        const std::array<double, 3> point = corner_of(piece.low, piece.high, corner);
+        for (std::size_t row = 0; row < 3; ++row) {
+          const double value = v[12 + row] + v[row] * point[0] +
+                               v[4 + row] * point[1] + v[8 + row] * point[2];
+          view_low[row] = corner ? std::min(view_low[row], value) : value;
+          view_high[row] = corner ? std::max(view_high[row], value) : value;
+        }
+      }
+      if (perspective || orthographic) {
+        const double ahead = std::max(-view_low[2], 0.0);
+        for (std::size_t row = 0; row < 2; ++row) {
+          const double scale = p[5 * row];
+          const double shift = p[8 + row];
+          const double offset = p[12 + row];
+          const double from = perspective ? ahead * (-1.0 + shift) / scale
+                                          : (-1.0 - offset) / scale;
+          const double to = perspective ? ahead * (1.0 + shift) / scale
+                                        : (1.0 - offset) / scale;
+          view_low[row] = std::max(view_low[row], std::min(from, to));
+          view_high[row] = std::min(view_high[row], std::max(from, to));
+        }
+        if (!(view_low[0] <= view_high[0]) || !(view_low[1] <= view_high[1])) {
+          continue;
+        }
+      }
+      for (unsigned corner = 0; corner < 8U; ++corner) {
+        const std::array<double, 3> view = corner_of(view_low, view_high, corner);
+        std::array<double, 3> point{};
+        for (std::size_t row = 0; row < 3; ++row) {
+          point[row] = w[12 + row] + w[row] * view[0] + w[4 + row] * view[1] +
+                       w[8 + row] * view[2];
+        }
+        for (std::size_t row = 0; row < 3; ++row) {
+          const double value = light(point, row);
+          extent.seen_low[row] =
+              extent.seen ? std::min(extent.seen_low[row], value) : value;
+          extent.seen_high[row] =
+              extent.seen ? std::max(extent.seen_high[row], value) : value;
+        }
+        extent.seen = true;
+      }
     }
   }
   return bounded;
@@ -2340,19 +2440,23 @@ bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
   return FlushIfNeeded(device_, buffer_, detail);
 }
 
-// The map looks along the light with an orthographic projection fitted to
-// the box around every MMD draw that casts or receives the self-shadow,
-// padded so a caster on the box's face is not clipped. It is square, so a
-// texel covers as much across the light either way, and its depth runs
-// from the box's face nearest the light.
+// The map looks along the light with an orthographic projection. Along the
+// light it spans the box around every MMD draw that casts or receives the
+// self-shadow, its depth running from the box's face nearest the light.
+// Across the light it spans what of that box the camera can see of a
+// receiver: the receivers' parts the frustum reaches, each cut to it. Only
+// a receiver reads the map, and along the light a caster outside that span
+// cannot shadow one inside it. So that a moving camera does not make the
+// shadow's edges crawl, each axis's span changes in steps of an eighth of
+// an octave and its centre in whole texels, and it is padded so the
+// filtered edge and a point moved along its normal stay inside.
 bool ShadowMap::Update(const DrawList& draws, const MeshCache& meshes,
     const MaterialCache& materials, std::string& detail) {
   active_ = false;
   MmdShadowParameters parameters{};
   Float3 travel;
-  std::array<double, 3> low{};
-  std::array<double, 3> high{};
-  bool receivers = false;
+  SelfShadowExtent extent;
+  const double size = kShadowMapSize;
   const auto length = [](Float3 value) {
     return std::sqrt(double(value.x) * value.x + double(value.y) * value.y +
                      double(value.z) * value.z);
@@ -2380,20 +2484,48 @@ bool ShadowMap::Update(const DrawList& draws, const MeshCache& meshes,
       light_from_world.m[column * 4 + 1] = static_cast<float>(y[column]);
       light_from_world.m[column * 4 + 2] = static_cast<float>(z[column]);
     }
-    if (meshes.SelfShadowBounds(draws, materials, light_from_world, low, high,
-            receivers) &&
-        receivers) {
-      const double across = std::max({high[0] - low[0], high[1] - low[1],
-                                1e-4}) * 1.02;
+    if (meshes.SelfShadowBounds(draws, materials, light_from_world, extent) &&
+        extent.receivers) {
+      const std::array<double, 3>& low = extent.low;
+      const std::array<double, 3>& high = extent.high;
+      // What of the box across the light the camera sees of a receiver.
+      std::array<double, 2> seen_low{low[0], low[1]};
+      std::array<double, 2> seen_high{high[0], high[1]};
+      if (extent.seen) {
+        for (std::size_t axis = 0; axis < 2; ++axis) {
+          seen_low[axis] = std::max(seen_low[axis], extent.seen_low[axis]);
+          seen_high[axis] = std::min(seen_high[axis], extent.seen_high[axis]);
+        }
+      }
+      // A span the camera does not see, or one that leaves nothing, falls
+      // back to the whole box.
+      std::array<double, 2> center{};
+      std::array<double, 2> across{};
+      for (std::size_t axis = 0; axis < 2; ++axis) {
+        const double whole = std::max(high[axis] - low[axis], 1e-4) * 1.02;
+        center[axis] = 0.5 * (low[axis] + high[axis]);
+        across[axis] = whole;
+        if (!extent.seen || !(seen_high[axis] > seen_low[axis])) {
+          continue;
+        }
+        const double span = std::exp2(std::ceil(std::log2(
+            (seen_high[axis] - seen_low[axis]) * 1.02 *
+            (1.0 + 16.0 / size)) * 8.0) / 8.0);
+        if (span < whole) {
+          const double texel = span / size;
+          across[axis] = span;
+          center[axis] =
+              std::round(0.5 * (seen_low[axis] + seen_high[axis]) / texel) *
+              texel;
+        }
+      }
       const double depth = std::max(high[2] - low[2], 1e-4) * 1.04;
-      const double center_x = 0.5 * (low[0] + high[0]);
-      const double center_y = 0.5 * (low[1] + high[1]);
       const double nearest = high[2] + 0.02 * depth;
       Matrix4 clip;
-      clip.m[0] = static_cast<float>(2.0 / across);
-      clip.m[12] = static_cast<float>(-2.0 * center_x / across);
-      clip.m[5] = static_cast<float>(2.0 / across);
-      clip.m[13] = static_cast<float>(-2.0 * center_y / across);
+      clip.m[0] = static_cast<float>(2.0 / across[0]);
+      clip.m[12] = static_cast<float>(-2.0 * center[0] / across[0]);
+      clip.m[5] = static_cast<float>(2.0 / across[1]);
+      clip.m[13] = static_cast<float>(-2.0 * center[1] / across[1]);
       clip.m[10] = static_cast<float>(-1.0 / depth);
       clip.m[14] = static_cast<float>(nearest / depth);
       clip_from_world_ = Multiply(clip, light_from_world);
@@ -2404,7 +2536,11 @@ bool ShadowMap::Update(const DrawList& draws, const MeshCache& meshes,
       parameters.parameters[0] = 1.0F;
       parameters.parameters[1] = static_cast<float>(
           depth * draws.meters_per_unit / kMetersPerMmdUnit);
-      parameters.parameters[2] = static_cast<float>(kShadowMapSize);
+      parameters.parameters[2] = static_cast<float>(size);
+      parameters.texel[0] = static_cast<float>(
+          3.0 * std::max(across[0], across[1]) / size);
+      parameters.texel[1] = static_cast<float>(std::max(across[0], across[1]) /
+          size * draws.meters_per_unit / kMetersPerMmdUnit);
       active_ = true;
     }
   }

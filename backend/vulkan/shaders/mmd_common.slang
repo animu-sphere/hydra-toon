@@ -60,9 +60,13 @@ struct MmdShadowParameters {
   // off; y MMD units per unit of the map's depth; z the map's size in
   // texels; w 1 when material morphs' tints draw, 0 as MMD draws none.
   float4 parameters;
+  // x how far a receiver's point moves along its normal before the map is
+  // read, at most, in view-space units: three of the map's texels; y a
+  // texel's width in MMD units.
+  float4 texel;
 };
 
-// The self-shadow map's depth, read texel by texel.
+// The self-shadow map's depth, read texel by texel and filtered here.
 [[vk::binding(5, 0)]] Texture2D<float> mmd_shadow_map;
 [[vk::binding(6, 0)]] StructuredBuffer<MmdShadowParameters> mmd_shadow;
 
@@ -77,6 +81,18 @@ static const float kShadowStart = 0.3;
 // full.fx's Toon: the lit side's share of the light rises from 0 to 1 over
 // the first third of N·L.
 static const float kShadowToon = 3.0;
+// How many texels' worth of a receiver's slope away from the light a point
+// must lie behind the map before it falls into shadow, and the steepest
+// slope that counts.
+static const float kShadowSlopeTexels = 2.0;
+static const float kShadowSlopeLimit = 4.0;
+// How wide the shadow's edge is: a disc six of the map's texels across
+// either way, read at 32 taps. MMD's own map follows its camera, so its
+// edge widens with its texels as the camera draws back; this map follows
+// the camera too, and six texels match MMD's edges on its frames of a face,
+// a bust and a full body (renderer report 63).
+static const float kShadowRadiusTexels = 6.0;
+static const int kShadowTaps = 32;
 
 // VertexInput's streams at locations 0-2, in its order, and a fourth.
 struct MmdVertexInput {
@@ -143,21 +159,70 @@ float4 TintTexel(float4 texel, float4 tint[2], float nothing) {
 }
 
 // How much of the light reaches a view-space point past MMD's self-shadow
-// map: 1 outside the map, 0 well behind what the map saw first. Point
-// sampled, as MMD's map is.
-float SelfShadowLight(float3 view_position) {
+// map: 1 outside the map, 0 well behind what the map saw first. MMD reads
+// its map point by point, and its edge is soft where its texels are large;
+// this map's texels are smaller, so it reads a disc of them as wide as
+// MMD's edges, each tap bilinear over its four texels (material policy
+// §10). The point first moves along its normal as far as three texels as
+// its surface turns from the light, and must lie further behind as its
+// surface slopes from the light; a tap away from it compares the depth the
+// point's own plane has there. So the texels around it, which a sloping
+// surface saw nearer the light, do not shadow it.
+float SelfShadowLight(float3 view_position, float3 normal, float lambert) {
   const MmdShadowParameters shadow = mmd_shadow[0];
-  const float4 clip = mul(shadow.clip_from_view, float4(view_position, 1.0));
+  const float offset = shadow.texel.x * sqrt(saturate(1.0 - lambert * lambert));
+  const float4 clip = mul(shadow.clip_from_view,
+      float4(view_position + normal * offset, 1.0));
   const float3 map = clip.xyz / clip.w;
   const float2 uv = map.xy * 0.5 + 0.5;
+  const float size = shadow.parameters.z;
+  // Texel i's centre is at i. How the point's texel and its depth in MMD
+  // units change from pixel to pixel, taken while every pixel of the quad
+  // is still here.
+  const float2 at = uv * size - 0.5;
+  const float depth = map.z * shadow.parameters.y;
+  const float3 across_x = ddx(float3(at, depth));
+  const float3 across_y = ddy(float3(at, depth));
   if (any(uv < 0.0) || any(uv > 1.0)) {
     return 1.0;
   }
-  const float size = shadow.parameters.z;
-  const int2 texel = int2(min(uv * size, float2(size - 1.0)));
-  const float first = mmd_shadow_map.Load(int3(texel, 0));
-  const float behind = max(map.z - first, 0.0) * shadow.parameters.y;
-  return 1.0 - saturate(behind * kShadowSharpness - kShadowStart);
+  // A surface sloping from the light differs in depth from texel to texel
+  // by its slope, more on a coarse triangle than its smooth normal says.
+  const float slope = min(sqrt(saturate(1.0 - lambert * lambert)) /
+      max(lambert, 0.05), kShadowSlopeLimit);
+  const float allowance = shadow.texel.y * kShadowSlopeTexels * slope;
+  const float radius = kShadowRadiusTexels;
+  // The point's own plane across the map, in MMD units per texel, so a tap
+  // away from it compares the depth its surface has there.
+  const float determinant = across_x.x * across_y.y - across_y.x * across_x.y;
+  float2 plane = float2(0.0);
+  if (abs(determinant) > 1e-8) {
+    plane = float2(across_x.z * across_y.y - across_y.z * across_x.y,
+                across_y.z * across_x.x - across_x.z * across_y.x) /
+            determinant;
+    const float limit = shadow.texel.y * kShadowSlopeLimit;
+    plane *= min(1.0, limit / max(length(plane), 1e-12));
+  }
+  float light = 0.0;
+  [unroll] for (int i = 0; i < kShadowTaps; ++i) {
+    // Vogel's spiral: taps spread evenly over the disc.
+    const float angle = float(i) * 2.39996323;
+    const float2 apart = radius * sqrt((float(i) + 0.5) / float(kShadowTaps)) *
+                         float2(cos(angle), sin(angle));
+    const float2 tap = at + apart;
+    const float2 base = floor(tap);
+    const float2 f = tap - base;
+    // The four texels around the tap: w its own, z the next across, x the
+    // next down, y both.
+    const float4 seen = mmd_shadow_map.Gather(samplers[kClampSampler],
+        (base + 1.0) / size);
+    const float4 behind = max(depth + dot(plane, apart) -
+                                  seen * shadow.parameters.y - allowance,
+        0.0);
+    const float4 lit = 1.0 - saturate(behind * kShadowSharpness - kShadowStart);
+    light += lerp(lerp(lit.w, lit.z, f.x), lerp(lit.x, lit.y, f.x), f.y);
+  }
+  return light / float(kShadowTaps);
 }
 
 // MMD's shading, as MikuMikuEffect's full.fx reproduces MMD's own, under
@@ -241,7 +306,7 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   const float3 specular = highlight * material.specular.rgb * light;
   if (material.modes.z != 0 && mmd_shadow[0].parameters.x != 0.0) {
     const float lit = min(saturate(lambert * kShadowToon),
-        SelfShadowLight(view_position));
+        SelfShadowLight(view_position, normal, lambert));
     color.rgb = lerp(color.rgb * toon_far.rgb, color.rgb + specular, lit);
   } else {
     color *= toon_texel;
