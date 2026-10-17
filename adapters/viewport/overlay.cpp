@@ -557,6 +557,9 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
     controls.mmd_self_shadow = frame.mmd_self_shadow;
     controls.mmd_self_shadow_changed =
         ImGui::Checkbox("MMD self-shadow", &controls.mmd_self_shadow);
+    controls.mmd_morph_tints = frame.mmd_morph_tints;
+    controls.mmd_morph_tints_changed =
+        ImGui::Checkbox("MMD morph tints", &controls.mmd_morph_tints);
     controls.lighting = frame.lighting;
     if (ImGui::CollapsingHeader("Lighting and material")) {
       ImGui::Text("%zu scene lights (up to 32 direct)", frame.lights);

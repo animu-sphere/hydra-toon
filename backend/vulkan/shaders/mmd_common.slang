@@ -51,14 +51,14 @@ static const uint kClampSampler = 4;
 [[vk::binding(4, 0)]] StructuredBuffer<MmdParameters> mmd_materials;
 
 // Must match vulkan_internal::MmdShadowParameters: where MMD's self-shadow
-// map was drawn from this frame.
+// map was drawn from this frame, and whether material morphs' tints draw.
 struct MmdShadowParameters {
   // The map's clip space, Vulkan's, from view space: x and y in [-1, 1]
   // across the map, z its depth in [0, 1] from the light.
   float4x4 clip_from_view;
   // x 1 when the map was drawn this frame and 0 when MMD's self-shadow is
   // off; y MMD units per unit of the map's depth; z the map's size in
-  // texels; w unused.
+  // texels; w 1 when material morphs' tints draw, 0 as MMD draws none.
   float4 parameters;
 };
 
@@ -133,7 +133,9 @@ float3 SrgbToLinear(float3 value) {
 // A texel as MMD's material morphs leave it, in full.fx's form: its colour
 // moves from what the texture adds when it contributes nothing, white or,
 // for a sphere that adds, black, toward texel x multiply + add, by the sum
-// of the two alphas; its alpha is kept (material policy MAT-Q6).
+// of the two alphas; its alpha is kept. MMD itself draws no tint, so this
+// applies only when a host asks for full.fx's tints (material policy
+// MAT-Q6).
 float4 TintTexel(float4 texel, float4 tint[2], float nothing) {
   const float3 tinted = texel.rgb * tint[0].rgb + tint[1].rgb;
   return float4(lerp(float3(nothing), tinted, tint[0].a + tint[1].a),
@@ -199,14 +201,15 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
       samplers[kClampSampler], float2(0.0, 1.0), 0.0);
   // Material morphs tint only a texture the material has: entry 0 is the
   // white that stands in for none.
-  if (material.textures.x != 0) {
+  const bool tints = mmd_shadow[0].parameters.w != 0.0;
+  if (tints && material.textures.x != 0) {
     base_texel = TintTexel(base_texel, material.texture_tint, 1.0);
   }
-  if (sphere != kSphereNone) {
+  if (tints && sphere != kSphereNone) {
     sphere_texel = TintTexel(sphere_texel, material.sphere_tint,
         sphere == kSphereAdd ? 0.0 : 1.0);
   }
-  if (material.modes.x != 0) {
+  if (tints && material.modes.x != 0) {
     toon_texel = TintTexel(toon_texel, material.toon_tint, 1.0);
     toon_far = TintTexel(toon_far, material.toon_tint, 1.0);
   }

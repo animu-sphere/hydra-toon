@@ -47,6 +47,11 @@ struct DrawList {
   // it shade by it (material policy §10). A per-frame value, like
   // `outlines`.
   bool mmd_self_shadow = true;
+  // Whether MMD materials' texture, sphere and toon tints, which material
+  // morphs set, draw as MikuMikuEffect's full.fx draws them. Off, as MMD
+  // itself draws none (material policy MAT-Q6); the tints stay in the
+  // material slots either way. A per-frame value, like `outlines`.
+  bool mmd_morph_tints = false;
   std::vector<MeshSnapshot> draws;
   // Every material of the snapshot, ordered by id, so a consumer keeps one
   // parameter slot per material whether or not a draw binds it this frame.

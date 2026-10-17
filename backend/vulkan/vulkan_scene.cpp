@@ -2408,6 +2408,7 @@ bool ShadowMap::Update(const DrawList& draws, const MeshCache& meshes,
       active_ = true;
     }
   }
+  parameters.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
   std::memcpy(buffer_.mapped, &parameters, sizeof(parameters));
   return FlushIfNeeded(device_, buffer_, detail);
 }

@@ -241,7 +241,8 @@ TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
     ((msaaSamples, "toon:msaaSamples"))
     ((metersPerUnit, "toon:metersPerUnit"))
     ((timeSeconds, "toon:timeSeconds"))
-    ((mmdSelfShadow, "toon:mmdSelfShadow")));
+    ((mmdSelfShadow, "toon:mmdSelfShadow"))
+    ((mmdMorphTints, "toon:mmdMorphTints")));
 
 constexpr int kDefaultSamples = static_cast<int>(Toon::RenderOptions{}.samples);
 
@@ -274,6 +275,15 @@ bool RequestedMmdSelfShadow(const HdRenderDelegate& delegate) {
   const VtValue value = VtValue::Cast<bool>(
       delegate.GetRenderSetting(SettingTokens->mmdSelfShadow));
   return !value.IsHolding<bool>() || value.UncheckedGet<bool>();
+}
+
+// Whether `toon:mmdMorphTints` draws MMD material morphs' texture, sphere
+// and toon tints, as MikuMikuEffect's full.fx does: off unless a host sets
+// it true, as MMD itself draws none (material policy MAT-Q6).
+bool RequestedMmdMorphTints(const HdRenderDelegate& delegate) {
+  const VtValue value = VtValue::Cast<bool>(
+      delegate.GetRenderSetting(SettingTokens->mmdMorphTints));
+  return value.IsHolding<bool>() && value.UncheckedGet<bool>();
 }
 
 double RequestedTimeSeconds(const HdRenderDelegate& delegate) {
@@ -571,7 +581,7 @@ public:
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
       std::uint32_t samples, float meters_per_unit, double time_seconds,
-      bool mmd_self_shadow) {
+      bool mmd_self_shadow, bool mmd_morph_tints) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
         pass_state->GetAovBindings();
@@ -599,6 +609,7 @@ public:
     world_.Commit(snapshot_);
     Toon::ExtractDrawList(snapshot_, draws_);
     draws_.mmd_self_shadow = mmd_self_shadow;
+    draws_.mmd_morph_tints = mmd_morph_tints;
     std::string error;
     if (!renderer_->Render(draws_, width, height, color_, depth_, error)) {
       TF_RUNTIME_ERROR("Toon Hydra frame failed: %s", error.c_str());
@@ -1652,7 +1663,7 @@ private:
     const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
     state_->Render(render_pass_state, RequestedSamples(delegate),
         RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate),
-        RequestedMmdSelfShadow(delegate));
+        RequestedMmdSelfShadow(delegate), RequestedMmdMorphTints(delegate));
   }
 
   std::shared_ptr<HdToonAdapterState> state_;
@@ -2007,7 +2018,8 @@ HdToonRenderDelegate::GetRenderSettingDescriptors() const {
           VtValue(1.0F)},
       {"Evaluation time in seconds", SettingTokens->timeSeconds,
           VtValue(0.0F)},
-      {"MMD self-shadow", SettingTokens->mmdSelfShadow, VtValue(true)}};
+      {"MMD self-shadow", SettingTokens->mmdSelfShadow, VtValue(true)},
+      {"MMD morph tints", SettingTokens->mmdMorphTints, VtValue(false)}};
 }
 
 HdToonRenderDelegate::~HdToonRenderDelegate() = default;

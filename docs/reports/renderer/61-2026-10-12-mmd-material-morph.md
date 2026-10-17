@@ -1,5 +1,7 @@
 # MMD's material morphs: the texture, sphere and toon tints draw
 
+> Followed by [report 62](62-2026-10-17-mat-q6-morph-tints.md): MMD's frames of these morphs show MMD draws no tint, so MAT-Q6 is resolved and the tints draw only when a host asks for `full.fx`'s reading.
+
 - Date: 2026-10-12
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Tooling: `ost 0.23.14`; the canonical runtime

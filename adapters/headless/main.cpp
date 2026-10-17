@@ -2402,16 +2402,18 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
 }
 
 // MMD's material morph tints (material policy §11, MAT-Q6), on a white
-// MMD material, diffuse 0 and ambient 1, under one light toward the camera.
-// A base texel of 128, which reads 55, multiplied by half reads 13 and with
+// MMD material, diffuse 0 and ambient 1, under one light toward the camera,
+// with full.fx's tints asked for. A base texel of 128, which reads 55,
+// multiplied by half reads 13 and with
 // 0.25 added 134; with the multiply's alpha at half too, it moves only
 // halfway from white, to 89; with every multiply 0 the texture contributes
 // nothing and the pixel is white, while a material without a base texture
 // stays white under any tint. A sphere tint of 0 takes away an add sphere's
 // 64, which read 134 over an ambient of 0.5, and a multiply sphere's alike,
 // to 55. Lit from behind, toon01's far side, 156, multiplied by half reads
-// 34 and by 0 is white. Last, a tint edit rewrites one slot and nothing
-// else.
+// 34 and by 0 is white. Without the switch, as MMD draws, none of those
+// tints changes the pixel, and turning it off or on rewrites no slot.
+// Last, a tint edit rewrites one slot and nothing else.
 Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
   const std::string id = "renderer.material.mmd_morph";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
@@ -2450,9 +2452,10 @@ Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
   Toon::ColorProduct color;
   Toon::DepthProduct depth;
   std::array<std::uint8_t, 4> pixel{};
-  const auto render = [&]() {
-    if (!renderer->Render(Toon::ExtractDrawList(world.Commit()), 64, 64,
-            color, depth, detail)) {
+  const auto render = [&](bool tints = true) {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.mmd_morph_tints = tints;
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
       return false;
     }
     pixel = CenterPixel(color);
@@ -2480,6 +2483,11 @@ Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
   world.SetMaterial(material, mmd);
   if (!render() || !grey(13)) {
     return {id, "fail", "a texture tint must multiply the base texel"};
+  }
+  if (!render(false) || !grey(55)) {
+    return {id, "fail",
+        "without the switch, as MMD draws, a texture tint must change "
+        "nothing"};
   }
   mmd.mmd.texture_tint =
       tint({1.0F, 1.0F, 1.0F, 1.0F}, {0.25F, 0.25F, 0.25F, 0.0F});
@@ -2524,6 +2532,11 @@ Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
   if (!render() || !grey(55)) {
     return {id, "fail", "a sphere tint of 0 must take an add sphere away"};
   }
+  if (!render(false) || !grey(134)) {
+    return {id, "fail",
+        "without the switch, as MMD draws, a sphere tint must change "
+        "nothing"};
+  }
   mmd.mmd.sphere_mode = Toon::ToonSphereMode::Multiply;
   world.SetMaterial(material, mmd);
   if (!render() || !grey(55)) {
@@ -2547,6 +2560,18 @@ Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
   world.SetMaterial(material, mmd);
   if (!render() || !grey(34)) {
     return {id, "fail", "a toon tint must multiply the ramp's texel"};
+  }
+  const Toon::OffscreenStatistics switched = renderer->statistics();
+  if (!render(false) || !grey(156)) {
+    return {id, "fail",
+        "without the switch, as MMD draws, a toon tint must change nothing"};
+  }
+  if (!render() || !grey(34)) {
+    return {id, "fail", "the switch on again must tint the ramp's texel"};
+  }
+  if (renderer->statistics().material_writes != switched.material_writes) {
+    return {id, "fail",
+        "turning the tints off or on must rewrite no material slot"};
   }
 
   const Toon::OffscreenStatistics before = renderer->statistics();
