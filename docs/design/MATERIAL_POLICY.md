@@ -170,6 +170,15 @@ Normalizing a new material writes a slot; it never compiles a shader. A
 feature a material does not use is a zero or a disabled flag in its slot, not
 a pipeline variant.
 
+PMX 2.1's three material flags, `vertexColor`, `drawPoints` and
+`drawLines`, are read into the MMD block and not drawn. A PMX 2.0 source
+keeps their bits without 2.1's meaning
+([`usd-mmd-plugins` material policy](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md)),
+every local model is PMX 2.0, and MikuMikuDance v9.32 reads no PMX 2.1, so
+no MMD frame shows what they draw; drawing points or lines would also
+change a draw's primitives, not a value in its slot. They are left for a
+later milestone ([later](../roadmap/later.md#mmd-after-v040)).
+
 ## 8. Values that change at run time
 
 UV animation takes the host's evaluation time in seconds as a frame value,

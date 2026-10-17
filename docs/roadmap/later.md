@@ -77,6 +77,12 @@ stage or checked against MMD's frames yet:
   and MMD's shadow moves with the distance
   ([renderer report 66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md));
   the stage carries neither.
+- **PMX 2.1's material flags**, `vertexColor`, `drawPoints` and
+  `drawLines`. v0.4.0 reads them into the MMD block and draws nothing from
+  them ([material policy §7](../design/MATERIAL_POLICY.md#7-pipelines-and-parameter-buffers)):
+  every local model is PMX 2.0, MikuMikuDance v9.32 reads no PMX 2.1, and
+  points and lines change a draw's primitives. Drawing them needs a PMX 2.1
+  model and a renderer that draws 2.1 to compare with.
 
 ## After v0.6.0
 
