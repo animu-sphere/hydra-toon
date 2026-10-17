@@ -1,5 +1,7 @@
 # Evaluated MMD material morphs draw as MMD draws them
 
+> Followed by [report 65](65-2026-10-17-mmd-vertex-morph-evidence.md): MMD's frames of eight vertex morphs on two models, compared with hdToon's, give the vertex-morph evidence §7 says v0.4.0 still owed.
+
 - Date: 2026-10-17
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Tooling: `ost 0.23.14`; the canonical runtime
