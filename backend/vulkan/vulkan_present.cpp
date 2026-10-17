@@ -89,6 +89,7 @@ constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 enum Timestamp : std::uint32_t {
   kFrameStart,
   kUploadsEnd,
+  kShadowEnd,
   kImageReady,
   // MeshCache::Record writes this one and the two after it.
   kUnlitEnd,
@@ -806,8 +807,9 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   WriteTimestamp(kFrameStart);
   textures_.RecordUploads(command_);
   overlay_.RecordUploads(command_);
-  shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
   WriteTimestamp(kUploadsEnd);
+  shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
+  WriteTimestamp(kShadowEnd);
   // The colour transitions wait at the stage the acquire semaphore gates;
   // a resolve into the swapchain image writes it at that stage too.
   const bool multisampled = color_samples_.image != VK_NULL_HANDLE;
@@ -1074,7 +1076,8 @@ void VulkanPresentSession::ReadTimestamps() {
   };
   PresentGpuTimes& gpu = statistics_.gpu;
   gpu.uploads = between(kFrameStart, kUploadsEnd);
-  gpu.image_wait = between(kUploadsEnd, kImageReady);
+  gpu.shadow = between(kUploadsEnd, kShadowEnd);
+  gpu.image_wait = between(kShadowEnd, kImageReady);
   gpu.unlit = between(kImageReady, kUnlitEnd);
   gpu.outline = between(kUnlitEnd, kOutlineEnd);
   gpu.opaque = between(kOutlineEnd, kOpaqueEnd);

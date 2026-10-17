@@ -211,10 +211,32 @@ struct MmdShadowParameters {
   // map's depth; z the map's size in texels; w 1 when material morphs'
   // tints draw (DrawList::mmd_morph_tints).
   float parameters[4];
+  // x how far a receiver's point moves along its normal before the map
+  // is read, at most, in view-space units: three of the map's texels; y a
+  // texel's width in MMD units.
+  float texel[4];
 };
-static_assert(sizeof(MmdShadowParameters) == 80);
+static_assert(sizeof(MmdShadowParameters) == 96);
 
-// MMD's self-shadow map: one square depth image, sampled texel by texel.
+// Where MMD's self-shadow map must look, in the light's frame, with z
+// toward the light (MeshCache::SelfShadowBounds).
+struct SelfShadowExtent {
+  // Around every MMD draw that casts or receives it, as
+  // OutlineBounds::SceneBounds bounds each.
+  std::array<double, 3> low{};
+  std::array<double, 3> high{};
+  // Whether any of them receives it.
+  bool receivers = false;
+  // Around the parts of those that receive it that the camera's frustum
+  // reaches (OutlineBounds::ScenePieces), each cut to the frustum; `seen`
+  // is false when it reaches none.
+  std::array<double, 3> seen_low{};
+  std::array<double, 3> seen_high{};
+  bool seen = false;
+};
+
+// MMD's self-shadow map: one square depth image. Its texels go where the
+// camera sees a receiver, and a receiver reads them filtered.
 constexpr std::uint32_t kShadowMapSize = 2048;
 constexpr VkFormat kShadowFormat = VK_FORMAT_D32_SFLOAT;
 
@@ -640,13 +662,11 @@ public:
     return pose_writes_;
   }
 
-  // The box, in `light_from_world`'s space, around every MMD draw whose
-  // material casts or receives MMD's self-shadow, as its pose places it
-  // (OutlineBounds::SceneBounds); false when there is none. `receivers`
-  // says whether any of them receives it.
+  // Where MMD's self-shadow map must look, in `light_from_world`'s space,
+  // as the draws' poses place them; false when no MMD draw casts or
+  // receives it.
   bool SelfShadowBounds(const DrawList& draws, const MaterialCache& materials,
-      const Matrix4& light_from_world, std::array<double, 3>& low,
-      std::array<double, 3>& high, bool& receivers) const;
+      const Matrix4& light_from_world, SelfShadowExtent& extent) const;
   // Draw every MMD draw whose material casts MMD's self-shadow through
   // mmd_shadow, inside rendering into the map, and return how many.
   std::uint32_t RecordSelfShadow(VkCommandBuffer command,
@@ -744,10 +764,11 @@ private:
 // MMD's self-shadow (material policy §10): a depth map of every MMD draw
 // whose material casts it, drawn each frame from the scene's first direct
 // light when that light is directional, before the scene, and read by the
-// MMD surfaces whose materials receive it. The map covers the box around
-// every MMD draw that casts or receives it, seen along the light, so it
-// does not move with the camera. Its parameters, and the map, sit in the
-// material descriptor set, at bindings 6 and 5.
+// MMD surfaces whose materials receive it. Along the light it covers every
+// MMD draw that casts or receives it; across the light, the parts of the
+// receivers the camera sees, so it follows the camera as MMD's own does.
+// Its parameters, and the map, sit in the material descriptor set, at
+// bindings 6 and 5.
 class ShadowMap {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,

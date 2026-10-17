@@ -94,6 +94,7 @@ private:
   Series wait_;
   Series submit_;
   Series gpu_uploads_;
+  Series gpu_shadow_;
   Series gpu_image_wait_;
   Series gpu_unlit_;
   Series gpu_outline_;

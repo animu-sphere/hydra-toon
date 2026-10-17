@@ -10,6 +10,24 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The project's version lives in `VERSION`, one line `X.Y.Z`, which
+  `CMakeLists.txt` reads as `project(Toon VERSION)` and reconfigures on
+  when it changes; `scripts/release_version.py` requires
+  `openstrata.toml`'s `[project].version` to equal it.
+
+- MMD's self-shadow map follows the camera, as MMD's own does: across the
+  light it spans what the camera sees of the receivers, their joints'
+  posed boxes cut to the frustum (`OutlineBounds::ScenePieces`), in steps
+  that hold the edges still as the camera moves. A receiver reads a disc
+  six texels in radius, 32 bilinear taps on its own plane, after moving
+  along its normal and allowing for its slope, so its edges no longer
+  step or streak close up and are about as soft as MMD's.
+  `MmdShadowParameters` is 96 bytes. The present session's GPU
+  times and the viewport's telemetry have a `shadow` part
+  (`PresentGpuTimes::shadow`) for the map's pass, which `uploads` no
+  longer includes
+  ([renderer report 63](docs/reports/renderer/63-2026-10-17-self-shadow-quality.md)).
+
 - MMD material morphs' texture, sphere and toon tints no longer draw by
   default: MMD v9.32's frames of two models' tinted morphs show MMD
   draws none (MAT-Q6, resolved). `DrawList::mmd_morph_tints`, the render

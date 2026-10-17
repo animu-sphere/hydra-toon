@@ -72,8 +72,8 @@ void Series::CopyInOrder(std::vector<float>& values) const {
 FrameTelemetry::FrameTelemetry()
     : interval_(kWindow), hydra_(kWindow), extract_(kWindow),
       overlay_(kWindow), wait_(kWindow), submit_(kWindow),
-      gpu_uploads_(kWindow), gpu_image_wait_(kWindow), gpu_unlit_(kWindow),
-      gpu_outline_(kWindow), gpu_opaque_(kWindow),
+      gpu_uploads_(kWindow), gpu_shadow_(kWindow), gpu_image_wait_(kWindow),
+      gpu_unlit_(kWindow), gpu_outline_(kWindow), gpu_opaque_(kWindow),
       gpu_transparent_(kWindow), gpu_resolve_(kWindow),
       gpu_capture_(kWindow), gpu_overlay_(kWindow), gpu_work_(kWindow),
       gpu_frame_(kWindow) {
@@ -133,6 +133,7 @@ void FrameTelemetry::PushCpu(const CpuSample& sample) {
 
 void FrameTelemetry::PushGpu(const PresentGpuTimes& times) {
   gpu_uploads_.Push(times.uploads);
+  gpu_shadow_.Push(times.shadow);
   gpu_image_wait_.Push(times.image_wait);
   gpu_unlit_.Push(times.unlit);
   gpu_outline_.Push(times.outline);
@@ -152,7 +153,8 @@ std::vector<FrameTelemetry::Named> FrameTelemetry::Cpu() const {
 }
 
 std::vector<FrameTelemetry::Named> FrameTelemetry::Gpu() const {
-  return {{"uploads", &gpu_uploads_}, {"image_wait", &gpu_image_wait_},
+  return {{"uploads", &gpu_uploads_}, {"shadow", &gpu_shadow_},
+      {"image_wait", &gpu_image_wait_},
       {"unlit", &gpu_unlit_}, {"outline", &gpu_outline_},
       {"opaque", &gpu_opaque_}, {"transparent", &gpu_transparent_},
       {"resolve", &gpu_resolve_}, {"capture", &gpu_capture_},

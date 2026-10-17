@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <random>
+#include <vector>
 
 namespace {
 bool Check(bool condition, const char* message) {
@@ -74,6 +75,11 @@ int main() {
                  near(low[2], 3) && near(high[2], 3),
           "scene bounds must follow the mesh's transform"))
     return 1;
+  std::vector<Toon::OutlineBounds::SceneBox> pieces;
+  if (!Check(bounds.ScenePieces(mesh, pieces) && pieces.size() == 1 &&
+                 pieces[0].low == low && pieces[0].high == high,
+          "an unskinned mesh's one piece must be its scene bounds"))
+    return 1;
   mesh.transform = {};
 
   // Explicit finite/infinite perspective depth ranges. A hull reaching
@@ -141,6 +147,19 @@ int main() {
   mesh = world.Commit().meshes[0];
   bounds.Update(mesh);
   if (!Check(!outside(), "skeleton-space motion must restore a visible hull"))
+    return 1;
+  // Each joint's box moves with its joint: joint 0 moves the two lower
+  // points, joint 1 all three. The boxes keep a margin for the shader's
+  // float roundoff.
+  const auto close = [](double value, double expected) {
+    return std::abs(value - expected) < 1e-3;
+  };
+  if (!Check(bounds.ScenePieces(mesh, pieces) && pieces.size() == 2 &&
+                 close(pieces[0].low[0], -0.4) && close(pieces[0].high[0], -0.2) &&
+                 close(pieces[0].low[1], -0.1) && close(pieces[0].high[1], -0.1) &&
+                 close(pieces[1].low[0], 0.6) && close(pieces[1].high[0], 0.8) &&
+                 close(pieces[1].low[1], -0.1) && close(pieces[1].high[1], 0.1),
+          "a skinned mesh's pieces must be its joints' posed boxes"))
     return 1;
   pose.joints.clear();
   world.SetMeshSkinPose(id, pose);

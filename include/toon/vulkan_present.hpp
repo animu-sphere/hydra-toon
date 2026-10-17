@@ -38,6 +38,9 @@ enum class PresentSetupStatus {
 struct PresentGpuTimes {
   // Textures copied and mipmapped before the scene.
   double uploads = 0.0;
+  // MMD's self-shadow map drawn, before the scene; 0 in a frame without one
+  // (material policy §10).
+  double shadow = 0.0;
   // Waiting for the swapchain image the frame draws into to be released by
   // the presentation engine: long under vsync, not the renderer's work.
   double image_wait = 0.0;

@@ -3,8 +3,8 @@
 # that pushes the Formation-facing packages to GHCR, and a DRAFT GitHub
 # release.
 #
-# Pushing a tag `vX.Y.Z` -- which must equal the version openstrata.toml and
-# CMakeLists.txt both declare, with a finalized `## [X.Y.Z] - YYYY-MM-DD`
+# Pushing a tag `vX.Y.Z` -- which must equal the version VERSION and
+# openstrata.toml both declare, with a finalized `## [X.Y.Z] - YYYY-MM-DD`
 # changelog section -- builds the `hydra` intent on the canonical CY2026
 # `lookdev` runtime, tests and validates it, packages it twice to prove the
 # archive digest is reproducible, pushes the package to

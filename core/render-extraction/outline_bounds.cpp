@@ -188,6 +188,41 @@ bool OutlineBounds::SceneBounds(const MeshSnapshot& mesh,
   return true;
 }
 
+bool OutlineBounds::ScenePieces(const MeshSnapshot& mesh,
+    std::vector<SceneBox>& boxes) const {
+  boxes.clear();
+  if (!IsSkinned(mesh)) {
+    SceneBox box;
+    if (!SceneBounds(mesh, box.low, box.high))
+      return false;
+    boxes.push_back(box);
+    return true;
+  }
+  if (!rest_.valid || !valid_skin_ || !Affine(mesh.transform) ||
+      !Affine(mesh.skeleton_to_mesh))
+    return false;
+  const auto scene_from_skeleton = Multiply(mesh.transform, mesh.skeleton_to_mesh);
+  for (std::size_t joint = 0; joint < joints_.size(); ++joint) {
+    if (!joints_[joint].valid)
+      continue;
+    if (!Affine((*mesh.joints)[joint])) {
+      boxes.clear();
+      return false;
+    }
+    const auto moved = Transform(
+        TransformProduct(joints_[joint], (*mesh.joints)[joint], mesh.geom_bind),
+        scene_from_skeleton);
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+      if (!std::isfinite(moved.low[axis]) || !std::isfinite(moved.high[axis])) {
+        boxes.clear();
+        return false;
+      }
+    }
+    boxes.push_back({moved.low, moved.high});
+  }
+  return !boxes.empty();
+}
+
 bool OutlineBounds::ViewBounds(const MeshSnapshot& mesh, const ToonView& view,
     float width, ToonOutlineWidthMode mode, float meters_per_unit,
     Box& bounds, double& radius) const {

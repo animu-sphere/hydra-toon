@@ -88,6 +88,17 @@ public:
   // Unlike OutsideView it bounds a morphed mesh, without its offsets.
   [[nodiscard]] bool SceneBounds(const MeshSnapshot& mesh,
       std::array<double, 3>& low, std::array<double, 3>& high) const;
+  // Where the mesh's parts lie as its pose and transform place them, in
+  // the scene's space: each joint's box around the points it moves, or the
+  // mesh's one box when it is not skinned. A skinned point lies among its
+  // joints' boxes, not always within one, so they place its parts rather
+  // than bound it. False, with no boxes, when they cannot be placed.
+  struct SceneBox {
+    std::array<double, 3> low{};
+    std::array<double, 3> high{};
+  };
+  [[nodiscard]] bool ScenePieces(const MeshSnapshot& mesh,
+      std::vector<SceneBox>& boxes) const;
 
 private:
   friend class OutlineOcclusion;

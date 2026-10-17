@@ -201,7 +201,7 @@ structural.
 | MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | resolved 2026-10-11: `hydra-toon` generates its own ten ramps, under its own licence, from the colours MMD's `toon01`–`toon10` show, and maps the index to them; no MMD image is copied or shipped ([report 56](../reports/renderer/56-2026-10-11-mmd-surface.md)) | v0.4.0 |
 | MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | resolved 2026-10-11: MMD computes its terms on the values as stored and writes them undecoded and unencoded; lowering its light colour scales a model's pixels by the factor its lighting term computes on stored values, flat across brightness ([report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md)). The MMD path samples its textures without sRGB decoding, computes MMD's terms on them and the factors as authored, and converts the result from sRGB to linear once, so the host's encoding writes MMD's values. Blending stays in the linear target, so a partly transparent material approximates MMD's | v0.4.0 |
 | MAT-Q4 | How wide MMD draws an edge of a given `edgeSize` × `edgeScale`: MMD states no unit, and on its own frames an edge of size 0.4 is 0.6 pixels wide from 45 MMD units and 1.57 from 9 at a 30° field of view and 1,080 pixels, neither a constant length nor a constant number of pixels ([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)) | resolved 2026-10-12: a share of the target's height, `edgeSize` × `edgeScale` × (0.00108 + 0.0203 / the vertex's view depth in MMD units). On MMD's frames a 15° field of view leaves an edge as many pixels wide as 30° does, a 2,160-pixel frame doubles it, and from 9, 18 and 30 MMD units it falls as a constant share plus one over the depth; the constants make hdToon's edge MMD's width at those cameras ([report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md)) | v0.4.0 |
-| MAT-Q5 | What MMD's self-shadow map covers and how far behind its depth a point falls into shadow. `full.fx` compares in MMD's own map depth, 1,500 per unit and shadowed from 0.3, but MMD states neither that depth's range nor how its map follows its camera and its self-shadow distance, which the stage does not carry (§10) | provisional 2026-10-12: a 2,048-texel map fitted along the light to every MMD draw that casts or receives the self-shadow, and the comparison in MMD units, 15 per unit and shadowed from 0.3. On one model's MMD capture with self-shadow, hdToon's frame is within 4 levels on 73% of the pixels, as near as its frame without is to MMD's without, and 5 or 50 per unit move the mean difference by under 0.11 ([report 60](../reports/renderer/60-2026-10-12-mmd-self-shadow.md)). Settled when captures of a contact or grazing shadow tell the comparison apart | v0.4.0 |
+| MAT-Q5 | What MMD's self-shadow map covers and how far behind its depth a point falls into shadow. `full.fx` compares in MMD's own map depth, 1,500 per unit and shadowed from 0.3, but MMD states neither that depth's range nor how its map follows its camera and its self-shadow distance, which the stage does not carry (§10) | provisional 2026-10-12: a 2,048-texel map fitted along the light to every MMD draw that casts or receives the self-shadow, and across it, since 2026-10-17, to what the camera sees of the receivers ([report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md)), and the comparison in MMD units, 15 per unit and shadowed from 0.3. On one model's MMD capture with self-shadow, hdToon's frame is within 4 levels on 73% of the pixels, as near as its frame without is to MMD's without, and 5 or 50 per unit move the mean difference by under 0.11 ([report 60](../reports/renderer/60-2026-10-12-mmd-self-shadow.md)). Settled when captures of a contact or grazing shadow tell the comparison apart | v0.4.0 |
 | MAT-Q6 | How MMD applies a material morph's texture, sphere and toon tints to a texel. PMX states a multiply and an add for each but not how they combine, and MikuMikuDance does not say (§11) | resolved 2026-10-17: MMD does not apply them. On MMD v9.32's frames of two local models, a morph that only tints (`spa消える`, `toon白くなる`, `toon深まる`, `spa消`) leaves the frame as it was at full and half weight, and `全灰モード` and `全黒モード` change only the colours and edge they also set ([report 62](../reports/renderer/62-2026-10-17-mat-q6-morph-tints.md)). So the MMD path leaves the tints out; a host may ask for MikuMikuEffect's `full.fx` reading, which [report 61](../reports/renderer/61-2026-10-12-mmd-material-morph.md) implements and no MikuMikuEffect frame has checked (§11) | v0.4.0 |
 
 ## 10. MMD's self-shadow
@@ -219,10 +219,16 @@ setting `toon:mmdSelfShadow`).
   is no map and nothing is shadowed. Every MMD draw whose material casts
   draws into it, both faces, no texel's alpha cutting it away, as `full.fx`
   draws its map.
-- **What it covers.** The map looks along the light at the box around every
-  MMD draw that casts or receives, so it does not move with the camera.
-  MMD's own map follows its camera and its self-shadow distance, which the
-  stage does not carry (MAT-Q5).
+- **What it covers.** Along the light, the map spans the box around every
+  MMD draw that casts or receives. Across it, the map follows the camera,
+  as MMD's own does: it spans what the camera sees of the receivers, their
+  joints' posed boxes (`OutlineBounds::ScenePieces`) that the frustum
+  reaches, each cut to the frustum, and no more of the box, so a close-up
+  spends its texels on what it shows. The span changes in steps of an
+  eighth of an octave and moves in whole texels, so the edges hold still
+  as the camera moves; a frame whose camera sees no receiver spans the
+  whole box. MMD's own map also follows its self-shadow distance, which
+  the stage does not carry (MAT-Q5).
 - **A receiver.** A material that receives is shaded as `full.fx`'s
   self-shadow pass shades it: its colour, the lighting term with its
   textures and sphere, is not toned by the ramp, and where the light is
@@ -234,6 +240,20 @@ setting `toon:mmdSelfShadow`).
 - **How far behind.** A point falls into shadow from 0.02 MMD units behind
   what the map saw first and wholly by 0.087, `full.fx`'s form on a depth in
   MMD units (MAT-Q5).
+- **Its edges.** The shadow may be cleaner than MMD's, as the project
+  decided on 2026-10-17, and its edge is as soft as MMD's, as it decided
+  the same day: what it reproduces is where MMD's shadow falls, how dark
+  it is and how soft its edge is, not the steps of its map. MMD's edge
+  widens as its camera draws back, as an edge a fixed number of its
+  camera-following map's texels wide does; this map follows the camera
+  too, so its edge is a fixed number of its own texels: a receiver reads
+  a disc six texels in radius, 32 taps each bilinear over four texels and
+  compared as above, which matched MMD's edges on a face, a bust and a
+  full body ([report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md)).
+  So that a surface sloping from the light does not shadow itself, the
+  point first moves along its normal by up to three texels, must lie
+  further behind by two texels for each unit of its slope, up to four,
+  and each tap compares the depth the point's own plane has there.
 
 `groundShadow`, MMD's shadow on its floor, is not drawn: a stage has no
 floor for it.
