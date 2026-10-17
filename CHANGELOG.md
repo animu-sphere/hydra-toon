@@ -27,6 +27,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
   (`PresentGpuTimes::shadow`) for the map's pass, which `uploads` no
   longer includes
   ([renderer report 63](docs/reports/renderer/63-2026-10-17-self-shadow-quality.md)).
+- A point falls into MMD's self-shadow from 0.12 MMD units behind what the
+  map saw first and wholly by 0.52, a sharpness of 2.5 per MMD unit where
+  it was 15, fitted to MMD's frames of contact and grazing shadows at its
+  default self-shadow distance; layers lying close over others are no
+  longer shadowed where MMD leaves them lit. MAT-Q5 is resolved
+  ([renderer report 66](docs/reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md)).
 
 - MMD material morphs' texture, sphere and toon tints no longer draw by
   default: MMD v9.32's frames of two models' tinted morphs show MMD

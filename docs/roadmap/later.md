@@ -67,6 +67,17 @@ differences and shader compiler differences. On Linux x86_64:
 Each measured configuration is a [report](../reports/) and a row of
 [supported configurations](../reference/SUPPORTED_CONFIGURATIONS.md).
 
+## MMD after v0.4.0
+
+What v0.4.0's MMD path leaves to a later milestone, none of it on the
+stage or checked against MMD's frames yet:
+
+- **MMD's self-shadow distance and mode 2** as a host setting. The
+  comparison and the map are fitted to mode 1 at MMD's default distance,
+  and MMD's shadow moves with the distance
+  ([renderer report 66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md));
+  the stage carries neither.
+
 ## After v0.6.0
 
 Candidates, none required before the milestones above are settled, and the
