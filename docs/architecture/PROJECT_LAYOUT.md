@@ -153,6 +153,20 @@ alongside influences and joints in descriptor set 1 (five vertex bindings).
 All scene shaders evaluate morph offsets before skinning in `skinning.slang`.
 The device capability probe requires ten storage-buffer bindings including
 the three models' parameter buffers, frame data and MMD shadow parameters.
+
+PreviewSurface's bounded USD shader-network reader stays in
+`adapters/hydra2/src/material.cpp`. It normalizes five `UsdUVTexture` inputs
+(diffuse, emissive, metallic, roughness, opacity), their channel and
+scale/bias/fallback, and a primvar reader with at most one `UsdTransform2d`
+into the PreviewSurface block of `ToonMaterial`. Base and emissive reuse
+the common texture references; metallic, roughness and opacity add three
+references to the adapter's role table. USD transforms are converted into
+the existing top-left image-space texture-reference convention. The Vulkan
+`PreviewParameters` slot is 528 bytes: three common float4 values followed
+by five 96-byte texture-input records. Primvar fallback coordinates occupy
+the UV rows' padding. The texture cache and fixed pipelines are shared with
+the existing models; no new target or material compiler is introduced.
+
 Offscreen and presentation statistics expose
 `morph_uploads` and `morph_weight_writes`; the viewport shows both in its
 upload panel. Rest/joint outline envelopes cannot certify a morphed hull,

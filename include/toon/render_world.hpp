@@ -341,6 +341,24 @@ struct ToonMaterial {
     bool enabled = false;
     float metallic = 0.0F;
     float roughness = 0.5F;
+    ToonTextureRef metallic_texture;
+    ToonTextureRef roughness_texture;
+    ToonTextureRef opacity_texture;
+    // UsdUVTexture result = sampled RGBA * scale + bias. Connected values
+    // replace the surface input, including when the image uses its fallback.
+    // Order: diffuse, emissive, metallic, roughness, opacity. Colour inputs
+    // use RGB; scalar inputs select channel 0-3. UV transforms are converted
+    // from USD's bottom-left space to ToonTextureRef's top-left space.
+    struct TextureInput {
+      bool connected = false;
+      Float2 uv_fallback;
+      std::uint32_t channel = 0;
+      Float4 scale{1, 1, 1, 1};
+      Float4 bias;
+      Float4 fallback{0, 0, 0, 1};
+      friend bool operator==(const TextureInput&, const TextureInput&) = default;
+    };
+    std::array<TextureInput, 5> inputs;
 
     friend bool operator==(const PreviewSurface&, const PreviewSurface&) = default;
   } preview;

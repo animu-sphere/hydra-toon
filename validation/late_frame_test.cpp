@@ -76,6 +76,9 @@ void State() {
   bad = latest; bad.materials[0].material.mtoon.rim_lift = std::numeric_limits<float>::quiet_NaN(); reject(bad);
   bad = latest; bad.materials[0].material.preview.roughness = std::numeric_limits<float>::quiet_NaN(); reject(bad);
   bad = latest; bad.materials[0].material.preview.metallic = std::numeric_limits<float>::infinity(); reject(bad);
+  bad = latest; bad.materials[0].material.preview.inputs[0].scale.x = std::numeric_limits<float>::quiet_NaN(); reject(bad);
+  bad = latest; bad.materials[0].material.preview.inputs[4].channel = 4; reject(bad);
+  bad = latest; bad.materials[0].material.preview.opacity_texture.texture = 10; reject(bad);
   bad = latest; bad.materials[0].material.preview.enabled = true; reject(bad);
   bad = latest; bad.meshes[0].color.y = std::numeric_limits<float>::infinity(); reject(bad);
   bad = latest; bad.lights.push_back({});

@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [69](69-2026-10-18-preview-surface-textures.md) | PreviewSurface texture inputs: real USD networks, channel selection, colour space, UV transforms and missing-image fallback; packed PBR, textured Mask/Blend and resource persistence on Vulkan at 1x/4x |
 | [68](68-2026-10-17-preview-surface-constants.md) | Constant-input PreviewSurface: real USD network traversal and time samples, GGX direct lighting, emission, Mask/Blend and material-slot persistence on Vulkan at 1x/4x |
 | [67](67-2026-10-17-v040-preparation.md) | v0.4.0 release gate, local: OpenStrata `core` 15/15, `hydra` 24/24 and `viewport-usd` 55/55 with every `ost validate` passed, plain CMake 15/15, and the `hydra` package built twice to the same digest |
 | [66](66-2026-10-17-mat-q5-shadow-depth.md) | MAT-Q5 resolved: on MMD's frames of a chin-and-neck contact, a light grazing the face and the neck, and report 63's four, a sharpness of 2.5 per MMD unit (shadowed from 0.12, wholly by 0.52) is nearest MMD's of 1–50, where 15 shadowed close-lying layers MMD leaves lit; grazing face 2.70 → 2.11, full body 5.17 → 4.97. MMD's self-shadow distance moves the answer and is not on the stage, so this is MMD's default |

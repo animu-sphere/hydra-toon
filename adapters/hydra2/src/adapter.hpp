@@ -85,7 +85,8 @@ struct HdToonTextureKey {
 // The roles a material samples a texture in: base colour, shade multiply,
 // outline width multiply, MatCap, rim multiply, emissive, normal,
 // shading shift and UV animation mask; then MMD's sphere and toon.
-constexpr std::size_t kHdToonTextureRoles = 11;
+// PreviewSurface reuses base/emissive, and adds metallic/roughness/opacity.
+constexpr std::size_t kHdToonTextureRoles = 14;
 
 // A material's texture references, one per role, in role order.
 std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(

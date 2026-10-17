@@ -70,6 +70,29 @@ differences and shader compiler differences. On Linux x86_64:
 Each measured configuration is a [report](../reports/) and a row of
 [supported configurations](../reference/SUPPORTED_CONFIGURATIONS.md).
 
+## glTF PBR through MaterialX
+
+No milestone is assigned yet. Support glTF metallic-roughness PBR materials
+through their imported MaterialX realization, including PBR materials mixed
+with MToon in a VRM avatar. PreviewSurface remains the ordinary USD fallback;
+glTF PBR fidelity is evaluated on the MaterialX path. MToon continues to read
+its canonical material inputs with selection priority, preserving its look.
+The format owner authors the realization; this repository consumes it rather
+than parsing glTF or VRM.
+
+Preserve base colour and textures, metallic and roughness, normals, emission
+including strength, and Opaque, Mask and Blend behaviour. Bound the supported
+MaterialX vocabulary around those avatar materials; this does not introduce
+general material-graph compilation or production PBR as a renderer goal.
+
+Use Seed-san's `backpack_metal`, `backpack_nm`, `backpack_plastic`,
+`anim_logo`, `wear_metal`, `green_emit` and `glass` as local reproduction
+cases: retain the backpack's texture, the logo's colour and green emission,
+and let glass reveal the surface behind it. Establish redistributable
+controlled fixtures and a local avatar comparison against a reference
+renderer, keeping restricted assets and captures out of the repository.
+These are outside v0.5.0's release condition.
+
 ## After v0.6.0
 
 Candidates, taken up as features and measurements require them; performance

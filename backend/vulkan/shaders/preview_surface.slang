@@ -4,12 +4,38 @@
 // outside this realization. All shading takes place in linear colour.
 #include "surface_common.slang"
 
+struct PreviewTextureParameters {
+  float4 uv_rows[2];
+  float4 scale;
+  float4 bias;
+  float4 fallback;
+  uint4 info;
+};
 struct PreviewParameters {
   float4 base_color;
   float4 emissive;
   float4 surface;
+  PreviewTextureParameters inputs[5];
 };
 [[vk::binding(7, 0)]] StructuredBuffer<PreviewParameters> materials;
+
+float4 PreviewSample(PreviewTextureParameters input, float2 st) {
+  float4 texel = input.fallback;
+  if (input.info.x != 0) {
+    const float2 uv = (draw.flags & kDrawHasUVs) != 0 ? st
+        : float2(input.uv_rows[0].w, input.uv_rows[1].w);
+    texel = textures[input.info.x].Sample(samplers[input.info.y], TransformUV(input.uv_rows, uv));
+  }
+  return texel * input.scale + input.bias;
+}
+
+float PreviewScalar(PreviewTextureParameters input, float2 st, float value) {
+  return (input.info.w & 1) != 0 ? PreviewSample(input, st)[min(input.info.z, 3)] : value;
+}
+
+float3 PreviewColor(PreviewTextureParameters input, float2 st, float3 value) {
+  return (input.info.w & 1) != 0 ? PreviewSample(input, st).rgb : value;
+}
 
 [shader("vertex")]
 VertexStageOutput vertex_main(VertexInput input) {
@@ -20,12 +46,12 @@ VertexStageOutput vertex_main(VertexInput input) {
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     float3 view_position : TEXCOORD1, bool front : SV_IsFrontFace) : SV_Target {
   const PreviewParameters material = materials[draw.material_slot];
-  const float opacity = saturate(material.base_color.a);
+  const float opacity = saturate(PreviewScalar(material.inputs[4], st, material.base_color.a));
   if (material.surface.z >= 0.0 && opacity < material.surface.z) discard;
   const float alpha = (draw.flags & kDrawBlend) != 0 ? opacity : 1.0;
-  const float3 base = max(material.base_color.rgb, 0.0);
-  const float metallic = saturate(material.surface.x);
-  const float roughness = clamp(material.surface.y, 0.04, 1.0);
+  const float3 base = max(PreviewColor(material.inputs[0], st, material.base_color.rgb), 0.0);
+  const float metallic = saturate(PreviewScalar(material.inputs[2], st, material.surface.x));
+  const float roughness = clamp(PreviewScalar(material.inputs[3], st, material.surface.y), 0.04, 1.0);
   const float3 n = normalize(view_normal) * (front ? 1.0 : -1.0);
   const float3 v = ViewDirection(view_position);
   const float nv = max(dot(n, v), 1e-5);
@@ -51,5 +77,5 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     const float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base / pi;
     color += (diffuse + specular) * light * nl;
   }
-  return float4(color + max(material.emissive.rgb, 0.0), alpha);
+  return float4(color + max(PreviewColor(material.inputs[1], st, material.emissive.rgb), 0.0), alpha);
 }

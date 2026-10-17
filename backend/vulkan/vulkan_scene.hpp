@@ -170,13 +170,23 @@ struct MToonParameters {
 static_assert(sizeof(MToonParameters) == 544);
 
 // Must match PreviewParameters in shaders/preview_surface.slang.
+struct PreviewTextureParameters {
+  float uv_rows[8];
+  float scale[4];
+  float bias[4];
+  float fallback[4];
+  // Texture entry, sampler, scalar channel, connected.
+  std::uint32_t info[4];
+};
+static_assert(sizeof(PreviewTextureParameters) == 96);
 struct PreviewParameters {
   float base_color[4];
   float emissive[4];
   // metallic, roughness, Mask cutoff (negative for Opaque/Blend), unused.
   float surface[4];
+  PreviewTextureParameters inputs[5];
 };
-static_assert(sizeof(PreviewParameters) == 48);
+static_assert(sizeof(PreviewParameters) == 528);
 
 // An MMD slot's sphere mode, as shaders/mmd_common.slang reads it.
 constexpr std::uint32_t kSphereNone = 0U;
@@ -520,6 +530,9 @@ struct MaterialEntries {
   std::uint32_t mask = 0;
   std::uint32_t sphere = 0;
   std::uint32_t toon = 0;
+  std::uint32_t metallic = 0;
+  std::uint32_t roughness = 0;
+  std::uint32_t opacity = 0;
 
   friend bool operator==(const MaterialEntries&,
       const MaterialEntries&) = default;

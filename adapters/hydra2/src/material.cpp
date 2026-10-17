@@ -125,6 +125,20 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (opacityThreshold)
     (emissiveColor)
     (useSpecularWorkflow)
+    (inputConnections)
+    (upstreamNodeOutputName)
+    (UsdUVTexture)
+    (UsdTransform2d)
+    (UsdPrimvarReader_float2)
+    (st)
+    (in)
+    (result)
+    (varname)
+    (translation)
+    (bias)
+    (fallback)
+    (sourceColorSpace)
+    (colorSpace)
     ((sphereMultiply, "multiply"))
     ((sphereAdd, "add"))
     ((sphereSubTexture, "subTexture"))
@@ -169,6 +183,12 @@ void Read(const HdContainerDataSourceHandle& group, const TfToken& name,
   if (Read(group, name, pair)) {
     value = {pair[0], pair[1]};
   }
+}
+
+void Read(const HdContainerDataSourceHandle& group, const TfToken& name,
+    Toon::Float4& value) {
+  GfVec4f rgba;
+  if (Read(group, name, rgba)) value = {rgba[0], rgba[1], rgba[2], rgba[3]};
 }
 
 Toon::ToonWrap ToWrap(const TfToken& wrap) {
@@ -363,11 +383,159 @@ void ReadMmd(const HdContainerDataSourceHandle& group,
   Read(group, _tokens->edgeColor, result.outline_color, mmd.edge_alpha);
 }
 
+// Only the bounded USD shader vocabulary is evaluated here. In particular,
+// a connection is a vector, not a child container of inputConnections.
+HdContainerDataSourceHandle Connection(const HdContainerDataSourceHandle& node,
+    const TfToken& input) {
+  const auto connections = Group(node, _tokens->inputConnections);
+  const auto vector = connections ? HdVectorDataSource::Cast(connections->Get(input)) : nullptr;
+  return vector && vector->GetNumElements() == 1
+      ? HdContainerDataSource::Cast(vector->GetElement(0)) : nullptr;
+}
+
+template <typename T>
+void Parameter(const HdContainerDataSourceHandle& node, const TfToken& name, T& value) {
+  Read(Group(Group(node, _tokens->parameters), name), _tokens->value, value);
+}
+
+HdContainerDataSourceHandle Upstream(const HdContainerDataSourceHandle& nodes,
+    const HdContainerDataSourceHandle& connection, TfToken& output) {
+  TfToken path;
+  if (!Read(connection, _tokens->upstreamNodePath, path) ||
+      !Read(connection, _tokens->upstreamNodeOutputName, output)) return nullptr;
+  return Group(nodes, path);
+}
+
+bool Identifier(const HdContainerDataSourceHandle& node, const TfToken& expected) {
+  TfToken id;
+  return Read(node, _tokens->nodeIdentifier, id) && id == expected;
+}
+
+// USD st -> top-left image space, conjugating Transform2d by the V flip.
+// One Transform2d is supported; arbitrary graphs and other UV sets retain
+// the surface's constant input instead of sampling a wrong coordinate set.
+bool PreviewCoordinates(const HdContainerDataSourceHandle& nodes,
+    const HdContainerDataSourceHandle& texture, Toon::ToonTextureRef& ref,
+    Toon::Float2& uv_fallback) {
+  const auto connection = Connection(texture, _tokens->st);
+  Toon::Float2 scale{1, 1}, translation;
+  float rotation = 0;
+  auto coordinate = texture;
+  TfToken input = _tokens->st;
+  if (connection) {
+    TfToken output;
+    coordinate = Upstream(nodes, connection, output);
+    if (Identifier(coordinate, _tokens->UsdTransform2d)) {
+      if (output != _tokens->result) return false;
+      Parameter(coordinate, _tokens->scale, scale);
+      Parameter(coordinate, _tokens->translation, translation);
+      Parameter(coordinate, _tokens->rotation, rotation);
+      input = _tokens->in;
+    } else {
+      if (!Identifier(coordinate, _tokens->UsdPrimvarReader_float2) || output != _tokens->result)
+        return false;
+      input = TfToken();
+    }
+  }
+  auto reader = coordinate;
+  if (!input.IsEmpty()) {
+    if (const auto source = Connection(coordinate, input)) {
+      TfToken output;
+      reader = Upstream(nodes, source, output);
+      if (output != _tokens->result) return false;
+    } else {
+      Toon::Float2 uv;
+      Parameter(coordinate, input, uv);
+      const float angle = rotation * 0.017453292519943295F;
+      ref.scale = {0, 0};
+      ref.offset = {translation.x + std::cos(angle) * scale.x * uv.x - std::sin(angle) * scale.y * uv.y,
+          1 - translation.y - std::sin(angle) * scale.x * uv.x - std::cos(angle) * scale.y * uv.y};
+      return true;
+    }
+  }
+  if (!Identifier(reader, _tokens->UsdPrimvarReader_float2)) return false;
+  std::string varname;
+  Parameter(reader, _tokens->varname, varname);
+  if (varname.empty()) {
+    TfToken token;
+    Parameter(reader, _tokens->varname, token);
+    varname = token.GetString();
+  }
+  if (varname != "st") return false;
+  Parameter(reader, _tokens->fallback, uv_fallback);
+  ref.rotation = rotation * 0.017453292519943295F;
+  ref.scale = scale;
+  ref.offset = {translation.x - std::sin(ref.rotation) * scale.y,
+      1 - translation.y - std::cos(ref.rotation) * scale.y};
+  return true;
+}
+
+bool ReadPreviewTexture(const HdContainerDataSourceHandle& nodes,
+    const HdContainerDataSourceHandle& surface, const TfToken& name, bool color,
+    HdToonTextureKey& key, Toon::ToonTextureRef& ref,
+    Toon::ToonMaterial::PreviewSurface::TextureInput& input) {
+  TfToken output;
+  const auto texture = Upstream(nodes, Connection(surface, name), output);
+  if (!Identifier(texture, _tokens->UsdUVTexture)) return false;
+  const std::string channel = output.GetString();
+  if (color ? channel != "rgb" : channel.size() != 1 || std::string("rgba").find(channel) == std::string::npos)
+    return false;
+  Toon::ToonTextureRef candidate;
+  Toon::Float2 uv_fallback;
+  if (!PreviewCoordinates(nodes, texture, candidate, uv_fallback)) return false;
+  SdfAssetPath file;
+  Parameter(texture, _tokens->file, file);
+  const auto image = file.GetResolvedPath().empty() ? HioImageSharedPtr{}
+      : HioImage::OpenForReading(file.GetResolvedPath());
+  const auto wrap = [&](const TfToken& name, HioAddressDimension dimension, Toon::ToonWrap& value) {
+    TfToken mode("useMetadata");
+    Parameter(texture, name, mode);
+    if (mode == TfToken("useMetadata")) {
+      HioAddressMode address = HioAddressModeRepeat;
+      if (image) image->GetSamplerMetadata(dimension, &address);
+      switch (address) {
+      case HioAddressModeRepeat: mode = TfToken("repeat"); break;
+      case HioAddressModeClampToEdge: mode = TfToken("clamp"); break;
+      case HioAddressModeMirrorRepeat: mode = TfToken("mirror"); break;
+      default: return false;
+      }
+    }
+    if (mode == TfToken("clamp")) value = Toon::ToonWrap::ClampToEdge;
+    else if (mode == TfToken("mirror")) value = Toon::ToonWrap::MirroredRepeat;
+    else if (mode != TfToken("repeat")) return false;
+    return true;
+  };
+  if (!wrap(_tokens->wrapS, HioAddressDimensionU, candidate.wrap_s) ||
+      !wrap(_tokens->wrapT, HioAddressDimensionV, candidate.wrap_t)) return false;
+  ref = candidate;
+  input.connected = true;
+  input.uv_fallback = uv_fallback;
+  input.channel = color ? 0U : static_cast<std::uint32_t>(std::string("rgba").find(channel));
+  Parameter(texture, _tokens->scale, input.scale);
+  Parameter(texture, _tokens->bias, input.bias);
+  Parameter(texture, _tokens->fallback, input.fallback);
+  key.path = file.GetResolvedPath();
+  TfToken color_space("auto");
+  Parameter(texture, _tokens->sourceColorSpace, color_space);
+  // UsdImaging folds sourceColorSpace into the asset parameter metadata.
+  TfToken metadata_color_space;
+  if (Read(Group(Group(texture, _tokens->parameters), _tokens->file), _tokens->colorSpace, metadata_color_space) &&
+      !metadata_color_space.IsEmpty()) color_space = metadata_color_space;
+  key.encoding = Toon::ToonTextureEncoding::Linear;
+  if (color_space == TfToken("sRGB")) key.encoding = Toon::ToonTextureEncoding::Srgb;
+  else if (color_space == TfToken("auto") && !key.path.empty()) {
+    if (image && image->IsColorSpaceSRGB()) key.encoding = Toon::ToonTextureEncoding::Srgb;
+  }
+  if (key.path.empty() && !file.GetAssetPath().empty()) WarnUnresolved(file.GetAssetPath());
+  return true;
+}
+
 // Follow the universal surface terminal, never an arbitrary node whose
 // identifier happens to be PreviewSurface. Node parameters wrap a sampled
 // `value` in the ordinary Hydra material schema.
 void ReadPreview(const HdContainerDataSourceHandle& prim,
-    Toon::ToonMaterial& result) {
+    HdToonMaterialSource& source) {
+  auto& result = source.values;
   const auto network = HdMaterialSchema::GetFromParent(prim).GetMaterialNetwork().GetContainer();
   const auto terminal = Group(Group(network, _tokens->terminals), _tokens->surface);
   TfToken path;
@@ -406,6 +574,19 @@ void ReadPreview(const HdContainerDataSourceHandle& prim,
                       : result.alpha < 1.0F ? Toon::ToonAlphaMode::Blend
                                             : Toon::ToonAlphaMode::Opaque;
   result.alpha_cutoff = threshold;
+  const auto nodes = Group(network, _tokens->nodes);
+  const TfToken names[] = {_tokens->diffuseColor, _tokens->emissiveColor,
+      _tokens->metallic, _tokens->roughness, _tokens->opacity};
+  const std::size_t roles[] = {0, 5, 11, 12, 13};
+  auto refs = HdToonTextureRefs(result);
+  for (std::size_t i = 0; i < 5; ++i) {
+    ReadPreviewTexture(nodes, node, names[i], i < 2, source.textures[roles[i]],
+        *refs[roles[i]], result.preview.inputs[i]);
+  }
+  // A connected opacity can be translucent at any texel even if the
+  // unconnected surface value is one. Mask always takes precedence.
+  if (threshold == 0 && result.preview.inputs[4].connected)
+    result.alpha_mode = Toon::ToonAlphaMode::Blend;
 }
 
 } // namespace
@@ -417,7 +598,9 @@ std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
       &material.mtoon.rim_multiply_texture, &material.emissive_texture,
       &material.normal_texture, &material.mtoon.shading_shift_texture,
       &material.mtoon.uv_animation_mask_texture,
-      &material.mmd.sphere_texture, &material.mmd.toon_texture};
+      &material.mmd.sphere_texture, &material.mmd.toon_texture,
+      &material.preview.metallic_texture, &material.preview.roughness_texture,
+      &material.preview.opacity_texture};
 }
 
 bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
@@ -440,7 +623,7 @@ HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle material =
         Group(mmd, _tokens->material);
     if (!material) {
-      ReadPreview(prim, result);
+      ReadPreview(prim, source);
       return source;
     }
     result.model = Toon::ToonShadingModel::MMD;

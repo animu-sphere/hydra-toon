@@ -102,6 +102,124 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   material.alpha_mode = Toon::ToonAlphaMode::Opaque;
   const auto opaque = render();
   Near(opaque[0], 0.6F, "Opaque must ignore material alpha");
+
+  // Connected inputs replace the surface's constants. One packed image
+  // supplies B metallic, G roughness and A opacity independently of RGB.
+  const auto image = world.CreateTexture();
+  Toon::ToonTexture texture;
+  texture.width = texture.height = 1;
+  texture.encoding = Toon::ToonTextureEncoding::Linear;
+  texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{64, 128, 192, 96});
+  world.SetTexture(image, texture);
+  world.SetMeshUVs(mesh, {{0.25F, 0.25F}, {0.25F, 0.25F}, {0.25F, 0.25F}});
+  material = {};
+  material.preview.enabled = true;
+  material.emissive_texture.texture = image;
+  material.preview.inputs[1].connected = true;
+  material.preview.inputs[1].scale = {2, 0.5F, 1, 1};
+  material.preview.inputs[1].bias = {0.1F, 0.05F, 0, 0};
+  auto texel = render();
+  Near(texel[0], 2 * 64.0F / 255 + 0.1F, "emission texture scale/bias R");
+  Near(texel[1], 0.5F * 128.0F / 255 + 0.05F, "emission texture scale/bias G");
+  Near(texel[2], 192.0F / 255, "emission texture replaces zero emission");
+  const auto resident = renderer->statistics();
+  material.preview.inputs[1].scale.x = 1;
+  render();
+  const auto edited = renderer->statistics();
+  Require(edited.material_writes == resident.material_writes + 1 &&
+              edited.texture_uploads == resident.texture_uploads &&
+              edited.point_uploads == resident.point_uploads &&
+              edited.topology_uploads == resident.topology_uploads &&
+              edited.pipelines_created == resident.pipelines_created,
+      "texture scale edit rebuilt resident resources");
+  material.preview.inputs[1].connected = false;
+  material.base_texture.texture = image;
+  material.preview.metallic_texture.texture = image;
+  material.preview.roughness_texture.texture = image;
+  for (const auto i : {0, 2, 3}) material.preview.inputs[i].connected = true;
+  material.preview.inputs[2].channel = 2;
+  material.preview.inputs[3].channel = 1;
+  direct = 0.2F;
+  texel = render();
+  Near(texel[0], expected(64.0F / 255, 192.0F / 255, 128.0F / 255), "textured BRDF R");
+  Near(texel[1], expected(128.0F / 255, 192.0F / 255, 128.0F / 255), "textured BRDF G");
+  Near(texel[2], expected(192.0F / 255, 192.0F / 255, 128.0F / 255), "textured BRDF B");
+  // sRGB conversion affects RGB alone, before scale/bias and lighting.
+  texture.encoding = Toon::ToonTextureEncoding::Srgb;
+  world.SetTexture(image, texture);
+  material.preview.inputs[0].connected = false;
+  material.preview.inputs[1].connected = true;
+  material.preview.inputs[1].scale = {1, 1, 1, 1};
+  material.preview.inputs[1].bias = {};
+  direct = 0;
+  texel = render();
+  const auto linear = [](float x) { return x <= 0.04045F ? x / 12.92F : std::pow((x + 0.055F) / 1.055F, 2.4F); };
+  Near(texel[0], linear(64.0F / 255), "sRGB emission R");
+  Near(texel[1], linear(128.0F / 255), "sRGB emission G");
+  const auto texture_opaque = texel;
+  material.preview.inputs[4].connected = true;
+  material.preview.inputs[4].channel = 3;
+  material.preview.opacity_texture.texture = image;
+  material.alpha_mode = Toon::ToonAlphaMode::Mask;
+  material.alpha_cutoff = 0.5F;
+  const auto texture_discard = render();
+  Require(center_depth() == 1 && texture_discard == masked, "texture alpha Mask discard");
+  material.alpha_cutoff = 96.0F / 255;
+  Require(render() == texture_opaque && center_depth() < 1, "texture alpha Mask threshold equality");
+  material.alpha_mode = Toon::ToonAlphaMode::Blend;
+  texel = render();
+  Near(texel[0], (texture_opaque[0] * (96.0F / 255) + masked[0] * (159.0F / 255)) / 255,
+      "texture alpha must remain linear in Blend");
+  Require(center_depth() == 1, "texture Blend must not write depth");
+  // Failed images use the texture fallback, before scale/bias.
+  material.alpha_mode = Toon::ToonAlphaMode::Opaque;
+  material.emissive_texture.texture = 0;
+  material.preview.inputs[1].fallback = {0.2F, 0.3F, 0.4F, 1};
+  material.preview.inputs[1].scale = {2, 1, 1, 1};
+  material.preview.inputs[1].bias = {0.1F, 0, 0, 0};
+  texel = render();
+  Near(texel[0], 0.5F, "missing image fallback scale/bias");
+  material.emissive_texture.texture = image;
+  world.SetMeshUVs(mesh, {});
+  texel = render();
+  Near(texel[0], 2 * linear(64.0F / 255) + 0.1F, "absent UVs must sample at the primvar fallback");
+  // A four-colour image locates samples in USD's bottom-left coordinates.
+  // The rotated map is the conjugate of USD R(90) + (0.5,0.5).
+  texture.width = texture.height = 2;
+  texture.encoding = Toon::ToonTextureEncoding::Linear;
+  texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{255,0,0,255, 0,255,0,255, 0,0,255,255, 255,255,0,255});
+  world.SetTexture(image, texture);
+  world.SetMeshUVs(mesh, {{0.25F,0.25F}, {0.25F,0.25F}, {0.25F,0.25F}});
+  material.preview.inputs[1].scale = {1,1,1,1};
+  material.preview.inputs[1].bias = {};
+  texel = render();
+  Near(texel[2], 1, "USD UV origin must sample bottom-left blue");
+  material.emissive_texture.rotation = 1.57079632679F;
+  material.emissive_texture.offset = {-0.5F, 0.5F};
+  texel = render();
+  Near(texel[0], 1, "rotated USD transform must sample top-left red");
+  Near(texel[2], 0, "rotated USD transform V direction");
+  const auto uv_resident = renderer->statistics();
+  material.emissive_texture.offset.x += 0.5F;
+  texel = render();
+  Near(texel[1], 1, "USD translated transform must sample top-right green");
+  const auto uv_edited = renderer->statistics();
+  Require(uv_edited.texture_uploads == uv_resident.texture_uploads &&
+              uv_edited.point_uploads == uv_resident.point_uploads &&
+              uv_edited.pipelines_created == uv_resident.pipelines_created &&
+              uv_edited.material_writes == uv_resident.material_writes + 1,
+      "UV edit must update one slot alone");
+  world.SetMeshUVs(mesh, {});
+  material.emissive_texture.scale = {0, 0};
+  material.emissive_texture.offset = {0.25F, 0.25F};
+  texel = render();
+  Near(texel[0], 1, "constant texture coordinates must sample even without mesh UVs");
+  // Restore the original constant case for culling/fallback regressions.
+  material = {};
+  material.preview.enabled = true;
+  material.emissive = {0.6F, 0.2F, 0.1F};
   world.SetMeshTopology(mesh, {0, 2, 1});
   Require(render() == masked, "single-sided back face must be culled");
   material.double_sided = true;
@@ -110,7 +228,7 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   const auto fallback = render();
   Require(fallback != opaque, "unreadable network must retain mesh display colour");
   Require(renderer->statistics().validation_message_count == 0, "Vulkan validation error");
-  std::cout << "preview_surface samples=" << samples << " constants, GGX, Mask, Blend and slot edits passed\n";
+  std::cout << "preview_surface samples=" << samples << " constants, textures, UV transforms, GGX, Mask, Blend and slot edits passed\n";
   return true;
 }
 } // namespace
