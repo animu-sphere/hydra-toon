@@ -57,6 +57,13 @@ if(TOON_WITH_VULKAN)
   add_test(NAME toon-subset-gpu COMMAND toon-subset-test
     "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-subset-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+  add_executable(toon-preview-surface-test preview_surface_test.cpp)
+  toon_configure_warnings(toon-preview-surface-test)
+  target_link_libraries(toon-preview-surface-test PRIVATE Toon::Vulkan)
+  add_dependencies(toon-preview-surface-test toon-renderer-shaders)
+  add_test(NAME toon-preview-surface-gpu COMMAND toon-preview-surface-test
+    "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-preview-surface-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
 endif()
 
 add_executable(toon-expression-test expression_test.cpp)

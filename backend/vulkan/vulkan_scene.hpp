@@ -169,6 +169,15 @@ struct MToonParameters {
 };
 static_assert(sizeof(MToonParameters) == 544);
 
+// Must match PreviewParameters in shaders/preview_surface.slang.
+struct PreviewParameters {
+  float base_color[4];
+  float emissive[4];
+  // metallic, roughness, Mask cutoff (negative for Opaque/Blend), unused.
+  float surface[4];
+};
+static_assert(sizeof(PreviewParameters) == 48);
+
 // An MMD slot's sphere mode, as shaders/mmd_common.slang reads it.
 constexpr std::uint32_t kSphereNone = 0U;
 constexpr std::uint32_t kSphereMultiply = 1U;
@@ -282,7 +291,8 @@ struct ScenePipeline {
 
 // The scene pipelines for one colour/depth format pair and sample count:
 // the unlit mesh pipeline, mtoon_opaque, mtoon_transparent, mtoon_outline,
-// mmd_opaque, mmd_transparent and mmd_outline; and mmd_shadow, which draws
+// mmd_opaque, mmd_transparent, mmd_outline and preview_surface; and
+// mmd_shadow, which draws
 // depth alone into MMD's self-shadow map, single-sampled, whatever the
 // scene's count. The transparent ones and the
 // outlines blend their source's alpha over the target; mmd_outline also
@@ -299,6 +309,7 @@ struct ScenePipeline {
 // with or without UVs or a skin.
 struct ScenePipelines {
   ScenePipeline mesh;
+  ScenePipeline preview;
   ScenePipeline mtoon;
   ScenePipeline mtoon_transparent;
   ScenePipeline mtoon_outline;
@@ -313,12 +324,14 @@ struct ScenePipelines {
   // What every pipeline rasterizes at; the targets must match it.
   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 
-  static constexpr std::uint32_t kCount = 8;
+  static constexpr std::uint32_t kCount = 9;
 };
 
 // The SPIR-V of every scene pipeline, loaded before any device exists so a
 // missing file is a failure rather than a skip.
 struct SceneShaderWords {
+  std::vector<std::uint32_t> preview_vertex;
+  std::vector<std::uint32_t> preview_fragment;
   std::vector<std::uint32_t> mesh_vertex;
   std::vector<std::uint32_t> mesh_fragment;
   std::vector<std::uint32_t> mtoon_vertex;
@@ -514,8 +527,9 @@ struct MaterialEntries {
 
 // One parameter slot per material, in its model's host-visible storage
 // buffer, which that model's pipelines index by slot (material policy §7):
-// MToonParameters for MToon and MmdParameters for MMD, one slot number in
-// both. A slot is rewritten when its material's parameters revision
+// MToonParameters for MToon, MmdParameters for MMD and PreviewParameters for
+// PreviewSurface, one slot number in all three. A slot is rewritten when its
+// material's parameters revision
 // changes or a texture it samples moves to another table entry; a new
 // material takes a free slot, and the buffers grow by doubling, keeping
 // every slot. Its descriptor set also holds the texture table, which a
@@ -528,6 +542,7 @@ public:
     // The table entries the slot was written with.
     MaterialEntries entries;
     ToonShadingModel model = ToonShadingModel::PreviewSurface;
+    bool preview_enabled = false;
     bool double_sided = false;
     // Whether a draw with this material also draws an outline's hull: an
     // MToon material that asks for an outline of some width, through
@@ -583,6 +598,7 @@ private:
   VkDescriptorSet set_ = VK_NULL_HANDLE;
   HostBuffer buffer_;
   HostBuffer mmd_buffer_;
+  HostBuffer preview_buffer_;
   // Fixed frame/light buffer, kFrameBytes bytes: time, debug, uniform ambient
   // and up to kLightCapacity direct sources. Updated after the prior frame.
   HostBuffer frame_buffer_;

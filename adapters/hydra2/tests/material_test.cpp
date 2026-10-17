@@ -542,7 +542,98 @@ int RunMmd() {
   return 0;
 }
 
+bool PreviewNetworkCheck() {
+  // A real USD network establishes the schema shape (including the
+  // universal render context and the surface terminal's node path).
+  const auto stage = UsdStage::CreateInMemory();
+  if (!stage->GetRootLayer()->ImportFromString(R"usd(#usda 1.0
+def Material "Preview" {
+    token outputs:surface.connect = </Preview/Pbr.outputs:surface>
+    def Shader "Pbr" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:diffuseColor.timeSamples = { 0: (0.8, 0.2, 0.1), 1: (0.1, 0.2, 0.8) }
+        float inputs:metallic = 0.7
+        float inputs:roughness = 0.3
+        color3f inputs:emissiveColor = (0, 2, 0)
+        float inputs:opacity = 0.4
+        float inputs:opacityThreshold.timeSamples = { 0: 0, 1: 0.5 }
+        token outputs:surface
+    }
+}
+def Material "Defaults" {
+    token outputs:surface.connect = </Defaults/Pbr.outputs:surface>
+    def Shader "Pbr" {
+        uniform token info:id = "UsdPreviewSurface"
+        token outputs:surface
+    }
+}
+def Material "Unsupported" {
+    token outputs:surface.connect = </Unsupported/Other.outputs:surface>
+    def Shader "Other" {
+        uniform token info:id = "UnrecognizedShader"
+        token outputs:surface
+    }
+    def Shader "UnusedPreview" {
+        uniform token info:id = "UsdPreviewSurface"
+        token outputs:surface
+    }
+}
+def Material "Specular" {
+    token outputs:surface.connect = </Specular/Pbr.outputs:surface>
+    def Shader "Pbr" {
+        uniform token info:id = "UsdPreviewSurface"
+        int inputs:useSpecularWorkflow = 1
+        token outputs:surface
+    }
+}
+)usd"))
+    return false;
+  UsdImagingCreateSceneIndicesInfo info;
+  info.stage = stage;
+  const auto scene = UsdImagingCreateSceneIndices(info);
+  HdToonRenderDelegate delegate;
+  std::unique_ptr<HdRenderIndex> index(HdRenderIndex::New(&delegate, {}));
+  index->InsertSceneIndex(scene.finalSceneIndex, SdfPath::AbsoluteRootPath());
+  HdTaskSharedPtrVector tasks;
+  HdTaskContext context;
+  for (const double time : {0.0, 1.0}) {
+    scene.stageSceneIndex->SetTime(UsdTimeCode(time));
+    index->SyncAll(&tasks, &context);
+    const auto* material = FindMaterial(*index, SdfPath("/Preview"));
+    const auto* defaults = FindMaterial(*index, SdfPath("/Defaults"));
+    const auto* unsupported = FindMaterial(*index, SdfPath("/Unsupported"));
+    const auto* specular = FindMaterial(*index, SdfPath("/Specular"));
+    if (!Check(material && defaults && unsupported && specular, "USD PreviewSurface materials did not sync"))
+      return false;
+    const auto& value = material->GetToonMaterial();
+    if (!Check(value.preview.enabled && value.preview.metallic == 0.7F &&
+                   value.preview.roughness == 0.3F && value.emissive == Toon::Float3{0, 2, 0} &&
+                   value.alpha == 0.4F &&
+                   value.base_color == (time == 0 ? Toon::Float3{0.8F, 0.2F, 0.1F} : Toon::Float3{0.1F, 0.2F, 0.8F}) &&
+                   value.alpha_mode == (time == 0 ? Toon::ToonAlphaMode::Blend : Toon::ToonAlphaMode::Mask),
+            "PreviewSurface constants or time samples differ"))
+      return false;
+    if (!Check(defaults->GetToonMaterial().preview.enabled &&
+                   defaults->GetToonMaterial().base_color == Toon::Float3{0.18F, 0.18F, 0.18F} &&
+                   defaults->GetToonMaterial().preview.roughness == 0.5F &&
+                   defaults->GetToonMaterial().alpha_mode == Toon::ToonAlphaMode::Opaque &&
+                   unsupported->GetToonMaterial() == Toon::ToonMaterial{} &&
+                   specular->GetToonMaterial() == Toon::ToonMaterial{},
+            "PreviewSurface defaults or unsupported-terminal fallback differ"))
+      return false;
+    const auto network = scene.finalSceneIndex->GetPrim(SdfPath("/Preview")).dataSource->Get(TfToken("material"));
+    const auto mixed = Container({{"material", network}, {"vrm", Container({{"mtoon", Container({})}})}});
+    const auto mixed_mmd = Container({{"material", network}, {"mmd", Container({{"material", Container({})}})}});
+    if (!Check(HdToonReadMaterial(mixed).values.model == Toon::ToonShadingModel::MToon &&
+                   HdToonReadMaterial(mixed_mmd).values.model == Toon::ToonShadingModel::MMD,
+            "PreviewSurface must not override a canonical toon material"))
+      return false;
+  }
+  return true;
+}
+
 int RunRetained() {
+  if (!PreviewNetworkCheck()) return 1;
   if (!Check(HdToonReadMaterial(nullptr).values == Toon::ToonMaterial{},
           "a material with nothing readable must be the fallback material")) {
     return 1;

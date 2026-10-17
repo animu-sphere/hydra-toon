@@ -105,8 +105,8 @@ struct HdToonMaterialSource {
 // own data sources (material policy §2–§4): a `vrm/mtoon` container is
 // MToon, read in the locator hierarchy `vrmImaging` froze, with a texture in
 // every MToon role; otherwise an `mmd/material` container is MMD, read in
-// the one `mmdImaging` froze; anything else is PreviewSurface. A null
-// container is the fallback material.
+// the one `mmdImaging` froze; otherwise the universal PreviewSurface
+// network's constants. An unreadable network retains the fallback material.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim);
 

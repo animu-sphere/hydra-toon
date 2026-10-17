@@ -682,8 +682,13 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
             ImGui::BeginDisabled(!material.parameters_overridden);
             const bool release = ImGui::Button("Release material override");
             ImGui::EndDisabled();
-            if (material.material.model == ToonShadingModel::PreviewSurface)
-              ImGui::TextWrapped("PreviewSurface currently draws with mesh display colour.");
+            if (material.material.model == ToonShadingModel::PreviewSurface) {
+              if (material.material.preview.enabled)
+                ImGui::Text("Metallic: %.3f; roughness: %.3f",
+                    material.material.preview.metallic, material.material.preview.roughness);
+              else
+                ImGui::TextWrapped("Unreadable material: using mesh display colour.");
+            }
             ToonMaterial values = material.material;
             ImGui::BeginDisabled(material.material.model != ToonShadingModel::MToon);
             const bool changed = MaterialValues(values);

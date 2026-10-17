@@ -151,8 +151,9 @@ hulls against independently CPU-deformed rest geometry.
 The Vulkan mesh cache owns per-mesh target, range and weight storage buffers
 alongside influences and joints in descriptor set 1 (five vertex bindings).
 All scene shaders evaluate morph offsets before skinning in `skinning.slang`.
-The device capability probe requires seven storage-buffer bindings including
-the material/frame buffers. Offscreen and presentation statistics expose
+The device capability probe requires ten storage-buffer bindings including
+the three models' parameter buffers, frame data and MMD shadow parameters.
+Offscreen and presentation statistics expose
 `morph_uploads` and `morph_weight_writes`; the viewport shows both in its
 upload panel. Rest/joint outline envelopes cannot certify a morphed hull,
 and morphed triangles cannot certify occlusion, so both conservatively keep
@@ -209,8 +210,8 @@ revision. The panel edits MToon colours, scalars and texture transforms through
 `HydraScene::SetMaterialParametersOverride` and releases through
 `ClearMaterialParametersOverride`; late commit publishes these operations after
 extraction. Model, alpha mode, sidedness and texture identities are displayed,
-not edited. PreviewSurface values are read-only because its current fallback
-draws mesh display colour. UI values come from each commit, so removal,
+not edited. PreviewSurface values remain read-only in the panel; readable networks
+draw through the basic PBR realization. UI values come from each commit, so removal,
 structural invalidation and scene replacement retain no independent override
 state. The host-route state/GPU tests live in `material_debug_test.cpp` within
 the existing viewport target layout. Runtime frame identities and source-owner

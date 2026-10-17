@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [68](68-2026-10-17-preview-surface-constants.md) | Constant-input PreviewSurface: real USD network traversal and time samples, GGX direct lighting, emission, Mask/Blend and material-slot persistence on Vulkan at 1x/4x |
 | [67](67-2026-10-17-v040-preparation.md) | v0.4.0 release gate, local: OpenStrata `core` 15/15, `hydra` 24/24 and `viewport-usd` 55/55 with every `ost validate` passed, plain CMake 15/15, and the `hydra` package built twice to the same digest |
 | [66](66-2026-10-17-mat-q5-shadow-depth.md) | MAT-Q5 resolved: on MMD's frames of a chin-and-neck contact, a light grazing the face and the neck, and report 63's four, a sharpness of 2.5 per MMD unit (shadowed from 0.12, wholly by 0.52) is nearest MMD's of 1–50, where 15 shadowed close-lying layers MMD leaves lit; grazing face 2.70 → 2.11, full body 5.17 → 4.97. MMD's self-shadow distance moves the answer and is not on the stage, so this is MMD's default |
 | [65](65-2026-10-17-mmd-vertex-morph-evidence.md) | MMD vertex morphs, weighed through the stage's blend shapes, change hdToon's face close-up as they change MMD's: eight morphs on YYB and Sour (eyes, mouth, brows, blush, glasses, two on the same points) at 1 and 0.5 are 1.3–12 levels from MMD's on the pixels they change, against 7–155 without, and move the brightness 0.92–1.04 times MMD's; the translucent blush 0.75, as hdToon blends in linear and MMD in stored values. No renderer change |
