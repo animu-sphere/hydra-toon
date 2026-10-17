@@ -12,7 +12,7 @@
 - Occasion: MAT-Q6, which
   [report 61](61-2026-10-12-mmd-material-morph.md) left provisional until
   MMD's frames of the tinted morphs were compared
-  ([roadmap](../../roadmap/v0.4.0.md))
+  ([roadmap](../../releases/v0.4.0.md))
 
 ## TL;DR
 

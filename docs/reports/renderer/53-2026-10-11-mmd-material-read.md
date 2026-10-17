@@ -12,7 +12,7 @@
   `mmdSchema`, built and packaged on this workstation at the `lookdev`
   profile; this branch's `toon` `hydra` package, built here
 - Occasion: v0.4.0 starts with MAT-Q1 agreed with `usd-mmd-plugins`
-  ([roadmap](../../roadmap/v0.4.0.md)). That repository froze its Hydra view,
+  ([roadmap](../../releases/v0.4.0.md)). That repository froze its Hydra view,
   `mmdImaging`, on 2026-10-04 in the shape `vrmImaging` has, so that this
   renderer reads both models by one path
   ([its material policy §12.1](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md#121-the-hydra-view-mmdimaging)).

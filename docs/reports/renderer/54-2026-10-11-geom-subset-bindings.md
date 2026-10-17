@@ -13,7 +13,7 @@
   ([`usd-mmd-plugins` stage contract §8.1](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/STAGE_CONTRACT.md#81-one-mesh-material-subsets)).
   `hdToon` read only a mesh's own binding, so after report 53 a 20-material
   model was one draw whose 20 materials nothing sampled
-  ([roadmap](../../roadmap/v0.4.0.md)).
+  ([roadmap](../../releases/v0.4.0.md)).
 
 ## TL;DR
 

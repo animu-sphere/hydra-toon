@@ -177,7 +177,7 @@ keeps their bits without 2.1's meaning
 every local model is PMX 2.0, and MikuMikuDance v9.32 reads no PMX 2.1, so
 no MMD frame shows what they draw; drawing points or lines would also
 change a draw's primitives, not a value in its slot. They are left for a
-later milestone ([later](../roadmap/later.md#mmd-after-v040)).
+later milestone ([later](../roadmap/README.md#not-yet-in-a-milestone)).
 
 ## 8. Values that change at run time
 

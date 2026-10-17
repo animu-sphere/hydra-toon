@@ -14,7 +14,7 @@
 - Occasion: MAT-Q5, provisional since
   [report 60](60-2026-10-12-mmd-self-shadow.md), to be settled against
   captures of a contact or grazing shadow
-  ([roadmap](../../roadmap/v0.4.0.md),
+  ([roadmap](../../releases/v0.4.0.md),
   [material policy §9](../../design/MATERIAL_POLICY.md#9-open-questions))
 
 ## TL;DR
@@ -115,7 +115,7 @@ cheek goes. So MMD's answer to MAT-Q5 moves with its self-shadow distance,
 as a depth range set by that distance would make it. The stage does not
 carry the distance, as it carries no camera of MMD's, so the renderer
 takes MMD's default; a host that wants another would need a setting, which
-v0.4.0 does not add ([later](../../roadmap/later.md)).
+v0.4.0 does not add ([the roadmap](../../roadmap/README.md#not-yet-in-a-milestone)).
 
 ## 5. The change
 

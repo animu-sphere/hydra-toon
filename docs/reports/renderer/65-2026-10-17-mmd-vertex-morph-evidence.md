@@ -12,7 +12,7 @@
   for the comparisons
 - Occasion: the evidence v0.4.0 still owes that an MMD model's vertex
   morphs draw as MMD draws them
-  ([roadmap](../../roadmap/v0.4.0.md),
+  ([roadmap](../../releases/v0.4.0.md),
   [report 64](64-2026-10-17-mmd-material-morph-evidence.md) §7)
 
 ## TL;DR

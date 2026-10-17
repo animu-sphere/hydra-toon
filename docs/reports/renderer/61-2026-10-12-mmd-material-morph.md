@@ -9,7 +9,7 @@
   (`sha256:b982656c…`); this branch's `toon` `hydra` package, built here
   (`sha256:1f882f0c56676e973cfd6dd2a9290ea493a74fa093cefa7e765ded63d628e049`); Python 3 for the PMX survey
 - Occasion: v0.4.0's MMD morphs
-  ([roadmap](../../roadmap/v0.4.0.md)), after MMD's shadow flags
+  ([roadmap](../../releases/v0.4.0.md)), after MMD's shadow flags
   ([report 60](60-2026-10-12-mmd-self-shadow.md)), in the order
   `usd-mmd-plugins` brings up the `hydra-toon` MMD path: material morphs
   next, then vertex colour.

@@ -8,6 +8,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
 ### Changed
 
 - The project's version lives in `VERSION`, one line `X.Y.Z`, which
@@ -41,6 +43,20 @@ version has a record in [docs/releases/](docs/releases/README.md).
   its "MMD morph tints" checkbox draw them in `full.fx`'s form, a frame
   value that rewrites no slot. `renderer.material.mmd_morph` covers both
   ([renderer report 62](docs/reports/renderer/62-2026-10-17-mat-q6-morph-tints.md)).
+- An MMD material that receives the self-shadow is no longer toned by its
+  ramp at `v = 0.5 − 0.5 N·L` while the self-shadow is on, which it is by
+  default, but shaded as `full.fx`'s self-shadow pass shades it.
+- The material descriptor set has two more bindings, MMD's self-shadow map
+  and its parameters, and a device needs D32_SFLOAT to be drawable and
+  sampled.
+- Setting the UVs a mesh already has changes nothing, so an edit of another
+  primvar, which Hydra reports through the same dirty bit, no longer gives
+  them a new revision.
+- MMD's textures are read undecoded, as MMD shades them.
+- What every surface pipeline shares moved from `mtoon_common.slang` into
+  `surface_common.slang`.
+- Draw counts in `TOON_HYDRA_EVIDENCE` and the viewport's scene summary
+  count parts: a mesh divided by its face subsets is one draw per part.
 
 ### Added
 
@@ -121,23 +137,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
   headless check `renderer.material.mmd_outline` checks it under a
   perspective camera
   ([renderer report 58](docs/reports/renderer/58-2026-10-12-mat-q4-edge-width.md)).
-
-### Changed
-
-- An MMD material that receives the self-shadow is no longer toned by its
-  ramp at `v = 0.5 − 0.5 N·L` while the self-shadow is on, which it is by
-  default, but shaded as `full.fx`'s self-shadow pass shades it.
-- The material descriptor set has two more bindings, MMD's self-shadow map
-  and its parameters, and a device needs D32_SFLOAT to be drawable and
-  sampled.
-- Setting the UVs a mesh already has changes nothing, so an edit of another
-  primvar, which Hydra reports through the same dirty bit, no longer gives
-  them a new revision.
-- MMD's textures are read undecoded, as MMD shades them.
-- What every surface pipeline shares moved from `mtoon_common.slang` into
-  `surface_common.slang`.
-- Draw counts in `TOON_HYDRA_EVIDENCE` and the viewport's scene summary
-  count parts: a mesh divided by its face subsets is one draw per part.
+- Renderer report 65 checks MMD's vertex morphs against MMD's own frames:
+  eight morphs on two models, weighed through the stage's blend shapes,
+  change hdToon's frame as they change MMD's, the translucent blush
+  excepted, which blends in the linear target where MMD blends stored
+  values.
 
 ### Fixed
 
