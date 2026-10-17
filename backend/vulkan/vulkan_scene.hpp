@@ -201,13 +201,15 @@ struct MmdParameters {
 };
 static_assert(sizeof(MmdParameters) == 240);
 
-// Where MMD's self-shadow map was drawn from this frame. Must match
-// MmdShadowParameters in shaders/mmd_common.slang.
+// Where MMD's self-shadow map was drawn from this frame, and whether MMD
+// materials' tints draw. Must match MmdShadowParameters in
+// shaders/mmd_common.slang.
 struct MmdShadowParameters {
   // The map's Vulkan clip space from view space, column-major.
   float clip_from_view[16];
   // x 1 when the map was drawn this frame; y MMD units per unit of the
-  // map's depth; z the map's size in texels.
+  // map's depth; z the map's size in texels; w 1 when material morphs'
+  // tints draw (DrawList::mmd_morph_tints).
   float parameters[4];
 };
 static_assert(sizeof(MmdShadowParameters) == 80);

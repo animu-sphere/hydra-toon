@@ -71,6 +71,7 @@ struct OverlayFrame {
   bool vsync = true;
   bool outlines = true;
   bool mmd_self_shadow = true;
+  bool mmd_morph_tints = false;
   LightingDebug lighting;
   std::size_t lights = 0;
   const PresentStatistics* statistics = nullptr;
@@ -112,6 +113,8 @@ struct OverlayControls {
   bool outlines = true;
   bool mmd_self_shadow_changed = false;
   bool mmd_self_shadow = true;
+  bool mmd_morph_tints_changed = false;
+  bool mmd_morph_tints = false;
   LightingDebug lighting;
   bool toggle_playback = false;
   std::optional<double> seek;

@@ -58,6 +58,7 @@ struct Arguments {
   bool overlay = true;
   bool outlines = true;
   bool mmd_self_shadow = true;
+  bool mmd_morph_tints = false;
   bool outline_culling = true;
   Toon::LightingDebug lighting;
   std::optional<double> time;
@@ -223,6 +224,12 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--mmd-self-shadow must be on or off");
       }
       result.mmd_self_shadow = value == "on";
+    } else if (option == "--mmd-morph-tints") {
+      const auto value = next();
+      if (value != "on" && value != "off") {
+        throw std::invalid_argument("--mmd-morph-tints must be on or off");
+      }
+      result.mmd_morph_tints = value == "on";
     } else if (option == "--screenshot") {
       result.screenshot = next();
     } else if (option == "--capture-sequence") {
@@ -267,6 +274,9 @@ Arguments ParseArguments(int argc, char** argv) {
                    "                           scene (default on)\n"
                    "  --outlines on|off        draw hulls (default on)\n"
                    "  --mmd-self-shadow on|off MMD's self-shadow (default on)\n"
+                   "  --mmd-morph-tints on|off full.fx's material morph tints,\n"
+                   "                           which MMD does not draw\n"
+                   "                           (default off)\n"
                    "  --outline-culling on|off omit offscreen hulls (default on)\n"
                    "  --lighting scene|camera  scene lights or camera key\n"
                    "  --direct-strength N      direct multiplier [0, 4]\n"
@@ -715,6 +725,7 @@ int RunViewport(int argc, char** argv) {
     bool overlay_shown = overlay != nullptr;
     bool outlines = arguments.outlines;
     bool mmd_self_shadow = arguments.mmd_self_shadow;
+    bool mmd_morph_tints = arguments.mmd_morph_tints;
     Toon::LightingDebug lighting = arguments.lighting;
     Toon::OverlayDrawList overlay_draws;
     Toon::viewport::FrameTelemetry telemetry;
@@ -952,6 +963,7 @@ int RunViewport(int argc, char** argv) {
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
       draws.mmd_self_shadow = mmd_self_shadow;
+      draws.mmd_morph_tints = mmd_morph_tints;
       draws.outline_frustum_culling = arguments.outline_culling;
       draws.outline_occlusion_culling = arguments.outline_culling;
       draws.lighting = lighting;
@@ -987,6 +999,7 @@ int RunViewport(int argc, char** argv) {
         shown.vsync = arguments.vsync;
         shown.outlines = outlines;
         shown.mmd_self_shadow = mmd_self_shadow;
+        shown.mmd_morph_tints = mmd_morph_tints;
         shown.lighting = lighting;
         shown.lights = draws.lights.size();
         shown.statistics = &session->statistics();
@@ -1065,6 +1078,11 @@ int RunViewport(int argc, char** argv) {
         if (controls.mmd_self_shadow_changed) {
           mmd_self_shadow = controls.mmd_self_shadow;
           draws.mmd_self_shadow = mmd_self_shadow;
+          telemetry = {};
+        }
+        if (controls.mmd_morph_tints_changed) {
+          mmd_morph_tints = controls.mmd_morph_tints;
+          draws.mmd_morph_tints = mmd_morph_tints;
           telemetry = {};
         }
       }

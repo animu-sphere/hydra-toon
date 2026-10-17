@@ -8,13 +8,23 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Changed
+
+- MMD material morphs' texture, sphere and toon tints no longer draw by
+  default: MMD v9.32's frames of two models' tinted morphs show MMD
+  draws none (MAT-Q6, resolved). `DrawList::mmd_morph_tints`, the render
+  setting `toon:mmdMorphTints` or the viewport's `--mmd-morph-tints` and
+  its "MMD morph tints" checkbox draw them in `full.fx`'s form, a frame
+  value that rewrites no slot. `renderer.material.mmd_morph` covers both
+  ([renderer report 62](docs/reports/renderer/62-2026-10-17-mat-q6-morph-tints.md)).
+
 ### Added
 
 - MMD material morphs' texture, sphere and toon tints draw: the MMD
   block of `ToonMaterial` carries each as the evaluated multiply and add
   (`texture_tint`, `sphere_tint`, `toon_tint`, with `Toon::Float4`), and
   `mmd_opaque` and `mmd_transparent` tint the base, sphere and toon texels
-  in MikuMikuEffect's `full.fx` form (MAT-Q6, provisional). An evaluated
+  in MikuMikuEffect's `full.fx` form (MAT-Q6). An evaluated
   override sets them, a tint edit rewrites one slot, and `MmdParameters` is
   240 bytes. The viewport's Materials panel edits an MMD material's
   specular, ambient, edge alpha and tints. The headless check
