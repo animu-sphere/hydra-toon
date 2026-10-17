@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Generic USD mesh primvars: face-varying, uniform and constant `st` and
+  normals, including indexed data resolved by Hydra. Corner vertices retain
+  skin influences, morph ranges, MMD edge scales and additional UVs; smooth
+  normals are computed before splitting UV seams. UV/normal value edits
+  retain topology, and pose/weight edits retain geometry
+  ([renderer report 70](docs/reports/renderer/70-2026-10-18-mesh-corner-primvars.md)).
+
 - PreviewSurface image inputs for diffuse colour, emission, metallic,
   roughness and opacity: `UsdUVTexture` channel selection, scale/bias,
   fallback, colour space, wrapping, `st` and one `UsdTransform2d`. UV and
@@ -26,6 +33,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
   ([renderer report 68](docs/reports/renderer/68-2026-10-17-preview-surface-constants.md)).
 
 ### Changed
+
+- Left-handed mesh winding uses `HdMeshUtil`'s conversion once, preserving
+  the front face instead of reversing it again in the adapter.
 
 - glTF PBR and mixed MToon/PBR avatar reproduction move to the later
   MaterialX work. v0.5.0 retains the ordinary USD PreviewSurface fallback;

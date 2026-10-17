@@ -185,13 +185,16 @@ void RenderWorld::SetMeshSubTextureUVs(MeshId mesh, std::vector<Float2> uvs) {
   dirty_ = true;
 }
 
-void RenderWorld::SetMeshNormals(MeshId mesh, std::vector<Float3> normals) {
+void RenderWorld::SetMeshNormals(MeshId mesh, std::vector<Float3> normals,
+    bool authored) {
   MeshRecord* record = Find(mesh);
-  if (record == nullptr || *record->authored_normals == normals) {
+  if (record == nullptr || (*record->authored_normals == normals &&
+                              record->normals_authored == authored)) {
     return;
   }
   record->authored_normals =
       std::make_shared<const std::vector<Float3>>(std::move(normals));
+  record->normals_authored = authored;
   record->normals_stale = true;
   dirty_ = true;
 }
@@ -702,7 +705,7 @@ void RenderWorld::Commit(FrameSnapshot& snapshot) {
                                  SmoothNormals(*mesh.points, *mesh.indices));
         mesh.normals_revision = Stamp();
       }
-      mesh.authored_normals = authored;
+      mesh.authored_normals = authored && record.normals_authored;
       record.normals_stale = false;
     }
     if (record.parts_stale) {

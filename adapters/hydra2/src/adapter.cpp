@@ -397,9 +397,10 @@ public:
     world_.SetMeshSubTextureUVs(mesh, std::move(uvs));
   }
 
-  void SetMeshNormals(Toon::MeshId mesh, std::vector<Toon::Float3> normals) {
+  void SetMeshNormals(Toon::MeshId mesh, std::vector<Toon::Float3> normals,
+      bool authored = true) {
     std::scoped_lock lock(mutex_);
-    world_.SetMeshNormals(mesh, std::move(normals));
+    world_.SetMeshNormals(mesh, std::move(normals), authored);
   }
 
   void SetMeshTransform(Toon::MeshId mesh, const Toon::Matrix4& transform) {
@@ -804,7 +805,8 @@ bool ReadInput(HdSceneDelegate* delegate, const SdfPath& computation,
 class HdToonMesh final : public HdMesh {
 public:
   HdToonMesh(const SdfPath& id, std::shared_ptr<HdToonAdapterState> state)
-      : HdMesh(id), state_(std::move(state)), mesh_(state_->CreateMesh(id)) {
+      : HdMesh(id), state_(std::move(state)), mesh_(state_->CreateMesh(id)),
+        source_mesh_(source_.CreateMesh()) {
   }
 
   ~HdToonMesh() override {
@@ -829,7 +831,12 @@ public:
     (void)repr_token;
     const SdfPath& id = GetId();
     if (HdChangeTracker::IsTopologyDirty(*dirty_bits, id)) {
-      state_->SetMeshTopology(mesh_, Triangulate(GetMeshTopology(delegate)));
+      const auto topology = GetMeshTopology(delegate);
+      if (topology_ != topology) {
+        topology_ = topology;
+        source_.SetMeshTopology(source_mesh_, Triangulate(topology_).indices);
+        layout_dirty_ = true;
+      }
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, HdTokens->points)) {
       SyncPoints(delegate);
@@ -838,14 +845,16 @@ public:
       SyncNormals(delegate);
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, StToken())) {
-      state_->SetMeshUVs(mesh_, ReadUVs(delegate));
+      uvs_ = ReadUVs(delegate);
+      source_.SetMeshUVs(source_mesh_, uvs_);
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, EdgeScaleToken())) {
-      state_->SetMeshEdgeScales(mesh_, ReadEdgeScales(delegate));
+      source_.SetMeshEdgeScales(source_mesh_, ReadEdgeScales(delegate));
     }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, Uv1Token())) {
-      state_->SetMeshSubTextureUVs(mesh_, ReadSubTextureUVs(delegate));
+      source_.SetMeshSubTextureUVs(source_mesh_, ReadSubTextureUVs(delegate));
     }
+    PublishGeometry();
     if (HdChangeTracker::IsTransformDirty(*dirty_bits, id)) {
       state_->SetMeshTransform(mesh_, ToToon(delegate->GetTransform(id)));
     }
@@ -876,8 +885,165 @@ protected:
   }
 
 private:
-  // The core takes triangles counter-clockwise from the front, so a
-  // left-handed mesh's are reversed here. The triangles of each face subset
+  void SetSourcePoints(std::vector<Toon::Float3> points) {
+    if (source_frame_.meshes.empty() || *source_frame_.meshes[0].points != points) {
+      source_.SetMeshPoints(source_mesh_, std::move(points));
+    }
+  }
+
+  static bool NeedsCorners(HdInterpolation interpolation) {
+    return interpolation == HdInterpolationFaceVarying ||
+           interpolation == HdInterpolationUniform;
+  }
+
+  template <typename T>
+  std::vector<T> PerPoint(const std::vector<T>& values,
+      const std::vector<std::uint32_t>& points, std::size_t width = 1) const {
+    if (values.empty()) return {};
+    std::vector<T> output;
+    output.reserve(points.size() * width);
+    for (const std::uint32_t point : points) {
+      if (point >= values.size() / width) return {};
+      const auto first = values.begin() + point * width;
+      output.insert(output.end(), first, first + width);
+    }
+    return output;
+  }
+
+  template <typename T>
+  std::vector<T> Primvar(const std::vector<T>& values,
+      HdInterpolation interpolation) const {
+    if (values.empty()) return {};
+    if (interpolation == HdInterpolationConstant) {
+      return std::vector<T>(split_ ? corner_points_.size() :
+          source_frame_.meshes[0].points->size(), values.front());
+    }
+    if (interpolation == HdInterpolationFaceVarying) {
+      return PerPoint(values, corners_);
+    }
+    if (interpolation == HdInterpolationUniform) {
+      return PerPoint(values, corner_faces_);
+    }
+    return split_ ? PerPoint(values, corner_points_) : values;
+  }
+
+  // Retain source-point geometry locally. Splitting only at this adapter
+  // boundary keeps every backend and evaluated-state consumer on the same
+  // per-vertex contract. Revisions avoid touching static arrays on pose or
+  // weight-only syncs.
+  void PublishGeometry() {
+    source_.Commit(source_frame_);
+    const bool split = NeedsCorners(uv_interpolation_) ||
+                       NeedsCorners(normal_interpolation_);
+    const bool layout = layout_dirty_ || split != split_;
+    split_ = split;
+    HdToonTriangulation triangles;
+    if (layout) {
+      triangles = Triangulate(topology_);
+      if (split_) {
+        VtIntArray ids(topology_.GetFaceVertexIndices().size());
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+          ids[i] = static_cast<int>(i);
+        }
+        HdMeshTopology corner_topology(topology_.GetScheme(),
+            topology_.GetOrientation(), topology_.GetFaceVertexCounts(),
+            ids, topology_.GetHoleIndices());
+        corner_topology.SetGeomSubsets(topology_.GetGeomSubsets());
+        triangles = Triangulate(corner_topology);
+        // Only emitted corners participate: holes and degenerate faces
+        // must not require values or influences for unused vertices.
+        corners_ = triangles.indices;
+        std::sort(corners_.begin(), corners_.end());
+        corners_.erase(std::unique(corners_.begin(), corners_.end()), corners_.end());
+        corner_points_.clear();
+        corner_faces_.clear();
+        const auto& counts = topology_.GetFaceVertexCounts();
+        std::size_t face = 0;
+        std::size_t end = counts.empty() ? 0U :
+            static_cast<std::size_t>(std::max(counts[0], 0));
+        for (const std::uint32_t corner : corners_) {
+          while (corner >= end && face + 1 < counts.size()) {
+            end += static_cast<std::size_t>(std::max(counts[++face], 0));
+          }
+          corner_faces_.push_back(static_cast<std::uint32_t>(face));
+          const auto& source_indices = topology_.GetFaceVertexIndices();
+          const int point = corner < source_indices.size() ? source_indices[corner] : -1;
+          corner_points_.push_back(point < 0 ?
+              std::numeric_limits<std::uint32_t>::max() :
+              static_cast<std::uint32_t>(point));
+        }
+        for (std::uint32_t& corner : triangles.indices) {
+          corner = static_cast<std::uint32_t>(
+              std::lower_bound(corners_.begin(), corners_.end(), corner) - corners_.begin());
+        }
+      }
+      state_->SetMeshTopology(mesh_, std::move(triangles));
+    }
+
+    const auto& before_normals = source_frame_.meshes[0];
+    if (normals_dirty_ || layout ||
+        before_normals.points_revision != published_.points_revision) {
+      if (NeedsCorners(normal_interpolation_)) {
+        source_.SetMeshNormals(source_mesh_, {});
+      } else if (normal_interpolation_ == HdInterpolationConstant && !normals_.empty()) {
+        source_.SetMeshNormals(source_mesh_,
+            std::vector<Toon::Float3>(before_normals.points->size(), normals_.front()));
+      } else {
+        source_.SetMeshNormals(source_mesh_, normals_);
+      }
+      source_.Commit(source_frame_);
+    }
+    const auto& source = source_frame_.meshes[0];
+    if (layout || source.points_revision != published_.points_revision) {
+      state_->SetMeshPoints(mesh_, split_ ?
+          PerPoint(*source.points, corner_points_) : *source.points);
+    }
+    if (layout || normals_dirty_ || source.normals_revision != published_.normals_revision) {
+      auto normals = NeedsCorners(normal_interpolation_)
+          ? Primvar(normals_, normal_interpolation_) : std::vector<Toon::Float3>{};
+      const bool authored = !normals.empty() || source.authored_normals;
+      if (normals.empty()) {
+        normals = split_ ? PerPoint(*source.normals, corner_points_) : *source.normals;
+      }
+      state_->SetMeshNormals(mesh_, std::move(normals), authored);
+    }
+    if (layout || source.uvs_revision != published_.uvs_revision ||
+        (uv_interpolation_ == HdInterpolationConstant &&
+            source.points_revision != published_.points_revision) ||
+        uv_interpolation_ != published_uv_interpolation_) {
+      state_->SetMeshUVs(mesh_, Primvar(uvs_, uv_interpolation_));
+    }
+    if (layout || source.edge_scales_revision != published_.edge_scales_revision) {
+      state_->SetMeshEdgeScales(mesh_, split_ ?
+          PerPoint(*source.edge_scales, corner_points_) : *source.edge_scales);
+    }
+    if (layout || source.sub_texture_uvs_revision != published_.sub_texture_uvs_revision) {
+      state_->SetMeshSubTextureUVs(mesh_, split_ ?
+          PerPoint(*source.sub_texture_uvs, corner_points_) : *source.sub_texture_uvs);
+    }
+    if (layout || source.skin_revision != published_.skin_revision) {
+      Toon::ToonSkin skin;
+      skin.influences_per_point = source.influences_per_point;
+      skin.constant = source.constant_influences;
+      skin.geom_bind = source.geom_bind;
+      skin.influences = split_ && !skin.constant && skin.influences_per_point != 0 ?
+          PerPoint(*source.influences, corner_points_, skin.influences_per_point) :
+          *source.influences;
+      state_->SetMeshSkin(mesh_, std::move(skin));
+    }
+    if (layout || source.morph_revision != published_.morph_revision) {
+      Toon::ToonMorph morph{*source.morph_offsets, split_ ?
+          PerPoint(*source.morph_ranges, corner_points_) : *source.morph_ranges};
+      state_->SetMeshMorph(mesh_, std::move(morph));
+    }
+    published_ = source;
+    published_uv_interpolation_ = uv_interpolation_;
+    layout_dirty_ = false;
+    normals_dirty_ = false;
+  }
+
+  // HdMeshUtil already converts left-handed topology to the core's
+  // counter-clockwise front winding. The triangles of each face subset
   // that binds a material are grouped, in the subsets' order, into one
   // range of the list, and the triangles of faces no such subset names
   // follow them, drawn with the mesh's own binding, as Storm draws them. A
@@ -887,8 +1053,6 @@ private:
     VtVec3iArray triangles;
     VtIntArray primitive_params;
     util.ComputeTriangleIndices(&triangles, &primitive_params);
-    const bool left_handed =
-        topology.GetOrientation() == HdTokens->leftHanded;
 
     // Each face's subset, or `rest` for none.
     const HdGeomSubsets& subsets = topology.GetGeomSubsets();
@@ -925,10 +1089,8 @@ private:
       }
       std::vector<std::uint32_t>& indices = groups[group];
       indices.push_back(static_cast<std::uint32_t>(triangle[0]));
-      indices.push_back(
-          static_cast<std::uint32_t>(triangle[left_handed ? 2 : 1]));
-      indices.push_back(
-          static_cast<std::uint32_t>(triangle[left_handed ? 1 : 2]));
+      indices.push_back(static_cast<std::uint32_t>(triangle[1]));
+      indices.push_back(static_cast<std::uint32_t>(triangle[2]));
     }
 
     HdToonTriangulation result;
@@ -975,13 +1137,13 @@ private:
           HdExtComputationUtils::GetComputedPrimvarValues({descriptor},
               delegate);
       const auto found = values.find(HdTokens->points);
-      state_->SetMeshPoints(mesh_, ReadPoints(found == values.end()
+      SetSourcePoints(ReadPoints(found == values.end()
                                                   ? GetPoints(delegate)
                                                   : found->second));
       return;
     }
     Unskin();
-    state_->SetMeshPoints(mesh_, ReadPoints(GetPoints(delegate)));
+    SetSourcePoints(ReadPoints(GetPoints(delegate)));
   }
 
   // False, having set nothing, when the skinning is not linear blend or an
@@ -1097,13 +1259,13 @@ private:
                                       : Toon::ToonJointInfluence{});
       }
     }
-    state_->SetMeshSkin(mesh_, std::move(skin));
+    source_.SetMeshSkin(source_mesh_, std::move(skin));
     if (!skinned_ || points != rest_points_) {
-      state_->SetMeshPoints(mesh_, ReadPoints(VtValue(points)));
+      SetSourcePoints(ReadPoints(VtValue(points)));
     }
     rest_points_ = std::move(points);
     std::vector<Subshape> subshapes = ReadSubshapes(delegate);
-    state_->SetMeshMorph(mesh_, ReadMorph(subshapes));
+    source_.SetMeshMorph(source_mesh_, ReadMorph(subshapes));
     std::vector<HdToonResidentSubshape> identities;
     identities.reserve(subshapes.size());
     for (Subshape& subshape : subshapes) {
@@ -1330,8 +1492,8 @@ private:
 
   void Unskin() {
     if (skinned_) {
-      state_->SetMeshSkin(mesh_, {});
-      state_->SetMeshMorph(mesh_, {});
+      source_.SetMeshSkin(source_mesh_, {});
+      source_.SetMeshMorph(source_mesh_, {});
       state_->SetMeshMorphWeights(mesh_, {});
       state_->SetMeshResidentSubshapes(mesh_, {});
       skinned_ = false;
@@ -1350,32 +1512,38 @@ private:
   // with the points. usdSkelImaging makes that computation only under
   // USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS and for a mesh whose
   // subdivision scheme is none; otherwise it hides a skinned mesh's normals.
-  // Face-varying normals need split vertices, as a face-varying `st` does;
-  // without authored normals the core derives smooth rest normals. Morph
-  // offsets are applied to either kind in the GPU before skinning.
+  // Face-varying normals use the same corner map as UVs; without authored
+  // normals, derive smooth rest normals before splitting. Morph offsets
+  // are applied to either kind in the GPU before skinning.
   void SyncNormals(HdSceneDelegate* delegate) {
-    for (const HdExtComputationPrimvarDescriptor& descriptor :
-        delegate->GetExtComputationPrimvarDescriptors(GetId(),
-            HdInterpolationVertex)) {
-      if (descriptor.name == HdTokens->normals) {
-        SyncRestNormals(delegate, descriptor.sourceComputationId);
-        return;
+    for (const auto interpolation : {HdInterpolationVertex,
+             HdInterpolationVarying, HdInterpolationFaceVarying}) {
+      for (const HdExtComputationPrimvarDescriptor& descriptor :
+          delegate->GetExtComputationPrimvarDescriptors(GetId(), interpolation)) {
+        if (descriptor.name == HdTokens->normals) {
+          SyncRestNormals(delegate, descriptor.sourceComputationId);
+          return;
+        }
       }
     }
     normals_aggregator_ = SdfPath();
     normals_revision_ = 0;
     for (const HdInterpolation interpolation :
-        {HdInterpolationVertex, HdInterpolationVarying}) {
+        {HdInterpolationVertex, HdInterpolationVarying,
+            HdInterpolationFaceVarying, HdInterpolationUniform, HdInterpolationConstant}) {
       for (const HdPrimvarDescriptor& descriptor :
           GetPrimvarDescriptors(delegate, interpolation)) {
         if (descriptor.name == HdTokens->normals) {
-          state_->SetMeshNormals(mesh_,
-              ReadPoints(GetPrimvar(delegate, HdTokens->normals)));
+          normal_interpolation_ = interpolation;
+          normals_ = ReadPoints(GetPrimvar(delegate, HdTokens->normals));
+          normals_dirty_ = true;
           return;
         }
       }
     }
-    state_->SetMeshNormals(mesh_, {});
+    normals_.clear();
+    normal_interpolation_ = HdInterpolationVertex;
+    normals_dirty_ = true;
   }
 
   // The aggregator's rest normals are read again only when its inputs
@@ -1402,13 +1570,14 @@ private:
     VtVec3fArray normals;
     bool face_varying = false;
     if (aggregator.IsEmpty() ||
-        !ReadInput(delegate, aggregator, SkinTokens->restNormals, normals) ||
-        (ReadInput(delegate, aggregator, SkinTokens->hasFaceVaryingNormals,
-             face_varying) &&
-            face_varying)) {
+        !ReadInput(delegate, aggregator, SkinTokens->restNormals, normals)) {
       normals.clear();
     }
-    state_->SetMeshNormals(mesh_, ReadPoints(VtValue(normals)));
+    ReadInput(delegate, aggregator, SkinTokens->hasFaceVaryingNormals, face_varying);
+    normal_interpolation_ = face_varying
+        ? HdInterpolationFaceVarying : HdInterpolationVertex;
+    normals_ = ReadPoints(VtValue(normals));
+    normals_dirty_ = true;
   }
 
   static const TfToken& StToken() {
@@ -1416,18 +1585,20 @@ private:
     return st;
   }
 
-  // `st`, the set a VRM importer writes TEXCOORD_0 to, when it has one
-  // value per point. A face-varying `st` needs split vertices, which the
-  // core does not make yet, so it is not read.
-  std::vector<Toon::Float2> ReadUVs(HdSceneDelegate* delegate) const {
+  // Hydra resolves indexed primvars before GetPrimvar. Retain the
+  // interpolation so PublishGeometry can map source points or corners.
+  std::vector<Toon::Float2> ReadUVs(HdSceneDelegate* delegate) {
+    uv_interpolation_ = HdInterpolationVertex;
     std::vector<Toon::Float2> uvs;
     for (const HdInterpolation interpolation :
-        {HdInterpolationVertex, HdInterpolationVarying}) {
+        {HdInterpolationVertex, HdInterpolationVarying,
+            HdInterpolationFaceVarying, HdInterpolationUniform, HdInterpolationConstant}) {
       for (const HdPrimvarDescriptor& descriptor :
           GetPrimvarDescriptors(delegate, interpolation)) {
         if (descriptor.name != StToken()) {
           continue;
         }
+        uv_interpolation_ = interpolation;
         const VtValue value = GetPrimvar(delegate, StToken());
         if (value.IsHolding<VtVec2fArray>()) {
           const VtVec2fArray& source = value.UncheckedGet<VtVec2fArray>();
@@ -1528,6 +1699,20 @@ private:
 
   std::shared_ptr<HdToonAdapterState> state_;
   Toon::MeshId mesh_;
+  Toon::RenderWorld source_;
+  Toon::MeshId source_mesh_;
+  Toon::FrameSnapshot source_frame_;
+  Toon::MeshSnapshot published_;
+  HdMeshTopology topology_;
+  std::vector<std::uint32_t> corners_, corner_points_, corner_faces_;
+  std::vector<Toon::Float2> uvs_;
+  std::vector<Toon::Float3> normals_;
+  HdInterpolation uv_interpolation_ = HdInterpolationVertex;
+  HdInterpolation normal_interpolation_ = HdInterpolationVertex;
+  HdInterpolation published_uv_interpolation_ = HdInterpolationVertex;
+  bool split_ = false;
+  bool layout_dirty_ = true;
+  bool normals_dirty_ = true;
   // What the last skinned sync read from the aggregator, and as of which of
   // its revisions; 0 when it must be read again.
   SdfPath aggregator_;
