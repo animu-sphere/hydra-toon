@@ -17,12 +17,21 @@ bool Finite(const Matrix4& matrix) {
 bool Finite(const Float3& value) {
   return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
+bool Finite(const Float4& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) && std::isfinite(value.w);
+}
 bool Finite(const ToonTextureRef& ref) {
   return std::isfinite(ref.offset.x) && std::isfinite(ref.offset.y) &&
       std::isfinite(ref.scale.x) && std::isfinite(ref.scale.y) && std::isfinite(ref.rotation);
 }
 bool Finite(const ToonMaterial& material) {
   const auto& m = material.mtoon;
+  const auto& p = material.preview;
+  if (!Finite(p.metallic_texture) || !Finite(p.roughness_texture) || !Finite(p.opacity_texture) ||
+      !std::all_of(p.inputs.begin(), p.inputs.end(), [](const auto& input) {
+        return input.channel < 4 && Finite(input.scale) && Finite(input.bias) && Finite(input.fallback) &&
+            std::isfinite(input.uv_fallback.x) && std::isfinite(input.uv_fallback.y);
+      })) return false;
   const float values[] = {material.alpha, material.alpha_cutoff, material.normal_scale,
       material.preview.metallic, material.preview.roughness,
       material.outline_width, m.shading_shift, m.shading_shift_texture_scale,

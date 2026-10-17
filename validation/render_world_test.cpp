@@ -683,8 +683,20 @@ int main() {
   auto preview_values = preview;
   preview_values.preview.metallic = 0.8F;
   preview_values.preview.roughness = 0.2F;
+  preview_values.preview.inputs[0].scale.x = 2;
+  preview_values.preview.inputs[1].bias.y = 0.1F;
   if (!Check(preview_values != preview && !Toon::IsStructuralChange(preview, preview_values),
           "PreviewSurface metallic/roughness edits must be value-only")) return 1;
+  for (auto role : {&Toon::ToonMaterial::PreviewSurface::metallic_texture,
+                    &Toon::ToonMaterial::PreviewSurface::roughness_texture,
+                    &Toon::ToonMaterial::PreviewSurface::opacity_texture}) {
+    auto textured = preview;
+    (textured.preview.*role).texture = 1;
+    if (!Check(Toon::IsStructuralChange(preview, textured), "PreviewSurface texture identity must be structural")) return 1;
+    auto transformed = textured;
+    (transformed.preview.*role).offset.x = 0.5F;
+    if (!Check(!Toon::IsStructuralChange(textured, transformed), "PreviewSurface UV edits must be value-only")) return 1;
+  }
   const auto before_light = world.Commit();
   const auto light_id = world.CreateLight();
   Toon::ToonLight light;

@@ -22,6 +22,7 @@ repositories' work is planned in their own roadmaps.
 | v0.7.0-scale | Host / compositor integration and GPU texture handoff; version assignment remains provisional | [later.md](later.md#host-and-compositor-integration-v070-scale) |
 | later | Platform and GPU coverage: Linux, and AMD and Intel Vulkan | [later.md](later.md#platform-and-gpu-coverage) |
 | later | GPU-driven rendering and other candidates, as evidence asks | [later.md](later.md#after-v060) |
+| later | glTF PBR fidelity through MaterialX, including mixed MToon/PBR avatars | [later.md](later.md#gltf-pbr-through-materialx) |
 
 ## Priority
 

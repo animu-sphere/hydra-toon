@@ -308,8 +308,10 @@ weighs no morph.
 
 ## 12. PreviewSurface and generic USD fallback
 
-PreviewSurface is the basic PBR fallback for ordinary USD assets and for glTF
-metallic-roughness materials imported into a VRM stage. MToon and MMD retain
+PreviewSurface is the basic PBR fallback for ordinary USD assets. glTF
+metallic-roughness fidelity in VRM avatars is planned through MaterialX in
+the [later roadmap](../roadmap/later.md#gltf-pbr-through-materialx), separately
+from this fallback. MToon and MMD retain
 selection priority (§3); extending generic coverage must preserve their
 reference fidelity. This renderer does not expand into a general lookdev
 renderer or an arbitrary material-graph compiler.
@@ -317,8 +319,8 @@ renderer or an arbitrary material-graph compiler.
 Consume base/diffuse colour, metallic, roughness, normal, emissive and opacity,
 their textures and basic texture transforms through the ordinary Hydra
 material network. Preserve Opaque, Mask and Blend behaviour, including mixed
-MToon and metallic-roughness materials in one scene. Emission retains its
-imported strength. Mesh input must preserve the UV data these networks use,
+toon and PreviewSurface materials in one scene. Emission retains its
+authored strength. Mesh input must preserve the UV data these networks use,
 including face-varying `st`. Unsupported materials use an explicit fallback
 rather than breaking the scene.
 

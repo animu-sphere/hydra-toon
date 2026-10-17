@@ -26,11 +26,13 @@
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/imaging/hio/image.h>
 #include <pxr/usd/sdf/assetPath.h>
+#include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -632,8 +634,154 @@ def Material "Specular" {
   return true;
 }
 
+bool PreviewTextureCheck() {
+  const auto image_path = std::filesystem::temp_directory_path() / "toon-preview-network.png";
+  std::vector<std::uint8_t> pixels{128, 64, 192, 96};
+  HioImage::StorageSpec storage;
+  storage.width = storage.height = storage.depth = 1;
+  storage.format = HioFormatUNorm8Vec4;
+  storage.data = pixels.data();
+  const auto writer = HioImage::OpenForWriting(image_path.generic_string());
+  if (!Check(writer && writer->Write(storage), "PreviewSurface image write failed")) return false;
+  std::string usd = R"usd(#usda 1.0
+def Material "Textured" {
+    token outputs:surface.connect = </Textured/Pbr.outputs:surface>
+    def Shader "Pbr" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:diffuseColor.connect = </Textured/Color.outputs:rgb>
+        color3f inputs:emissiveColor.connect = </Textured/Color.outputs:rgb>
+        float inputs:metallic.connect = </Textured/Data.outputs:b>
+        float inputs:roughness.connect = </Textured/Data.outputs:g>
+        float inputs:opacity.connect = </Textured/Data.outputs:a>
+        float inputs:opacityThreshold.timeSamples = { 0: 0, 1: 0.5 }
+        token outputs:surface
+    }
+    def Shader "Color" {
+        uniform token info:id = "UsdUVTexture"
+        asset inputs:file = @IMAGE@
+        token inputs:sourceColorSpace = "sRGB"
+        token inputs:wrapS = "clamp"
+        token inputs:wrapT = "mirror"
+        float4 inputs:scale = (2, 3, 4, 1)
+        float4 inputs:bias = (0.1, 0.2, 0.3, 0)
+        float4 inputs:fallback = (0.2, 0.3, 0.4, 1)
+        float2 inputs:st.connect = </Textured/Transform.outputs:result>
+        float3 outputs:rgb
+    }
+    def Shader "Data" {
+        uniform token info:id = "UsdUVTexture"
+        asset inputs:file = @IMAGE@
+        token inputs:sourceColorSpace = "raw"
+        float2 inputs:st.connect = </Textured/Reader.outputs:result>
+        float outputs:g
+        float outputs:b
+        float outputs:a
+    }
+    def Shader "Reader" {
+        uniform token info:id = "UsdPrimvarReader_float2"
+        string inputs:varname = "st"
+        float2 outputs:result
+    }
+    def Shader "Transform" {
+        uniform token info:id = "UsdTransform2d"
+        float2 inputs:in.connect = </Textured/Reader.outputs:result>
+        float2 inputs:scale = (2, 3)
+        float2 inputs:translation = (0.1, 0.2)
+        float inputs:rotation.timeSamples = { 0: 0, 1: 90 }
+        float2 outputs:result
+    }
+}
+)usd";
+  for (auto at = usd.find("IMAGE"); at != std::string::npos; at = usd.find("IMAGE"))
+    usd.replace(at, 5, image_path.generic_string());
+  const auto stage = UsdStage::CreateInMemory();
+  if (!stage->GetRootLayer()->ImportFromString(usd)) return false;
+  UsdImagingCreateSceneIndicesInfo info;
+  info.stage = stage;
+  const auto scene = UsdImagingCreateSceneIndices(info);
+  HdToonRenderDelegate delegate;
+  std::unique_ptr<HdRenderIndex> index(HdRenderIndex::New(&delegate, {}));
+  index->InsertSceneIndex(scene.finalSceneIndex, SdfPath::AbsoluteRootPath());
+  HdTaskSharedPtrVector tasks;
+  HdTaskContext context;
+  Toon::TextureId first = 0;
+  for (const double time : {0.0, 1.0}) {
+    scene.stageSceneIndex->SetTime(UsdTimeCode(time));
+    index->SyncAll(&tasks, &context);
+    const auto* material = FindMaterial(*index, SdfPath("/Textured"));
+    if (!Check(material != nullptr, "textured USD material did not sync")) return false;
+    const auto& value = material->GetToonMaterial();
+    const auto& p = value.preview;
+    if (!Check(value.base_texture.texture && value.base_texture.texture == value.emissive_texture.texture &&
+                   p.metallic_texture.texture && p.metallic_texture.texture != value.base_texture.texture &&
+                   p.metallic_texture.texture == p.roughness_texture.texture &&
+                   p.metallic_texture.texture == p.opacity_texture.texture &&
+                   p.inputs[2].channel == 2 && p.inputs[3].channel == 1 && p.inputs[4].channel == 3 &&
+                   std::all_of(p.inputs.begin(), p.inputs.end(), [](const auto& input) { return input.connected; }) &&
+                   p.inputs[0].scale == Toon::Float4{2, 3, 4, 1} &&
+                   p.inputs[0].bias == Toon::Float4{0.1F, 0.2F, 0.3F, 0} &&
+                   p.inputs[0].fallback == Toon::Float4{0.2F, 0.3F, 0.4F, 1} &&
+                   value.base_texture.wrap_s == Toon::ToonWrap::ClampToEdge &&
+                   value.base_texture.wrap_t == Toon::ToonWrap::MirroredRepeat &&
+                   value.alpha_mode == (time == 0 ? Toon::ToonAlphaMode::Blend : Toon::ToonAlphaMode::Mask),
+            "PreviewSurface texture channels, colour space, identity or sampling differ")) return false;
+    const auto& ref = value.base_texture;
+    const Toon::Float2 expected = time == 0 ? Toon::Float2{0.1F, -2.2F} : Toon::Float2{-2.9F, 0.8F};
+    if (!Check(ref.scale == Toon::Float2{2, 3} && std::abs(ref.offset.x - expected.x) < 1e-5F &&
+                   std::abs(ref.offset.y - expected.y) < 1e-5F &&
+                   std::abs(ref.rotation - static_cast<float>(time) * 1.57079632679F) < 1e-5F,
+            "USD Transform2d must be conjugated by the image V flip")) return false;
+    if (time == 0) first = value.base_texture.texture;
+    else if (!Check(first == value.base_texture.texture, "UV value edit reloaded the image")) return false;
+  }
+  // Unauthored sourceColorSpace uses Hio's auto rule, independently of
+  // whether UsdImaging publishes an empty or explicit "auto" metadata token.
+  stage->GetAttributeAtPath(SdfPath("/Textured/Color.inputs:sourceColorSpace")).Clear();
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  if (!Check(FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial().base_texture.texture == first,
+          "default texture colour space must use auto")) return false;
+  const auto before_snapshot = delegate.CommitScene();
+  const auto before = std::find_if(before_snapshot.materials.begin(), before_snapshot.materials.end(),
+      [first](const auto& entry) { return entry.material.base_texture.texture == first; });
+  if (!Check(before != before_snapshot.materials.end(), "textured material missing from snapshot")) return false;
+  const auto uv_before = *before;
+  stage->GetAttributeAtPath(SdfPath("/Textured/Transform.inputs:rotation")).Set(45.0F, UsdTimeCode(1));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  const auto after_snapshot = delegate.CommitScene();
+  const auto after = std::find_if(after_snapshot.materials.begin(), after_snapshot.materials.end(),
+      [&](const auto& entry) { return entry.id == uv_before.id; });
+  if (!Check(after != after_snapshot.materials.end(), "edited material missing from snapshot")) return false;
+  const auto uv_after = *after;
+  if (!Check(uv_before.structure_revision == uv_after.structure_revision &&
+                 uv_before.parameters_revision != uv_after.parameters_revision &&
+                 uv_after.material.base_texture.texture == first,
+          "USD transform edit must change parameters alone")) return false;
+  // An unresolved file retains the texture node's fallback. Unsupported UV
+  // sets and unsupported output connections retain the surface constants.
+  stage->GetAttributeAtPath(SdfPath("/Textured/Color.inputs:file")).Set(SdfAssetPath("missing-preview-image.png"));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  const auto& missing = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
+  if (!Check(missing.preview.inputs[0].connected && missing.base_texture.texture == 0,
+          "unresolved PreviewSurface image must keep the texture fallback")) return false;
+  stage->GetAttributeAtPath(SdfPath("/Textured/Reader.inputs:varname")).Set(std::string("st1"));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  const auto& unsupported = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
+  if (!Check(!unsupported.preview.inputs[0].connected && !unsupported.preview.inputs[4].connected &&
+                 unsupported.base_texture.texture == 0 && unsupported.preview.opacity_texture.texture == 0,
+          "unsupported UV set must not silently sample st")) return false;
+  index.reset();
+  std::error_code ignored;
+  std::filesystem::remove(image_path, ignored);
+  return true;
+}
+
 int RunRetained() {
   if (!PreviewNetworkCheck()) return 1;
+  if (!PreviewTextureCheck()) return 1;
   if (!Check(HdToonReadMaterial(nullptr).values == Toon::ToonMaterial{},
           "a material with nothing readable must be the fallback material")) {
     return 1;

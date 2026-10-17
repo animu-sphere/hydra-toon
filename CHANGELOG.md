@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- PreviewSurface image inputs for diffuse colour, emission, metallic,
+  roughness and opacity: `UsdUVTexture` channel selection, scale/bias,
+  fallback, colour space, wrapping, `st` and one `UsdTransform2d`. UV and
+  value edits update the resident material slot; textured Mask/Blend and
+  linear/sRGB sampling have 1x/4x Vulkan checks
+  ([renderer report 69](docs/reports/renderer/69-2026-10-18-preview-surface-textures.md)).
+
 - Basic constant-input metallic/roughness `UsdPreviewSurface` rendering:
   universal surface-terminal traversal, time-sampled diffuse colour,
   metallic, roughness, emission and opacity; GGX direct lighting, diffuse
@@ -19,6 +26,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
   ([renderer report 68](docs/reports/renderer/68-2026-10-17-preview-surface-constants.md)).
 
 ### Changed
+
+- glTF PBR and mixed MToon/PBR avatar reproduction move to the later
+  MaterialX work. v0.5.0 retains the ordinary USD PreviewSurface fallback;
+  Seed-san's PBR cases are outside its release condition.
 
 - Design and roadmap adopt the post-v0.4.0 direction: USD interoperability,
   tangent fidelity and reusable RGBA output in v0.5.0, semantic parity on

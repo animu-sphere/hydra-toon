@@ -510,6 +510,9 @@ bool IsStructuralChange(const ToonMaterial& before,
     const ToonMaterial& after) {
   return before.model != after.model ||
          before.preview.enabled != after.preview.enabled ||
+         before.preview.metallic_texture.texture != after.preview.metallic_texture.texture ||
+         before.preview.roughness_texture.texture != after.preview.roughness_texture.texture ||
+         before.preview.opacity_texture.texture != after.preview.opacity_texture.texture ||
          before.alpha_mode != after.alpha_mode ||
          before.mmd.sphere_texture.texture != after.mmd.sphere_texture.texture ||
          before.mmd.toon_texture.texture != after.mmd.toon_texture.texture ||

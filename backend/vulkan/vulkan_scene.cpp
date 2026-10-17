@@ -384,7 +384,10 @@ MaterialEntries EntriesOf(const ToonMaterial& material,
       textures.Entry(material.normal_texture.texture),
       textures.Entry(material.mtoon.shading_shift_texture.texture),
       textures.Entry(material.mtoon.uv_animation_mask_texture.texture),
-      textures.Entry(material.mmd.sphere_texture.texture), toon};
+      textures.Entry(material.mmd.sphere_texture.texture), toon,
+      textures.Entry(material.preview.metallic_texture.texture),
+      textures.Entry(material.preview.roughness_texture.texture),
+      textures.Entry(material.preview.opacity_texture.texture)};
 }
 
 void WriteParameters(const ToonMaterial& material,
@@ -1493,6 +1496,28 @@ bool MaterialCache::Update(const DrawList& draws,
         slot.surface[0] = values.preview.metallic;
         slot.surface[1] = values.preview.roughness;
         slot.surface[2] = values.alpha_mode == ToonAlphaMode::Mask ? values.alpha_cutoff : -1.0F;
+        const ToonTextureRef* refs[] = {&values.base_texture, &values.emissive_texture,
+            &values.preview.metallic_texture, &values.preview.roughness_texture,
+            &values.preview.opacity_texture};
+        const std::uint32_t images[] = {entries.base, entries.emissive,
+            entries.metallic, entries.roughness, entries.opacity};
+        for (std::size_t i = 0; i < values.preview.inputs.size(); ++i) {
+          const auto& input = values.preview.inputs[i];
+          auto& target = slot.inputs[i];
+          WriteUvRows(*refs[i], target.uv_rows);
+          target.uv_rows[3] = input.uv_fallback.x;
+          target.uv_rows[7] = input.uv_fallback.y;
+          const auto copy = [](const Float4& value, float* out) {
+            out[0] = value.x; out[1] = value.y; out[2] = value.z; out[3] = value.w;
+          };
+          copy(input.scale, target.scale);
+          copy(input.bias, target.bias);
+          copy(input.fallback, target.fallback);
+          target.info[0] = images[i];
+          target.info[1] = SamplerIndex(*refs[i]);
+          target.info[2] = input.channel;
+          target.info[3] = input.connected ? 1U : 0U;
+        }
       } else {
         auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
         WriteParameters(material.material, entries, slots[entry.slot]);
