@@ -14,7 +14,7 @@
 - Occasion: [MAT-Q4](../../design/MATERIAL_POLICY.md#9-open-questions), the
   MMD edge's width, which report 57 fitted to two distances and left to be
   settled against captures at more distances, another field of view and
-  another output size ([roadmap](../../roadmap/v0.4.0.md)).
+  another output size ([roadmap](../../releases/v0.4.0.md)).
 
 ## TL;DR
 

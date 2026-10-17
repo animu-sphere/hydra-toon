@@ -9,7 +9,7 @@
   runtime for the stage's values
 - Occasion: [MAT-Q3](../../design/MATERIAL_POLICY.md#9-open-questions), one
   of the two questions v0.4.0 settles before anything draws through an MMD
-  pipeline ([roadmap](../../roadmap/v0.4.0.md)), to be decided against
+  pipeline ([roadmap](../../releases/v0.4.0.md)), to be decided against
   reference renders taken in MMD itself. Report 53 read MMD's colours as
   authored and left their interpretation to this question
   ([report 53 §5](53-2026-10-11-mmd-material-read.md#5-what-it-does-not-do-yet)).

@@ -11,7 +11,7 @@
   and [report 58](58-2026-10-12-mat-q4-edge-width.md)'s (`sha256:330e4e1a…`)
   to compare against; Python 3 with Pillow and NumPy for the comparisons
 - Occasion: v0.4.0's sub-texture spheres, which sample the mesh's
-  additional UV ([roadmap](../../roadmap/v0.4.0.md)).
+  additional UV ([roadmap](../../releases/v0.4.0.md)).
 
 ## TL;DR
 

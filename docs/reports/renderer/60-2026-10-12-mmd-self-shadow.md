@@ -15,7 +15,7 @@
 - Occasion: v0.4.0's MMD materials: the self-shadow that `castSelfShadow`
   and `receiveSelfShadow` ask for, which [report 59](59-2026-10-12-mmd-sub-texture.md)
   left as the largest difference from MMD's frames
-  ([roadmap](../../roadmap/v0.4.0.md)).
+  ([roadmap](../../releases/v0.4.0.md)).
 
 ## TL;DR
 

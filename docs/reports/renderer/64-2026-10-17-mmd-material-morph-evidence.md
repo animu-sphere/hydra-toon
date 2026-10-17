@@ -15,7 +15,7 @@
   captures; Python 3 with NumPy and Pillow for the comparisons
 - Occasion: the evidence v0.4.0 owes that an MMD model's evaluated
   material morphs draw as MMD draws them
-  ([roadmap](../../roadmap/v0.4.0.md),
+  ([roadmap](../../releases/v0.4.0.md),
   [report 62](62-2026-10-17-mat-q6-morph-tints.md) §5)
 
 ## TL;DR

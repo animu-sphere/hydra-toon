@@ -17,8 +17,7 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.4.0 | MMD realization | [v0.4.0.md](v0.4.0.md) |
-| v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [later.md](later.md#v050--usdpreviewsurface-and-generic-usd-fallback) |
+| v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [v0.5.0.md](v0.5.0.md) |
 | v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
 | later | Platform and GPU coverage: Linux, and AMD and Intel Vulkan | [later.md](later.md#platform-and-gpu-coverage) |
 | after v0.6.0 | Candidates, taken up when the above is settled | [later.md](later.md#after-v060) |
@@ -27,10 +26,9 @@ repositories' work is planned in their own roadmaps.
 
 Work is taken in this order, across milestones:
 
-1. MMD
-2. `UsdPreviewSurface`
-3. WebGPU
-4. Linux and multi-vendor Vulkan
+1. `UsdPreviewSurface`
+2. WebGPU
+3. Linux and multi-vendor Vulkan
 
 The current milestone is finished before a new feature family is added, and
 platform coverage is not widened before the renderer core, the viewport and
@@ -74,6 +72,17 @@ to that milestone's page.
   ([schema contract](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/plugins/vrmSchema/docs/SCHEMA_CONTRACT.md)),
   so the runtime publishes none. v0.3.0 established them on a committed
   fixture.
+- **MMD's self-shadow distance and mode 2** as a host setting. v0.4.0's
+  comparison and the map are fitted to mode 1 at MMD's default distance,
+  and MMD's shadow moves with the distance
+  ([renderer report 66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md));
+  the stage carries neither.
+- **PMX 2.1's material flags**, `vertexColor`, `drawPoints` and
+  `drawLines`. v0.4.0 reads them into the MMD block and draws nothing from
+  them ([material policy §7](../design/MATERIAL_POLICY.md#7-pipelines-and-parameter-buffers)):
+  every local model is PMX 2.0, MikuMikuDance v9.32 reads no PMX 2.1, and
+  points and lines change a draw's primitives. Drawing them needs a PMX 2.1
+  model and a renderer that draws 2.1 to compare with.
 - **Off-thread asset upload.** Geometry, textures and morph targets decoded
   and staged off the render thread and copied on a transfer queue, with a
   placeholder until they arrive, so asset loading never stalls a playing

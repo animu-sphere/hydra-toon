@@ -1,31 +1,7 @@
-# After v0.4.0
+# After v0.5.0
 
 The milestones after the avatar path, and platform coverage, in less detail
 than the next one. Each gets its own page when it becomes next.
-
-## v0.5.0 — UsdPreviewSurface and generic USD fallback
-
-Enough interoperability that an ordinary USD asset does not draw broken just
-because it is not a toon material, while the renderer stays a toon renderer
-and generic coverage never outranks it
-([design policy §26](../design/DESIGN_POLICY.md#26-non-goals)); general
-rendering is `hydra-merlin`'s.
-
-- Base colour, roughness, metallic, normal, emissive, opacity, their textures
-  and basic texture transforms, in `preview_surface`: a basic PBR fallback.
-- glTF metallic-roughness PBR materials mixed with MToon in a VRM avatar,
-  consumed through the imported `UsdPreviewSurface` network. Preserve base
-  colour and textures, metallic and roughness, normals, emission including
-  its strength, and Opaque, Mask and Blend behaviour through that network.
-- Seed-san reproduction checks for `backpack_metal`, `backpack_nm`,
-  `backpack_plastic` and `anim_logo`, plus `wear_metal`, `green_emit` and
-  `glass`: retain the backpack's texture, the logo's colour and the green
-  emission, and let the glass reveal the surface behind it. Cover these
-  behaviours with redistributable controlled fixtures and a local avatar
-  comparison against a reference renderer; keep MToon materials unchanged.
-- Generic textured meshes: face-varying `st` and the other mesh data
-  ordinary assets author.
-- A fallback for materials the renderer does not support.
 
 ## v0.6.0 — WebGPU
 
@@ -66,23 +42,6 @@ differences and shader compiler differences. On Linux x86_64:
 
 Each measured configuration is a [report](../reports/) and a row of
 [supported configurations](../reference/SUPPORTED_CONFIGURATIONS.md).
-
-## MMD after v0.4.0
-
-What v0.4.0's MMD path leaves to a later milestone, none of it on the
-stage or checked against MMD's frames yet:
-
-- **MMD's self-shadow distance and mode 2** as a host setting. The
-  comparison and the map are fitted to mode 1 at MMD's default distance,
-  and MMD's shadow moves with the distance
-  ([renderer report 66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md));
-  the stage carries neither.
-- **PMX 2.1's material flags**, `vertexColor`, `drawPoints` and
-  `drawLines`. v0.4.0 reads them into the MMD block and draws nothing from
-  them ([material policy §7](../design/MATERIAL_POLICY.md#7-pipelines-and-parameter-buffers)):
-  every local model is PMX 2.0, MikuMikuDance v9.32 reads no PMX 2.1, and
-  points and lines change a draw's primitives. Drawing them needs a PMX 2.1
-  model and a renderer that draws 2.1 to compare with.
 
 ## After v0.6.0
 

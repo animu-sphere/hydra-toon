@@ -13,7 +13,7 @@
   MikuMikuDance v9.32 x64 for the captures; Python 3 with NumPy and Pillow
   for the comparisons
 - Occasion: v0.4.0's MMD self-shadow, whose edges step close up
-  ([roadmap](../../roadmap/v0.4.0.md),
+  ([roadmap](../../releases/v0.4.0.md),
   [report 60](60-2026-10-12-mmd-self-shadow.md))
 
 ## TL;DR
