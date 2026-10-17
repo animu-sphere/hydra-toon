@@ -1,5 +1,7 @@
 # MMD's self-shadow follows the camera and softens its edge as MMD's does
 
+> Followed by [report 66](66-2026-10-17-mat-q5-shadow-depth.md): MAT-Q5 resolved on MMD's frames of contact and grazing shadows; the comparison's sharpness is 2.5 per MMD unit, not 15.
+
 - Date: 2026-10-17
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Tooling: `ost 0.23.14`; the canonical runtime

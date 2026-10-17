@@ -1,6 +1,8 @@
 # MMD's self-shadow: a light's depth map, and receivers shaded as `full.fx`'s self-shadow pass
 
 > Followed by [report 63](63-2026-10-17-self-shadow-quality.md): the map follows the camera across the light and is read filtered, so §5's map that does not move with the camera and its unmeasured cost no longer hold.
+>
+> Followed by [report 66](66-2026-10-17-mat-q5-shadow-depth.md): MAT-Q5 resolved on MMD's frames of contact and grazing shadows; the comparison's sharpness is 2.5 per MMD unit, not 15.
 
 - Date: 2026-10-12
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18

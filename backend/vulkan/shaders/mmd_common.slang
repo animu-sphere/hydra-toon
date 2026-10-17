@@ -74,9 +74,10 @@ struct MmdShadowParameters {
 // self-shadow, in full.fx's form 1 - saturate(depth behind * sharpness -
 // 0.3): it starts 0.3 / sharpness behind and is whole 1 / sharpness
 // later. full.fx's sharpness is 1500 per unit of MMD's own map depth,
-// whose range MMD does not state, so this one is in MMD units (material
-// policy MAT-Q5).
-static const float kShadowSharpness = 15.0;
+// whose range MMD does not state, so this one is in MMD units, fitted to
+// MMD's frames at its default self-shadow distance: from 0.12 behind,
+// wholly by 0.52 (material policy MAT-Q5).
+static const float kShadowSharpness = 2.5;
 static const float kShadowStart = 0.3;
 // full.fx's Toon: the lit side's share of the light rises from 0 to 1 over
 // the first third of N·L.
