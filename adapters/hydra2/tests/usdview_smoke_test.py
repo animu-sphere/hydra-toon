@@ -50,7 +50,7 @@ def testUsdviewInputFunction(appController):
     assert updated["scene_revision"] > first["scene_revision"]
     # A points edit re-uploads points only: the pipelines, the render targets
     # and the triangulated topology all survive it.
-    assert first["pipelines"] == 8 and updated["pipelines"] == 8
+    assert first["pipelines"] == 9 and updated["pipelines"] == 9
     assert updated["target_allocations"] == first["target_allocations"]
     assert updated["topology_uploads"] == first["topology_uploads"]
     assert updated["point_uploads"] > first["point_uploads"]
@@ -62,7 +62,7 @@ def testUsdviewInputFunction(appController):
     appController._stageView.SetRendererSetting("toon:msaaSamples", 1)
     single = _render(appController, "single-sample")
     assert single["samples"] == 1
-    assert single["pipelines"] == 8 and single["target_allocations"] == 1
+    assert single["pipelines"] == 9 and single["target_allocations"] == 1
     assert single["topology_uploads"] == 1 and single["point_uploads"] == 1
 
     # toon:metersPerUnit is the stage's unit, which Hydra does not carry. A

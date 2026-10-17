@@ -8,6 +8,16 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- Basic constant-input metallic/roughness `UsdPreviewSurface` rendering:
+  universal surface-terminal traversal, time-sampled diffuse colour,
+  metallic, roughness, emission and opacity; GGX direct lighting, diffuse
+  ambient, Opaque, hard-cutoff Mask and Blend. Unreadable networks retain
+  mesh display colour. MToon and MMD keep selection priority. Texture
+  connections and normal mapping remain outside this increment
+  ([renderer report 68](docs/reports/renderer/68-2026-10-17-preview-surface-constants.md)).
+
 ### Changed
 
 - Design and roadmap adopt the post-v0.4.0 direction: USD interoperability,

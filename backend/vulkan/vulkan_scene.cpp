@@ -45,19 +45,19 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail) {
              "shaderSampledImageArrayDynamicIndexing";
     return false;
   }
-  // Two material buffers, the frame buffer, MMD's self-shadow parameters
+  // Three material buffers, the frame buffer, MMD's self-shadow parameters
   // and five skin/morph buffers, plus the texture table, the self-shadow
   // map and samplers. Each vertex stage counts the complete shared layout.
   const VkPhysicalDeviceLimits& limits = properties.limits;
   if (limits.maxPerStageDescriptorSampledImages < kTextureCapacity + 1U ||
       limits.maxDescriptorSetSampledImages < kTextureCapacity + 1U ||
       limits.maxPerStageDescriptorSamplers < kSamplerCount ||
-      limits.maxPerStageDescriptorStorageBuffers < 9U ||
-      limits.maxDescriptorSetStorageBuffers < 9U ||
-      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 10U) {
+      limits.maxPerStageDescriptorStorageBuffers < 10U ||
+      limits.maxDescriptorSetStorageBuffers < 10U ||
+      limits.maxPerStageResources < kTextureCapacity + kSamplerCount + 11U) {
     detail = std::string(properties.deviceName) + " cannot bind a table of " +
              std::to_string(kTextureCapacity) +
-             " textures, a shadow map and nine scene storage buffers";
+             " textures, a shadow map and ten scene storage buffers";
     return false;
   }
   VkFormatProperties shadow{};
@@ -638,7 +638,9 @@ bool SelfShadowLightDirection(const DrawList& draws, Float3& direction) {
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
     std::string& detail) {
-  return LoadSpirv(shaders.mesh_vertex, words.mesh_vertex, detail) &&
+  return LoadSpirv(shaders.preview_vertex, words.preview_vertex, detail) &&
+         LoadSpirv(shaders.preview_fragment, words.preview_fragment, detail) &&
+         LoadSpirv(shaders.mesh_vertex, words.mesh_vertex, detail) &&
          LoadSpirv(shaders.mesh_fragment, words.mesh_fragment, detail) &&
          LoadSpirv(shaders.mtoon_vertex, words.mtoon_vertex, detail) &&
          LoadSpirv(shaders.mtoon_fragment, words.mtoon_fragment, detail) &&
@@ -691,10 +693,10 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   // mtoon_outline's vertex stage reads the width, its mode and its texture
   // from the same slot and table the fragment stages do. Binding 0 is the
   // MToon parameter buffer and 4 the MMD one; 5 is MMD's self-shadow map
-  // and 6 its parameters.
+  // and 6 its parameters; 7 is the PreviewSurface parameter buffer.
   const VkShaderStageFlags material_stages =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding material_bindings[7]{};
+  VkDescriptorSetLayoutBinding material_bindings[8]{};
   material_bindings[0].binding = 0;
   material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[0].descriptorCount = 1;
@@ -724,9 +726,11 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   material_bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[6].descriptorCount = 1;
   material_bindings[6].stageFlags = material_stages;
+  material_bindings[7] = material_bindings[6];
+  material_bindings[7].binding = 7;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create.bindingCount = 7;
+  set_layout_create.bindingCount = 8;
   set_layout_create.pBindings = material_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.material_layout),
@@ -768,6 +772,12 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mtoon.push_constant_size = sizeof(SurfaceDrawConstants);
   mtoon.vertex_streams = 3;
   mtoon.dynamic_draw_state = true;
+  // One fixed PreviewSurface pipeline: Opaque and Mask return alpha one;
+  // Blend returns material opacity. Mask coverage is a hard cutoff for now.
+  PipelineDescription preview = mtoon;
+  preview.vertex_words = &words.preview_vertex;
+  preview.fragment_words = &words.preview_fragment;
+  preview.blend = true;
   // The same streams, constants and dynamic state; only the shaders,
   // blending and coverage differ. The hull blends, so a transparent
   // material's outline takes its surface's alpha while an opaque one's
@@ -820,6 +830,8 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
+         CreateScenePipeline(device, preview, pipelines, color_format,
+             depth_format, pipelines.preview, detail) &&
          CreateScenePipeline(device, mtoon, pipelines, color_format,
              depth_format, pipelines.mtoon, detail) &&
          CreateScenePipeline(device, transparent, pipelines, color_format,
@@ -845,6 +857,7 @@ void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines) {
   DestroyScenePipeline(device, pipelines.mtoon_outline);
   DestroyScenePipeline(device, pipelines.mtoon_transparent);
   DestroyScenePipeline(device, pipelines.mtoon);
+  DestroyScenePipeline(device, pipelines.preview);
   DestroyScenePipeline(device, pipelines.mesh);
 }
 
@@ -1328,7 +1341,7 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
   device_ = device;
   VkDescriptorPoolSize pool_sizes[3]{};
   pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_sizes[0].descriptorCount = 4;
+  pool_sizes[0].descriptorCount = 5;
   pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   pool_sizes[1].descriptorCount = kTextureCapacity + 1U;
   pool_sizes[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -1466,6 +1479,20 @@ bool MaterialCache::Update(const DrawList& draws,
       if (material.material.model == ToonShadingModel::MMD) {
         auto* slots = static_cast<MmdParameters*>(mmd_buffer_.mapped);
         WriteParameters(material.material, entries, slots[entry.slot]);
+      } else if (material.material.model == ToonShadingModel::PreviewSurface) {
+        auto& slot = static_cast<PreviewParameters*>(preview_buffer_.mapped)[entry.slot];
+        const auto& values = material.material;
+        slot = {};
+        slot.base_color[0] = values.base_color.x;
+        slot.base_color[1] = values.base_color.y;
+        slot.base_color[2] = values.base_color.z;
+        slot.base_color[3] = values.alpha;
+        slot.emissive[0] = values.emissive.x;
+        slot.emissive[1] = values.emissive.y;
+        slot.emissive[2] = values.emissive.z;
+        slot.surface[0] = values.preview.metallic;
+        slot.surface[1] = values.preview.roughness;
+        slot.surface[2] = values.alpha_mode == ToonAlphaMode::Mask ? values.alpha_cutoff : -1.0F;
       } else {
         auto* slots = static_cast<MToonParameters*>(buffer_.mapped);
         WriteParameters(material.material, entries, slots[entry.slot]);
@@ -1473,6 +1500,8 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.parameters_revision = material.parameters_revision;
       entry.entries = entries;
       entry.model = material.material.model;
+      entry.preview_enabled = material.material.model == ToonShadingModel::PreviewSurface &&
+                              material.material.preview.enabled;
       entry.double_sided = material.material.double_sided;
       entry.outline = HasOutline(material.material);
       entry.outline_width = material.material.outline_width;
@@ -1518,7 +1547,8 @@ bool MaterialCache::Update(const DrawList& draws,
   if (!written) return true;
   const auto flush_start = SteadyNanoseconds();
   const bool flushed = FlushIfNeeded(device_, buffer_, detail) &&
-                       FlushIfNeeded(device_, mmd_buffer_, detail);
+                       FlushIfNeeded(device_, mmd_buffer_, detail) &&
+                       FlushIfNeeded(device_, preview_buffer_, detail);
   parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - flush_start) / 1e6;
   return flushed;
 }
@@ -1531,6 +1561,7 @@ const MaterialCache::Entry* MaterialCache::Find(MaterialId material) const {
 void MaterialCache::Destroy() {
   DestroyHostBuffer(device_, buffer_);
   DestroyHostBuffer(device_, mmd_buffer_);
+  DestroyHostBuffer(device_, preview_buffer_);
   DestroyHostBuffer(device_, frame_buffer_);
   // Frees the set with it.
   vkDestroyDescriptorPool(device_, pool_, nullptr);
@@ -1572,7 +1603,8 @@ bool MaterialCache::Reserve(std::uint32_t slots, std::string& detail) {
     return FlushIfNeeded(device_, buffer, detail);
   };
   if (!grow(buffer_, sizeof(MToonParameters), 0) ||
-      !grow(mmd_buffer_, sizeof(MmdParameters), 4)) {
+      !grow(mmd_buffer_, sizeof(MmdParameters), 4) ||
+      !grow(preview_buffer_, sizeof(PreviewParameters), 7)) {
     return false;
   }
   capacity_ = slots;
@@ -1877,14 +1909,14 @@ void MeshCache::Record(VkCommandBuffer command,
     }
   };
   const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
-  // A part draws through its model's pipelines when its material selected
-  // MToon or MMD, and unlit otherwise.
+  // A readable material uses its model's pipeline; an unreadable network or
+  // missing binding retains the unlit mesh display colour.
   const auto surface_material =
       [&materials](const MeshPart& part) -> const MaterialCache::Entry* {
     const MaterialCache::Entry* material = materials.Find(part.material);
     return material != nullptr &&
                    (material->model == ToonShadingModel::MToon ||
-                       material->model == ToonShadingModel::MMD)
+                       material->model == ToonShadingModel::MMD || material->preview_enabled)
                ? material
                : nullptr;
   };
@@ -2061,9 +2093,9 @@ void MeshCache::Record(VkCommandBuffer command,
           }
           continue;
         }
-        if (material->model == ToonShadingModel::MMD) {
+        if (material->model == ToonShadingModel::MMD || material->preview_enabled) {
           if (!outline) {
-            draw_surface(pipelines.mmd, mesh, entry, part, *material,
+            draw_surface(material->preview_enabled ? pipelines.preview : pipelines.mmd, mesh, entry, part, *material,
                 material->double_sided ? VK_CULL_MODE_NONE
                                        : VK_CULL_MODE_BACK_BIT);
             ++counts.opaque;
@@ -2124,8 +2156,8 @@ void MeshCache::Record(VkCommandBuffer command,
     const Entry& entry = entries_.find(mesh.id)->second;
     const MeshPart part = transparent_part(draw);
     const MaterialCache::Entry& material = *surface_material(part);
-    if (material.model == ToonShadingModel::MMD) {
-      draw_surface(pipelines.mmd_transparent, mesh, entry, part, material,
+    if (material.model == ToonShadingModel::MMD || material.preview_enabled) {
+      draw_surface(material.preview_enabled ? pipelines.preview : pipelines.mmd_transparent, mesh, entry, part, material,
           material.double_sided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       ++counts.transparent;
       continue;

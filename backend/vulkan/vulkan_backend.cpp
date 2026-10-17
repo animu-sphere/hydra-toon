@@ -39,7 +39,9 @@ SceneShaders SceneShadersIn(const std::string& directory) {
       (root / "mmd_shadow.vert.spv").string(),
       (root / "mmd_shadow.frag.spv").string(),
       (root / "overlay.vert.spv").string(),
-      (root / "overlay.frag.spv").string()};
+      (root / "overlay.frag.spv").string(),
+      (root / "preview_surface.vert.spv").string(),
+      (root / "preview_surface.frag.spv").string()};
 }
 
 BackendCapability ProbeVulkanBackend() {

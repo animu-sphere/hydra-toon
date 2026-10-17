@@ -630,6 +630,6 @@ numeric value. Colours are linear. `Release material override` and
 `Release all material overrides` resume the latest evaluated scene values.
 These controls use the same late commit as the Morphs panel, so edits require
 no USD authoring or Hydra sync. Model, alpha mode, sidedness and texture ids
-are display-only. PreviewSurface values are read-only while that fallback
-draws mesh display colour. Runtime expression names and source-owner mappings
+are display-only. PreviewSurface values remain read-only in the panel; readable networks
+draw through the basic PBR realization. Runtime expression names and source-owner mappings
 are not supplied by these renderer-id diagnostics.

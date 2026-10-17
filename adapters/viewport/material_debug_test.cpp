@@ -107,9 +107,12 @@ int main(int argc, char** argv) {
         Require(std::any_of(depth.payload.begin(), depth.payload.end(), [](float z) { return z < 1; }),
             "empty render cannot establish unchanged geometry");
       } else {
-        // PreviewSurface currently draws mesh display colour; MToon image
-        // effects are established independently by toon-expression-gpu.
-        Require(color.payload == initial && depth.payload == initial_depth, "fallback surface or depth changed");
+        // The readable PreviewSurface responds to the same late value route;
+        // releasing the override restores the original image exactly.
+        Require(Bound(baseline).material.preview.enabled,
+            "fixture must exercise the readable PreviewSurface pipeline");
+        Require((color.payload != initial) == (frame == 1 || frame == 2) && depth.payload == initial_depth,
+            "PreviewSurface override/release colour or depth differs");
         const auto& after = renderer->statistics();
         Require(after.point_uploads == before.point_uploads && after.topology_uploads == before.topology_uploads &&
             after.skin_uploads == before.skin_uploads && after.pose_writes == before.pose_writes &&
@@ -135,7 +138,7 @@ int main(int argc, char** argv) {
             [&](const auto& item) { return item.id == material; }), "removed material retained override");
     scene->ClearMaterialParametersOverride(material);
     std::cout << "material debug: six late frames, one Hydra sync; equal/duplicate/release/replacement/removal verified\n";
-    if (renderer) std::cout << "GPU: two value writes; unchanged resident resources and fallback colour/depth\n";
+    if (renderer) std::cout << "GPU: two value writes; PreviewSurface colour edits and exact release, unchanged depth/resources\n";
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';

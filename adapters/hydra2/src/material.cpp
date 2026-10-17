@@ -17,6 +17,8 @@
 #include <pxr/usd/sdf/assetPath.h>
 
 #include <cstddef>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -109,6 +111,20 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (toonSource)
     (toonTexture)
     (sharedToonIndex)
+    (nodes)
+    (terminals)
+    (surface)
+    (upstreamNodePath)
+    (nodeIdentifier)
+    (parameters)
+    (value)
+    (UsdPreviewSurface)
+    (metallic)
+    (roughness)
+    (opacity)
+    (opacityThreshold)
+    (emissiveColor)
+    (useSpecularWorkflow)
     ((sphereMultiply, "multiply"))
     ((sphereAdd, "add"))
     ((sphereSubTexture, "subTexture"))
@@ -130,6 +146,7 @@ HdContainerDataSourceHandle Group(const HdContainerDataSourceHandle& parent,
 template <typename T>
 bool Read(const HdContainerDataSourceHandle& group, const TfToken& name,
     T& value) {
+  if (!group) return false;
   const auto leaf = HdTypedSampledDataSource<T>::Cast(group->Get(name));
   if (!leaf) {
     return false;
@@ -346,6 +363,51 @@ void ReadMmd(const HdContainerDataSourceHandle& group,
   Read(group, _tokens->edgeColor, result.outline_color, mmd.edge_alpha);
 }
 
+// Follow the universal surface terminal, never an arbitrary node whose
+// identifier happens to be PreviewSurface. Node parameters wrap a sampled
+// `value` in the ordinary Hydra material schema.
+void ReadPreview(const HdContainerDataSourceHandle& prim,
+    Toon::ToonMaterial& result) {
+  const auto network = HdMaterialSchema::GetFromParent(prim).GetMaterialNetwork().GetContainer();
+  const auto terminal = Group(Group(network, _tokens->terminals), _tokens->surface);
+  TfToken path;
+  if (!Read(terminal, _tokens->upstreamNodePath, path))
+    return;
+  const auto node = Group(Group(network, _tokens->nodes), path);
+  TfToken identifier;
+  if (!Read(node, _tokens->nodeIdentifier, identifier) ||
+      identifier != _tokens->UsdPreviewSurface)
+    return;
+  const auto parameters = Group(node, _tokens->parameters);
+  const auto parameter = [&](const TfToken& name, auto& value) {
+    Read(Group(parameters, name), _tokens->value, value);
+  };
+  int specular_workflow = 0;
+  parameter(_tokens->useSpecularWorkflow, specular_workflow);
+  if (specular_workflow != 0)
+    return;
+  result.preview.enabled = true;
+  result.base_color = {0.18F, 0.18F, 0.18F};
+  parameter(_tokens->diffuseColor, result.base_color);
+  parameter(_tokens->emissiveColor, result.emissive);
+  parameter(_tokens->metallic, result.preview.metallic);
+  parameter(_tokens->roughness, result.preview.roughness);
+  parameter(_tokens->opacity, result.alpha);
+  float threshold = 0.0F;
+  parameter(_tokens->opacityThreshold, threshold);
+  const auto unit = [](float value, float fallback) {
+    return std::isfinite(value) ? std::clamp(value, 0.0F, 1.0F) : fallback;
+  };
+  result.preview.metallic = unit(result.preview.metallic, 0.0F);
+  result.preview.roughness = unit(result.preview.roughness, 0.5F);
+  result.alpha = unit(result.alpha, 1.0F);
+  threshold = unit(threshold, 0.0F);
+  result.alpha_mode = threshold > 0.0F      ? Toon::ToonAlphaMode::Mask
+                      : result.alpha < 1.0F ? Toon::ToonAlphaMode::Blend
+                                            : Toon::ToonAlphaMode::Opaque;
+  result.alpha_cutoff = threshold;
+}
+
 } // namespace
 
 std::array<Toon::ToonTextureRef*, kHdToonTextureRoles> HdToonTextureRefs(
@@ -365,8 +427,6 @@ bool HdToonIsValueOnlyChange(const HdDataSourceLocatorSet& locators) {
          !locators.Intersects(HdMaterialSchema::GetDefaultLocator());
 }
 
-// Rule 3's surface network is not read yet: a PreviewSurface material has
-// the fallback material's values.
 HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle& prim) {
   HdToonMaterialSource source;
@@ -380,6 +440,7 @@ HdToonMaterialSource HdToonReadMaterial(
     const HdContainerDataSourceHandle material =
         Group(mmd, _tokens->material);
     if (!material) {
+      ReadPreview(prim, result);
       return source;
     }
     result.model = Toon::ToonShadingModel::MMD;

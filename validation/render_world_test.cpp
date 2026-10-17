@@ -677,6 +677,14 @@ int main() {
     return 1;
   }
   const Toon::ToonMaterial defaults;
+  auto preview = defaults;
+  preview.preview.enabled = true;
+  if (!Check(Toon::IsStructuralChange(defaults, preview), "enabling PreviewSurface changes the draw pipeline")) return 1;
+  auto preview_values = preview;
+  preview_values.preview.metallic = 0.8F;
+  preview_values.preview.roughness = 0.2F;
+  if (!Check(preview_values != preview && !Toon::IsStructuralChange(preview, preview_values),
+          "PreviewSurface metallic/roughness edits must be value-only")) return 1;
   const auto before_light = world.Commit();
   const auto light_id = world.CreateLight();
   Toon::ToonLight light;

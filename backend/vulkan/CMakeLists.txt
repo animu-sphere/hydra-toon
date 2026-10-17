@@ -17,6 +17,7 @@ if(TOON_WITH_VULKAN)
   include(ToonShaders)
   toon_add_shader_library(toon-renderer-shaders
     shaders/mesh.slang
+    shaders/preview_surface.slang
     shaders/mtoon.slang
     shaders/mtoon_transparent.slang
     shaders/mtoon_outline.slang

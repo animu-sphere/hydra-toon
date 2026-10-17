@@ -334,6 +334,17 @@ struct ToonMaterial {
   float outline_width = 0.0F;
   Float3 outline_color;
 
+  // The basic metallic/roughness PreviewSurface realization. An unreadable
+  // network keeps the mesh's display colour fallback rather than treating
+  // the default slot as an authored white material.
+  struct PreviewSurface {
+    bool enabled = false;
+    float metallic = 0.0F;
+    float roughness = 0.5F;
+
+    friend bool operator==(const PreviewSurface&, const PreviewSurface&) = default;
+  } preview;
+
   // Read only when `model` is MToon.
   struct MToon {
     Float3 shade_color{1.0F, 1.0F, 1.0F};

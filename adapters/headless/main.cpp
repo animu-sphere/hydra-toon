@@ -3306,13 +3306,13 @@ int main(int argc, char** argv) {
                frame.depth.payload[depth_center] > 0.0F &&
                frame.depth.payload[depth_center] < 0.9F &&
                frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: the eight scene pipelines, one target
+    // 1,000 frames on one device: the nine scene pipelines, one target
     // allocation and one upload of the unchanged mesh, every later frame
     // reusing them.
     const Toon::OffscreenStatistics& statistics = frame.statistics;
     persistence_ok = statistics.frames_rendered == 1000 &&
                      statistics.completion == 1000 &&
-                     statistics.pipelines_created == 8 &&
+                     statistics.pipelines_created == 9 &&
                      statistics.target_allocations == 1 &&
                      statistics.topology_uploads == 1 &&
                      statistics.point_uploads == 1;

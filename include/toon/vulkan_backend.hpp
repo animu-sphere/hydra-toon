@@ -51,7 +51,7 @@ struct BackendCapability {
 // install-tree layouts exercise the same backend code without source-tree
 // fallbacks.
 struct SceneShaders {
-  // Unlit, one colour per draw: meshes that bind no MToon or MMD material.
+  // Unlit, one colour per draw: missing or unreadable material bindings.
   std::string mesh_vertex;
   std::string mesh_fragment;
   // mtoon_opaque (material policy §7).
@@ -85,6 +85,9 @@ struct SceneShaders {
   // renderer draws none and does not read these.
   std::string overlay_vertex;
   std::string overlay_fragment;
+  // Basic metallic/roughness PreviewSurface, including surface opacity.
+  std::string preview_vertex;
+  std::string preview_fragment;
 };
 
 // The shaders as the build and install trees lay them out: `<module>.vert.spv`

@@ -24,6 +24,7 @@ bool Finite(const ToonTextureRef& ref) {
 bool Finite(const ToonMaterial& material) {
   const auto& m = material.mtoon;
   const float values[] = {material.alpha, material.alpha_cutoff, material.normal_scale,
+      material.preview.metallic, material.preview.roughness,
       material.outline_width, m.shading_shift, m.shading_shift_texture_scale,
       m.shading_toony, m.gi_equalization, m.rim_fresnel_power, m.rim_lift,
       m.rim_lighting_mix, m.outline_lighting_mix, m.uv_scroll_x_speed,
