@@ -29,6 +29,7 @@ and the document is a bug. When a summary disagrees with
 | Purpose, principles, renderer architecture, how milestones are ordered | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | What this repository owns, what it consumes from which sibling, what it does not own | [design/INTEGRATION_SCOPE_POLICY.md](design/INTEGRATION_SCOPE_POLICY.md) |
 | Reading MToon, MMD and PreviewSurface materials; `ToonMaterial`; outline; draw order; pipelines | [design/MATERIAL_POLICY.md](design/MATERIAL_POLICY.md) |
+| Reusable RGBA products, background modes, alpha/coverage, viewport compositing and GPU texture handoff | [design/RENDER_OUTPUT_POLICY.md](design/RENDER_OUTPUT_POLICY.md) |
 | Targets, names, directories, dependency directions, build intents, install tree | [architecture/PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | Implemented capabilities — the only statement of current status | [reference/CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) |
 | Measured platforms and runtimes | [reference/SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
@@ -37,8 +38,9 @@ and the document is a bug. When a summary disagrees with
 | How documents here are maintained, and how they cite sibling repositories | [contributing/documentation.md](contributing/documentation.md) |
 
 Where the design documents overlap, the narrower one wins:
-INTEGRATION_SCOPE_POLICY.md and MATERIAL_POLICY.md over DESIGN_POLICY.md on
-their subjects, and none of them over PROJECT_LAYOUT.md on structure.
+INTEGRATION_SCOPE_POLICY.md, MATERIAL_POLICY.md and RENDER_OUTPUT_POLICY.md
+over DESIGN_POLICY.md on their subjects, and none of them over
+PROJECT_LAYOUT.md on structure.
 
 ## Owned elsewhere
 

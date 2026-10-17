@@ -31,7 +31,8 @@ Authored format semantics cross through USD; resolved runtime state crosses
 through an optional consumer adapter
 ([integration scope](docs/design/INTEGRATION_SCOPE_POLICY.md)). General USD
 rendering is [`hydra-merlin`](https://github.com/animu-sphere/hydra-merlin)'s
-role.
+role; ordinary USD assets use a PreviewSurface fallback while toon fidelity
+comes first.
 
 ## Architecture
 
@@ -44,6 +45,9 @@ Evaluated state ─→ Hydra output ──────────────�
                                                                extraction
                                                            late latch / GPU update
                                                              Vulkan | WebGPU
+                                                                   ↓
+                                                          reusable RGBA product
+                                                          viewport / Hydra / host
 ```
 
 Static scene state and per-frame motion state take separate paths. A pose
@@ -53,6 +57,9 @@ distinguishes existing late-frame input from runtime integration. Hydra is the
 scene integration layer: `usdview` checks the integration, and the renderer itself
 is judged in its own viewport. See the
 [design policy](docs/design/DESIGN_POLICY.md).
+Reusable RGBA output treats the viewport as one consumer, with shared alpha
+and background semantics defined by the
+[render output policy](docs/design/RENDER_OUTPUT_POLICY.md).
 
 ## Components
 

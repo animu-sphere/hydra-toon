@@ -8,6 +8,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Design and roadmap adopt the post-v0.4.0 direction: USD interoperability,
+  tangent fidelity and reusable RGBA output in v0.5.0, semantic parity on
+  WebGPU in v0.6.0, then host / compositor integration. A dedicated
+  [render output policy](docs/design/RENDER_OUTPUT_POLICY.md) defines intended
+  background, premultiplied alpha, coverage and GPU handoff contracts.
+
 ## [0.4.0] - 2026-10-17
 
 ### Changed

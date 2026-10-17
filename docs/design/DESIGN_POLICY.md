@@ -14,15 +14,18 @@ owner: hydra-toon
 > direction, which brought the dedicated viewport forward and put platform
 > coverage after the renderer, and the 2026-10-05 direction, which makes
 > Hydra and direct evaluated-state input two adapters into one renderer core.
+> The 2026-10-17 direction establishes USD interoperability and reusable RGBA
+> semantics before WebGPU parity, then host / compositor integration.
 > Where this repository departs from the
 > implementation policy, §30 records it; §31 onward are this repository's own.
-> Two focused documents own the detail of one area each, and **on its own area
+> Focused documents own the detail of one area each, and **on its own area
 > the focused document wins**:
 >
 > | Area | Owning document |
 > | --- | --- |
 > | What this repository owns, and what it consumes from its siblings | [INTEGRATION_SCOPE_POLICY.md](INTEGRATION_SCOPE_POLICY.md) |
 > | Consuming MToon, MMD and PreviewSurface materials; `ToonMaterial`; pipelines | [MATERIAL_POLICY.md](MATERIAL_POLICY.md) |
+> | Reusable RGBA, background, alpha, compositing and GPU output handoff | [RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md) |
 > | Targets, directories and dependency directions | [architecture/PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) |
 
 ---
@@ -131,7 +134,8 @@ clear, and is re-evaluated then. OpenGL is not pursued as a new backend.
 Linux, and Vulkan validation across vendors (AMD and Intel as well as
 NVIDIA), matter, but they come after the renderer: its architecture and
 quality are settled on Windows and the main development GPU first, and
-platform coverage is then taken up as one piece of work (§25).
+platform coverage is taken up after WebGPU and host / compositor integration
+as one piece of work (§25).
 
 Where the backends live in this repository is
 [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md); the implementation
@@ -182,7 +186,9 @@ integration correctness, but it is not a premise of the architecture. The
 candidates to replace it are Hgi interop, a Vulkan image handoff, a shared
 GPU texture, and the renderer-native presentation path. Latency is judged on
 the renderer-native path, in the dedicated viewport (§31), not through a
-Hydra host.
+Hydra host. CPU readback remains acceptable while the reusable RGBA semantics
+are established; zero-copy consumption follows WebGPU parity. The logical
+handoff contract is owned by [render output policy §7](RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff).
 
 ## 7. Renderer core
 
@@ -357,6 +363,11 @@ optional shadow → opaque toon → outline → transparent → composite / post
 It exists for resource lifetime, dependencies, barriers, transient resources
 and pass ordering — not as a game-engine graph compiler.
 
+The scene passes produce reusable RGBA; viewport compositing and presentation
+consume it. Background, alpha and multisample coverage follow
+[RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md), independent of swapchain
+or backend.
+
 **Anti-aliasing is MSAA**, 4 samples per pixel by default, resolved as the
 scene pass ends: colour by averaging, depth by taking sample 0. The samples
 are transient and never leave the pass. A Mask material turns its alpha
@@ -438,7 +449,10 @@ Not required initially: meshlets, visibility buffer, GPU culling, full
 indirect rendering, bindless everything. The main case is a few characters,
 some hundreds of thousands of polygons and tens to hundreds of materials, for
 which CPU-side persistent draw packets should be enough. GPU-driven techniques
-come after a measurement shows the need.
+come after a measurement shows the need. Performance work is feature- and
+measurement-driven and, as a rule, is not added before v0.6.0; this includes
+async upload/transfer queues, compute skinning, async compute, pipeline caches
+and shader pre-warming as well as GPU-driven draws.
 
 Textures are bound through a fixed texture table, and it is not made bindless
 early: while MToon and VRM fit in it, it stays. Descriptor indexing, a
@@ -496,7 +510,7 @@ first.
 The renderer is built in **milestones, and each milestone is a `v0.x.0`
 release**: a version number says how far the renderer has come, not how much
 changed. What each milestone contains, and the order, is the
-[roadmap](../roadmap/README.md). The order follows three rules:
+[roadmap](../roadmap/README.md). The order follows these rules:
 
 - **Depth before breadth.** The avatar path — MToon quality, the animation
   fast path, latency, frame stability, outline quality, expressions — is
@@ -512,11 +526,15 @@ changed. What each milestone contains, and the order, is the
   tuned. It is built early, and grows with each milestone.
 - **Platforms after the renderer.** Architecture and quality are settled on
   Windows and the main development GPU. Linux and multi-vendor Vulkan
-  validation come after the renderer core, the viewport and the fast path
-  are settled, as their own piece of work, and are no release gate before
-  then (§4).
+  validation follow WebGPU and host / compositor integration once the core,
+  viewport and fast path are settled, and are no release gate before then (§4).
 
-In short: v0.2.0 finishes how an avatar looks, and v0.3.0 how it moves.
+MMD realization closes toon fidelity before generic coverage expands.
+v0.5.0 establishes USD interoperability, tangents and reusable RGBA semantics;
+v0.6.0 reproduces them on WebGPU. GPU texture handoff and host / compositor
+integration follow, at roughly v0.7.0 scale. GPU dual quaternion skinning is
+introduced when an asset needs it; CPU fallback is acceptable and it is not
+a v0.5.0 or v0.6.0 release gate.
 
 Until v0.1.0 the sequence was **Renderer Phase 0–7**. It is retired; reports
 and the v0.1.0 record that name a phase map onto milestones as follows:
@@ -527,7 +545,7 @@ and the v0.1.0 record that name a phase map onto milestones as follows:
 | 2 MToon completion | v0.2.0, MToon quality and the viewport foundation |
 | 3 Animation fast path | v0.3.0, avatar animation fast path |
 | 4 MMD | v0.4.0, MMD realization |
-| 5 UsdPreviewSurface | v0.5.0, generic USD fallback |
+| 5 UsdPreviewSurface | v0.5.0, USD interoperability and render output |
 | 6 WebGPU | v0.6.0, WebGPU |
 | 7 Optimization | after v0.6.0, as measurement asks |
 
@@ -579,7 +597,8 @@ Stage bindings + inputs → usd-avatar-runtime             │
                                                                 draw extraction
                                                            late latch / GPU update
                                                               Vulkan | WebGPU
-                                                           low-latency presentation
+                                                           reusable RGBA product
+                                                         viewport / Hydra / host
 ```
 
 ## 29. Conclusion
@@ -618,7 +637,10 @@ and the display.
 ```text
 bootstrap scene (core build) ──────────────┐
 USD stage → Hydra, in process (--usd) ─────┴→ RenderWorld → RenderExtraction
-                                                  → Vulkan → GLFW / swapchain
+                                                            ↓
+                                                          Vulkan
+                                                            ↓
+                     GLFW / swapchain ← viewport compositor ← RGBA product
 ```
 
 The default build stays OpenUSD-free and draws a built-in scene. A USD
@@ -631,9 +653,11 @@ with the render delegate itself, populated through UsdImaging's scene index
 chain as `usdview`'s engine populates one, and syncs it in its own frame
 loop, so the scene arrives through the same adapter `usdview` exercises.
 No Hydra render pass runs: the viewport draws the delegate's committed
-render world straight into the swapchain, so there is neither an offscreen
-target nor a copy. A normal frame reads nothing back to the CPU, and only a
-screenshot, a reference check or picking asks for a readback.
+render world through the native backend. The initial direct-swapchain path
+evolves into the reusable RGBA product and viewport compositor defined by
+[RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md); the viewport remains a
+native GPU consumer. A normal frame requires no CPU readback; a screenshot,
+a reference check or picking may request one.
 [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §4 lets OpenUSD into
 the viewport's Hydra source, in that build only.
 
