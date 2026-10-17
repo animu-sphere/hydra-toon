@@ -1,5 +1,7 @@
 # MAT-Q6: MMD draws no material morph tint, so hdToon draws none by default
 
+> Followed by [report 64](64-2026-10-17-mmd-material-morph-evidence.md): hdToon's frames of `全灰モード`, `全黒モード` and `全白モード`, evaluated and set as the canonical inputs, compared with these captures (§5).
+
 - Date: 2026-10-17
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000; MSVC 14.51 / Visual Studio 18
 - Tooling: `ost 0.23.14`; the canonical runtime

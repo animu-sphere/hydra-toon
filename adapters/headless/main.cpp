@@ -2200,11 +2200,15 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
 // sub-texture multiplies at the mesh's additional UV 1, not where the
 // normal points: of a sphere texture 64 on the left and 192 on the right,
 // whose middle the normal would blend to 13, UV 1 at x 0.75 reads 30 and at
-// 0.25 reads 4. A specular colour of 0.25 at power 0 adds everywhere, to 133. Two halves
+// 0.25 reads 4. An add sphere without a texture adds nothing, as MMD draws
+// it, so the ambient alone reads 55. A specular colour of 0.25 at power 0
+// adds everywhere, to 133. Two halves
 // of one mesh at alpha 0.5, the nearer red listed first but second in
 // MMD's material order, blend green then red, the red writing depth; in the
-// other order the green would fail the depth test. Last, an ambient edit
-// rewrites one slot and nothing else.
+// other order the green would fail the depth test. An ambient edit
+// rewrites one slot and nothing else. Last, a material drawn on an earlier
+// one's vertices passes the depth test MMD's LESSEQUAL passes: green over
+// red when opaque, half of each at alpha 0.5.
 Check MmdCheck(const Toon::SceneShaders& shaders) {
   const std::string id = "renderer.material.mmd";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
@@ -2319,6 +2323,12 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
   if (!render() || !grey(4)) {
     return {id, "fail", "a multiply sphere must multiply by its texel"};
   }
+  mmd.mmd.sphere_texture.texture = 0;
+  mmd.mmd.sphere_mode = Toon::ToonSphereMode::Add;
+  world.SetMaterial(material, mmd);
+  if (!render() || !grey(55)) {
+    return {id, "fail", "an add sphere without a texture must add nothing"};
+  }
   const Toon::TextureId halves_texture = world.CreateTexture();
   texels.width = 2;
   texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(
@@ -2397,6 +2407,34 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
       after.texture_uploads != before.texture_uploads) {
     return {id, "fail",
         "an MMD value-only edit must rewrite one slot and nothing else"};
+  }
+
+  // A layer on the same vertices as an earlier material, as a blush or an
+  // ambient-occlusion overlay is, draws over it.
+  world.SetMeshVisible(halves, false);
+  const Toon::MeshId layered = world.CreateMesh();
+  world.SetMeshPoints(layered, {{-0.70F, -0.65F, 0.8F}, {0.70F, -0.65F, 0.8F},
+                                   {0.00F, 0.70F, 0.8F}});
+  world.SetMeshTopology(layered, {0, 1, 2, 0, 1, 2});
+  const Toon::MaterialId under = world.CreateMaterial();
+  const Toon::MaterialId over = world.CreateMaterial();
+  Toon::ToonMaterial values = layer({1.0F, 0.0F, 0.0F}, 0);
+  values.alpha = 1.0F;
+  world.SetMaterial(under, values);
+  values = layer({0.0F, 1.0F, 0.0F}, 1);
+  values.alpha = 1.0F;
+  world.SetMaterial(over, values);
+  world.SetMeshSubsets(layered, {{0, 3, under}, {3, 3, over}});
+  if (!render() || !is(0, 255, 0)) {
+    return {id, "fail",
+        "an opaque MMD layer on an earlier material's vertices must draw over "
+        "it"};
+  }
+  world.SetMaterial(over, layer({0.0F, 1.0F, 0.0F}, 1));
+  if (!render() || !is(128, 128, 0)) {
+    return {id, "fail",
+        "a translucent MMD layer on an earlier material's vertices must blend "
+        "over it"};
   }
   return {id, "pass", ""};
 }

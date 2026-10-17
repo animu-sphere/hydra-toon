@@ -140,7 +140,10 @@ semantics, and both models' ordering below applies to draws.
   opaque — draws with the opaque draws instead; the rest draw after them,
   writing depth as MMD does, in material-table order within a mesh. That
   differs from MMD only where an earlier translucent material covers a
-  later opaque one.
+  later opaque one. Models layer materials on another's vertices — a
+  blush, an ambient-occlusion overlay, an expression — and MMD's depth
+  test, Direct3D 9's LESSEQUAL, lets the later one over; so does the MMD
+  path's ([report 64](../reports/renderer/64-2026-10-17-mmd-material-morph-evidence.md)).
 
 The sort key is computed once, when the material is normalized, and is part
 of the persistent draw packet ([DESIGN_POLICY.md](DESIGN_POLICY.md) §15).
@@ -272,7 +275,10 @@ weighs no morph.
   value-only path reads (§8), or as an evaluated override
   (`RenderWorld::SetMaterialParametersOverride`). A morph that takes a
   diffuse alpha below 1 moves the material to the transparent draws, which
-  is structural (§6).
+  is structural (§6). Evaluated so and written as the canonical inputs'
+  opinions, `全灰モード`, `全黒モード` and `全白モード` change hdToon's frame
+  as they change MMD's
+  ([report 64](../reports/renderer/64-2026-10-17-mmd-material-morph-evidence.md)).
 - **Tints.** The texture, sphere and toon tints have no canonical input;
   they modulate a texture's contribution, which only an MMD-aware renderer
   draws. The MMD block carries each as the evaluated multiply and add, the

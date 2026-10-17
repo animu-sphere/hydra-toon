@@ -133,6 +133,18 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - Draw counts in `TOON_HYDRA_EVIDENCE` and the viewport's scene summary
   count parts: a mesh divided by its face subsets is one draw per part.
 
+### Fixed
+
+- An MMD material drawn on an earlier material's vertices, as a blush, an
+  ambient-occlusion overlay or an expression layer is, now draws over it:
+  `mmd_opaque` and `mmd_transparent` pass a fragment at the depth already
+  written, as Direct3D 9's LESSEQUAL test, which MMD draws with, passes
+  it. Before, such a layer lost the tie and never showed.
+- An MMD material whose sphere mode adds or multiplies but which names no
+  sphere texture no longer adds white: as in MMD, a sphere mode without a
+  texture changes nothing. `renderer.material.mmd` covers both
+  ([renderer report 64](docs/reports/renderer/64-2026-10-17-mmd-material-morph-evidence.md)).
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

@@ -135,6 +135,9 @@ struct PipelineDescription {
   // Pushed away from the camera by a depth resolution step and the slope's
   // worth of one, so a surface at the same depth wins the test.
   bool depth_bias = false;
+  // A fragment at the depth already written passes, as Direct3D 9's
+  // default LESSEQUAL test, which MMD draws with, passes it.
+  bool depth_ties_pass = false;
   // Depth alone, single-sampled whatever the scene's sample count, for a
   // target with no colour attachment.
   bool depth_only = false;
@@ -241,7 +244,9 @@ bool CreateScenePipeline(VkDevice device,
       VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
   depth_state.depthTestEnable = VK_TRUE;
   depth_state.depthWriteEnable = VK_TRUE;
-  depth_state.depthCompareOp = VK_COMPARE_OP_LESS;
+  depth_state.depthCompareOp = description.depth_ties_pass
+                                     ? VK_COMPARE_OP_LESS_OR_EQUAL
+                                     : VK_COMPARE_OP_LESS;
   VkPipelineColorBlendAttachmentState blend_attachment{};
   if (description.blend) {
     blend_attachment.blendEnable = VK_TRUE;
@@ -451,6 +456,11 @@ void WriteParameters(const ToonMaterial& material,
 }
 
 std::uint32_t SphereMode(const ToonMaterial& material) {
+  // A mode with no sphere texture changes nothing in MMD; sampled, the
+  // missing texture would read white, which an added sphere would add.
+  if (material.mmd.sphere_texture.texture == 0) {
+    return kSphereNone;
+  }
   switch (material.mmd.sphere_mode) {
   case ToonSphereMode::Multiply:
     return kSphereMultiply;
@@ -784,6 +794,10 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd.fragment_words = &words.mmd_fragment;
   mmd.vertex_streams = 4;
   mmd.sub_texture_uvs = true;
+  // A model layers decals, blush and expressions on its face's own
+  // vertices, drawn after the face in material-table order; MMD's depth
+  // test lets them over it.
+  mmd.depth_ties_pass = true;
   PipelineDescription mmd_transparent = mmd;
   mmd_transparent.vertex_words = &words.mmd_transparent_vertex;
   mmd_transparent.fragment_words = &words.mmd_transparent_fragment;
