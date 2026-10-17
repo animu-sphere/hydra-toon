@@ -362,6 +362,14 @@ int main() {
           "a points edit, or the same normals, must not re-send them")) {
     return 1;
   }
+  world.SetMeshNormals(quad, {{1, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 0, 0}}, false);
+  const auto adapter_normals = world.Commit().meshes[0];
+  if (!Check(!adapter_normals.authored_normals &&
+                 *adapter_normals.normals == *raised.normals,
+          "adapter-derived normals must retain their values and provenance")) return 1;
+  world.SetMeshNormals(quad, {{1, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 0, 0}}, false);
+  if (!Check(world.Commit().meshes[0].normals_revision == adapter_normals.normals_revision,
+          "unchanged adapter-derived normals must not resend")) return 1;
   world.SetMeshNormals(quad, {{1, 0, 0}});
   const Toon::MeshSnapshot short_normals = world.Commit().meshes[0];
   world.SetMeshNormals(quad, {});

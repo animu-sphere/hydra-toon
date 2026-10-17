@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [70](70-2026-10-18-mesh-corner-primvars.md) | Generic USD corner primvars: indexed UV seams, uniform/face-varying normals, smooth normals before splitting, subsets, holes, left-handed winding and retained skin/morph data; explicit-vertex Vulkan comparisons at 1x/4x |
 | [69](69-2026-10-18-preview-surface-textures.md) | PreviewSurface texture inputs: real USD networks, channel selection, colour space, UV transforms and missing-image fallback; packed PBR, textured Mask/Blend and resource persistence on Vulkan at 1x/4x |
 | [68](68-2026-10-17-preview-surface-constants.md) | Constant-input PreviewSurface: real USD network traversal and time samples, GGX direct lighting, emission, Mask/Blend and material-slot persistence on Vulkan at 1x/4x |
 | [67](67-2026-10-17-v040-preparation.md) | v0.4.0 release gate, local: OpenStrata `core` 15/15, `hydra` 24/24 and `viewport-usd` 55/55 with every `ost validate` passed, plain CMake 15/15, and the `hydra` package built twice to the same digest |

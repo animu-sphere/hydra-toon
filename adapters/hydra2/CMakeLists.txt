@@ -139,6 +139,14 @@ if(TOON_BUILD_TESTS)
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
+  add_executable(toon-hydra2-primvar-test tests/primvar_test.cpp)
+  toon_configure_warnings(toon-hydra2-primvar-test)
+  target_link_libraries(toon-hydra2-primvar-test PRIVATE
+    toon-hydra2-runtime usdImaging usdShade usdGeom usd Toon::Vulkan)
+  target_compile_features(toon-hydra2-primvar-test PRIVATE cxx_std_20)
+  target_compile_definitions(toon-hydra2-primvar-test PRIVATE NOMINMAX
+    _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+
   toon_openusd_root(TOON_PXR_ROOT)
   add_executable(toon-hydra2-light-test tests/light_test.cpp)
   toon_configure_warnings(toon-hydra2-light-test)
@@ -168,6 +176,15 @@ if(TOON_BUILD_TESTS)
   add_test(NAME toon-renderer-hydra-geom-subsets
     COMMAND toon-hydra2-subset-test
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/geom-subsets.usda")
+  add_test(NAME toon-renderer-hydra-primvars
+    COMMAND toon-hydra2-primvar-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda")
+  add_test(NAME toon-renderer-hydra-primvars-gpu
+    COMMAND toon-hydra2-primvar-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda"
+      "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-renderer-hydra-primvars-gpu PROPERTIES
+    LABELS "gpu" SKIP_RETURN_CODE 77)
   add_test(NAME toon-renderer-hydra-morph-normals
     COMMAND toon-hydra2-skinning-test
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda"
@@ -181,6 +198,8 @@ if(TOON_BUILD_TESTS)
     toon-renderer-hydra-material
     toon-renderer-hydra-skinning
     toon-renderer-hydra-geom-subsets
+    toon-renderer-hydra-primvars
+    toon-renderer-hydra-primvars-gpu
     toon-renderer-hydra-morph-normals
     toon-renderer-hydra-lights
     PROPERTIES ENVIRONMENT_MODIFICATION

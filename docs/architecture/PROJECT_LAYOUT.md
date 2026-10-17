@@ -154,6 +154,26 @@ All scene shaders evaluate morph offsets before skinning in `skinning.slang`.
 The device capability probe requires ten storage-buffer bindings including
 the three models' parameter buffers, frame data and MMD shadow parameters.
 
+`HdToonMesh` in `adapters/hydra2/src/adapter.cpp` normalizes mesh primvars
+before publishing them to the shared render world. It retains source-point
+geometry in a private `RenderWorld`; when `st` or normals use face-varying
+or uniform interpolation, it triangulates a matching corner topology with
+`HdMeshUtil`, retaining holes, orientation and subset face ordering. Only
+emitted polygon corners become vertices. The same map expands points,
+vertex normals, skin influences, morph ranges, MMD edge scales and
+additional UVs. Constant primvars expand to the resulting vertex count;
+Hydra resolves indexed primvars before the adapter reads them.
+
+Smooth rest normals are derived on the source mesh before UV seams split
+its vertices. `RenderWorld::SetMeshNormals` accepts an optional `authored`
+flag, defaulting to true; false retains adapter-derived values while
+keeping `MeshSnapshot::authored_normals` false. Empty or insufficient arrays
+still use core derivation. Source revisions retain the corner map and
+static arrays through pose and weight edits; UV and normal value edits do
+not change topology. `toon-hydra2-primvar-test` checks this normalization
+through UsdImaging and compares textured and deformed Vulkan draws to
+independent explicit-vertex fixtures. No backend vertex contract changes.
+
 PreviewSurface's bounded USD shader-network reader stays in
 `adapters/hydra2/src/material.cpp`. It normalizes five `UsdUVTexture` inputs
 (diffuse, emissive, metallic, roughness, opacity), their channel and
