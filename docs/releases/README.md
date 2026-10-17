@@ -50,9 +50,10 @@ A tag `vX.Y.Z` starts
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml). Before
 tagging:
 
-1. `[project].version` in `openstrata.toml` and `project(Toon VERSION)` in
-   `CMakeLists.txt` are both `X.Y.Z`; `python scripts/release_version.py
-   --tag vX.Y.Z` checks it.
+1. `VERSION`, whose one line `CMakeLists.txt` reads as
+   `project(Toon VERSION)`, and `[project].version` in `openstrata.toml`
+   are both `X.Y.Z`; `python scripts/release_version.py --tag vX.Y.Z`
+   checks it.
 2. `CHANGELOG.md`'s `[Unreleased]` section is renamed
    `## [X.Y.Z] - YYYY-MM-DD`, and a new, empty `[Unreleased]` section sits
    above it.

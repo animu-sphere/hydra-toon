@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The project's version lives in `VERSION`, one line `X.Y.Z`, which
+  `CMakeLists.txt` reads as `project(Toon VERSION)` and reconfigures on
+  when it changes; `scripts/release_version.py` requires
+  `openstrata.toml`'s `[project].version` to equal it.
+
 - MMD's self-shadow map follows the camera, as MMD's own does: across the
   light it spans what the camera sees of the receivers, their joints'
   posed boxes cut to the frustum (`OutlineBounds::ScenePieces`), in steps

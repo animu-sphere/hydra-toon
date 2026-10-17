@@ -1,8 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.24)
 
+# The project's version is the one line of VERSION, X.Y.Z; editing it
+# reconfigures. openstrata.toml's [project].version, which names the package
+# `ost package` writes, must equal it (scripts/release_version.py).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" TOON_VERSION LIMIT_COUNT 1)
+string(STRIP "${TOON_VERSION}" TOON_VERSION)
+if(NOT TOON_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR "VERSION must hold X.Y.Z, not '${TOON_VERSION}'")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+
 project(Toon
-  VERSION 0.3.0
+  VERSION ${TOON_VERSION}
   DESCRIPTION "toon — an OpenStrata renderer skeleton"
   LANGUAGES CXX)
 

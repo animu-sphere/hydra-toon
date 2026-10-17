@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Print the project version, and fail when its two declarations disagree.
 
-The version is declared twice: ``[project].version`` in ``openstrata.toml``,
-which names the package ``ost package`` writes, and ``project(Toon VERSION)``
-in ``CMakeLists.txt``, which the installed ``ToonConfigVersion.cmake``
-carries. A release needs both to be the tag's version.
+The version is declared twice: ``VERSION``, whose one line ``CMakeLists.txt``
+reads into ``project(Toon VERSION)`` and the installed
+``ToonConfigVersion.cmake`` carries, and ``[project].version`` in
+``openstrata.toml``, which names the package ``ost package`` writes. A
+release needs both to be the tag's version.
 
 Usage (what .github/workflows/release.yml runs):
 
@@ -29,12 +30,11 @@ def manifest_version() -> str:
         return tomllib.load(f)["project"]["version"]
 
 
-def cmake_version() -> str:
-    text = (REPO_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    m = re.search(r"project\(\s*Toon\b[^)]*?\bVERSION\s+([0-9.]+)", text, re.S)
-    if not m:
-        raise SystemExit("ERROR: CMakeLists.txt declares no project(Toon VERSION ...)")
-    return m.group(1)
+def file_version() -> str:
+    lines = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise SystemExit("ERROR: VERSION is empty")
+    return lines[0].strip()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,10 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", help="the release tag, vX.Y.Z, that both must equal")
     args = parser.parse_args(argv)
 
-    manifest, cmake = manifest_version(), cmake_version()
-    if manifest != cmake:
+    manifest, version = manifest_version(), file_version()
+    if manifest != version:
         raise SystemExit(
-            f"ERROR: openstrata.toml declares {manifest}, CMakeLists.txt {cmake}")
+            f"ERROR: openstrata.toml declares {manifest}, VERSION {version}")
     if not SEMVER.match(manifest):
         raise SystemExit(f"ERROR: version {manifest!r} is not X.Y.Z")
     if args.tag is not None and args.tag != f"v{manifest}":
