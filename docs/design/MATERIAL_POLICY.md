@@ -73,6 +73,7 @@ model-specific block:
 | common | shading model; base colour and alpha; base texture; normal texture and scale; alpha mode and cutoff; cull mode (double-sidedness); emissive and its texture; outline enable, width, colour; sort key |
 | MToon block | shade colour and texture; shading shift, its texture and contribution scale, and toony; GI equalization; MatCap; parametric rim and rim texture; outline width mode and lighting mix; UV animation and mask; render-queue offset; transparent-with-Z-write |
 | MMD block | specular colour and power; ambient; the edge colour's alpha; sphere texture and mode; toon source, texture or shared index; shadow flags; vertex-colour and draw-points / lines flags; draw order; the texture, sphere and toon tints of its material morphs (§11) |
+| PreviewSurface block | metallic and roughness plus their textures; other inputs use the common part where their meanings match (§12) |
 
 Only what is truly the same goes into the common part. MMD-only concepts —
 sphere modes, sub-texture UVs, shared toon slots, shadow flags, per-vertex edge
@@ -304,3 +305,38 @@ weighs no morph.
   contributes nothing toward texel × multiply + add, by the sum of the two
   alphas, and the alpha is kept. A material without the texture is not
   tinted. The switch changes no material slot.
+
+## 12. PreviewSurface and generic USD fallback
+
+PreviewSurface is the basic PBR fallback for ordinary USD assets and for glTF
+metallic-roughness materials imported into a VRM stage. MToon and MMD retain
+selection priority (§3); extending generic coverage must preserve their
+reference fidelity. This renderer does not expand into a general lookdev
+renderer or an arbitrary material-graph compiler.
+
+Consume base/diffuse colour, metallic, roughness, normal, emissive and opacity,
+their textures and basic texture transforms through the ordinary Hydra
+material network. Preserve Opaque, Mask and Blend behaviour, including mixed
+MToon and metallic-roughness materials in one scene. Emission retains its
+imported strength. Mesh input must preserve the UV data these networks use,
+including face-varying `st`. Unsupported materials use an explicit fallback
+rather than breaking the scene.
+
+Material opacity defines surface behaviour; it does not select the background
+mode. Final product alpha, compositing and boundary conversions belong to
+[RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md). Reference cases and the
+release condition belong to [v0.5.0](../roadmap/v0.5.0.md).
+
+## 13. Tangent-space normal mapping
+
+MToon and PreviewSurface use the same tangent foundation. Prefer authored
+tangents, preserving handedness; when absent, generate MikkTSpace-compatible
+tangents. Mirrored UVs must retain the correct orientation at seams, and
+skinning/morphing must leave a stable normal/tangent frame. A frame derived
+only from deformed positions and UVs is insufficient as the general asset
+fidelity contract.
+
+Validate authored-tangent assets against a reference renderer, generated
+tangents against a glTF reference, and mirrored seams and deformed assets
+under motion. This is a renderer geometry/shading responsibility, not a new
+format schema or avatar evaluator.

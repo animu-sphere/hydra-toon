@@ -7,7 +7,8 @@ owner: hydra-toon
 
 > This document says how far `hydra-toon` goes, what it consumes from which
 > sibling repository, and what it does not own. On structure, [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md)
-> wins; on materials, [MATERIAL_POLICY.md](MATERIAL_POLICY.md) does.
+> wins; on materials, [MATERIAL_POLICY.md](MATERIAL_POLICY.md) does; on RGBA
+> output and compositing, [RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md) does.
 
 ## 1. The rule
 
@@ -50,6 +51,10 @@ and [`usd-mmd-plugins` material policy §12](https://github.com/animu-sphere/usd
 - An MMD toon realization: diffuse / alpha, toon ramp, sphere multiply / add /
   sub-texture, edge, shadow flags, MMD draw order.
 - A `UsdPreviewSurface` realization for materials with no toon semantics.
+- Reusable RGBA render products, transparent output, shared alpha semantics
+  and consumer-boundary conversion. Viewport presentation and future Hydra,
+  host or compositor handoff consume that product under
+  [RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md).
 - The renderer-private `ToonMaterial` and everything below it: pipelines,
   parameter buffers, Slang shaders ([MATERIAL_POLICY.md](MATERIAL_POLICY.md)).
 - The low-latency path: late motion latching, the skeleton / morph fast path,
@@ -122,6 +127,9 @@ is a reference for, and what is designed separately here, is
 - Avatar runtime orchestration, evaluator scheduling, physics and the shared
   evaluated-state contract. The runtime's evaluation Scene Index belongs
   upstream; this repository owns consuming and normalizing its data sources.
+- Host application orchestration and compositor internals. Prospective
+  Mimikuri and Tessera integrations consume renderer output; they do not move
+  application ownership or avatar evaluation into the renderer core.
 - General-purpose USD rendering; that is `hydra-merlin`'s role.
 
 ## 6. Cross-repository observations

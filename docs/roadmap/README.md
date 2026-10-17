@@ -17,18 +17,20 @@ repositories' work is planned in their own roadmaps.
 
 | Milestone | Theme | Page |
 | --- | --- | --- |
-| v0.5.0 | `UsdPreviewSurface` and generic USD fallback | [v0.5.0.md](v0.5.0.md) |
+| v0.5.0 | USD interoperability and render output: PreviewSurface, tangents, reusable RGBA and compositing | [v0.5.0.md](v0.5.0.md) |
 | v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
+| v0.7.0-scale | Host / compositor integration and GPU texture handoff; version assignment remains provisional | [later.md](later.md#host-and-compositor-integration-v070-scale) |
 | later | Platform and GPU coverage: Linux, and AMD and Intel Vulkan | [later.md](later.md#platform-and-gpu-coverage) |
-| after v0.6.0 | Candidates, taken up when the above is settled | [later.md](later.md#after-v060) |
+| later | GPU-driven rendering and other candidates, as evidence asks | [later.md](later.md#after-v060) |
 
 ## Priority
 
 Work is taken in this order, across milestones:
 
-1. `UsdPreviewSurface`
-2. WebGPU
-3. Linux and multi-vendor Vulkan
+1. USD interoperability, tangent fidelity and reusable RGBA output
+2. WebGPU parity with the Vulkan semantics
+3. Host / compositor integration and zero-copy consumption
+4. Platform expansion; GPU-driven work when measurements require it
 
 The current milestone is finished before a new feature family is added, and
 platform coverage is not widened before the renderer core, the viewport and
@@ -83,18 +85,10 @@ to that milestone's page.
   every local model is PMX 2.0, MikuMikuDance v9.32 reads no PMX 2.1, and
   points and lines change a draw's primitives. Drawing them needs a PMX 2.1
   model and a renderer that draws 2.1 to compare with.
-- **Off-thread asset upload.** Geometry, textures and morph targets decoded
-  and staged off the render thread and copied on a transfer queue, with a
-  placeholder until they arrive, so asset loading never stalls a playing
-  avatar ([design policy §20](../design/DESIGN_POLICY.md#20-asset-upload)).
-  Not a priority of v0.2.0 or v0.3.0.
 - **Dual quaternion skinning on the GPU.** A dual quaternion variant of the
   skinning vertex stage, replacing usdSkelImaging's CPU kernel and its point
-  uploads, when an asset needs it.
-- **Hgi interop.** Hand the Hydra host the rendered image without reading
-  every frame back into CPU `HdRenderBuffer`s and waiting for it: Hgi
-  interop, a Vulkan image handoff or a shared GPU texture
-  ([design policy §6](../design/DESIGN_POLICY.md#6-relationship-with-hgi)).
+  uploads, when an asset needs it. CPU fallback remains acceptable; neither
+  v0.5.0 nor v0.6.0 gates on GPU dual quaternion skinning.
 - **More viewport debug views.** Outline debug modes, and wireframe and
   normal display
   ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)).
