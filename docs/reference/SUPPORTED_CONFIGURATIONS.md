@@ -39,7 +39,7 @@ runs on a tag or a manual dry run, never on a pull request.
 | `ost` | 0.23.8 or newer; 0.23.11 or newer to package the `hydra` intent and compose it in a Formation; 0.23.14 or newer for `ost renderer viewport --intent hydra --with <plugin>`; the release workflow pins 0.23.14 | generated with 0.23.6; install smoke ported from renderer template 0.5.3, which lets `core` pass `renderer.install_tree` |
 | CMake | 3.24 or newer | measured with 4.4 |
 | C++ | C++20 | |
-| Vulkan | 1.3 device, loader and headers | the device needs `dynamicRendering`, `synchronization2` and `timelineSemaphore`; without a suitable device the GPU checks report an explained `SKIP`, not a failure |
+| Vulkan | 1.3 device, loader and headers | the device needs `dynamicRendering`, `synchronization2` and `timelineSemaphore`; transparent offscreen MSAA additionally needs `alphaToOne` (1x and opaque output do not). Without a suitable device the GPU checks report an explained `SKIP`, not a failure |
 | `slangc` | bundled with the Vulkan SDK from 1.3.296 | found through `VULKAN_SDK`, then `PATH` |
 | OpenUSD | 26.08 measured | Hydra adapter only; a real `lookdev` or `usd` runtime |
 | GLFW | 3.4 | standalone viewport only; `find_package`, else a pinned FetchContent |

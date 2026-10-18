@@ -429,7 +429,8 @@ PresentSetupStatus VulkanPresentSession::Initialize(
   SceneDeviceFeatures features;
   const char* swapchain_extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
   VkDeviceCreateInfo device_create{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-  device_create.pNext = features.EnableRequired();
+  device_create.pNext = features.EnableRequired(physical_device_);
+  pipelines_.alpha_to_one = features.core.features.alphaToOne == VK_TRUE;
   device_create.queueCreateInfoCount = 1;
   device_create.pQueueCreateInfos = &queue_create;
   device_create.enabledExtensionCount = 1;
@@ -1025,6 +1026,8 @@ bool VulkanPresentSession::TakeCapture(ColorProduct& color,
   color.pixel_format = "rgba8-unorm";
   color.origin = "top-left";
   color.color_space = "as-presented";
+  color.transfer_function = statistics_.srgb_encoded ? "srgb" : "linear";
+  color.alpha_convention = "opaque";
   color.payload.resize(static_cast<std::size_t>(color.width) * color.height *
                        4U);
   std::memcpy(color.payload.data(), capture_.mapped, color.payload.size());

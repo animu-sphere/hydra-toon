@@ -111,6 +111,16 @@ enum class FrameStatus {
   Skip,
 };
 
+enum class BackgroundMode { Opaque, Transparent };
+
+struct BackgroundSettings {
+  BackgroundMode mode = BackgroundMode::Opaque;
+  // Linear RGB in [0,1]. Opaque clears alpha to one; Transparent ignores
+  // this colour and clears all four channels to zero. This is independent
+  // of scene lighting and of a consumer's compositing background.
+  Float3 color{0.05F, 0.10F, 0.15F};
+};
+
 struct ColorProduct {
   std::uint32_t width = 0;
   std::uint32_t height = 0;
@@ -119,6 +129,11 @@ struct ColorProduct {
   std::string origin;
   std::string color_space;
   std::vector<std::uint8_t> payload;
+  // Offscreen: linear transfer, premultiplied RGBA in the scene's linear
+  // sRGB working space. UNORM clamps each channel to [0,1]; no tone mapping.
+  // Present capture: the swapchain transfer and opaque alpha.
+  std::string transfer_function;
+  std::string alpha_convention;
 };
 
 struct DepthProduct {
@@ -190,6 +205,12 @@ class OffscreenRenderer {
 public:
   virtual ~OffscreenRenderer() = default;
   virtual void SetLateFrameSource(LateFrameSource source) = 0;
+
+  // Changes the next clear without reallocating targets or scene resources.
+  // Invalid settings retain the previous clear. Transparent MSAA requires
+  // alphaToOne support to preserve MToon Mask coverage; 1x needs none.
+  [[nodiscard]] virtual bool SetBackground(const BackgroundSettings& settings,
+      std::string& error) = 0;
 
   // Render `draws` at `width` x `height` into `color` and `depth`, reusing
   // their storage. Both products have their origin at the top left.
