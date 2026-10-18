@@ -47,6 +47,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
   [render output policy](docs/design/RENDER_OUTPUT_POLICY.md) defines intended
   background, premultiplied alpha, coverage and GPU handoff contracts.
 
+- Design and roadmap adopt the 2026-10-18 direction: v0.6.0 is shared
+  shadow and lighting across MToon, MMD and PreviewSurface on Vulkan,
+  WebGPU moves to v0.7.0 and host / compositor integration to v0.8.0 scale.
+  [Design policy §35](docs/design/DESIGN_POLICY.md#35-shared-scene-services)
+  defines the shared scene services and
+  [material policy §14](docs/design/MATERIAL_POLICY.md#14-shadows-across-material-families)
+  each model's shadow receive; the release gate states its evidence tiers.
+
 ## [0.4.0] - 2026-10-17
 
 ### Changed

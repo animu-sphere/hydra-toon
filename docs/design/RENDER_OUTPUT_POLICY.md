@@ -68,13 +68,23 @@ conversion divides RGB by alpha only where alpha is nonzero; zero-alpha
 pixels use zero RGB. Record colour encoding and conversion alongside alpha
 convention so compositing never relies on an implicit interpretation.
 
+The v0.5.0 contract is the boundary between the scene-linear foreground and
+the encoded output — colour space, transfer and alpha convention. Exposure,
+tone mapping and HDR output are later work, taken up when a host's display
+differences or an HDR requirement ask for them
+([later](../roadmap/later.md#after-v070)).
+
 ## 4. Foreground and multisample coverage
 
 Character surfaces, toon outlines and transparent surfaces all contribute
 foreground alpha. An outline pixel is foreground even outside its surface's
 depth footprint. Never reconstruct alpha as `depth exists ? 1 : 0`.
 Preserve material alpha, hull coverage and the existing model's draw order.
-MMD self-shadow shades the character surface and is included in its RGBA.
+MMD self-shadow shades the character surface and is included in its RGBA,
+as shadows between material families will be
+([MATERIAL_POLICY.md §14](MATERIAL_POLICY.md#14-shadows-across-material-families)):
+a shadow received on a surface is that surface's colour, not separate
+coverage.
 
 Resolve multisample premultiplied colour and alpha consistently, including
 silhouettes, outlines, Mask edges, alpha-to-coverage and Blend surfaces.
@@ -106,7 +116,8 @@ foreground product fixed; final RGB naturally differs between backgrounds.
 Include transparent hair, outlines, Mask, Blend, emissive and normal maps
 across the three material families.
 
-Ground/contact/drop shadows and shadow catchers are separate future work.
+Ground/contact/drop shadows and shadow catchers are separate future work,
+after host / compositor integration, reusing the shared shadow pass.
 Possible additional outputs include a shadow matte, depth, normal and
 object/prim identity; they are not prerequisites for reusable foreground
 RGBA. The RGBA milestone covers scene geometry, toon outlines and transparent
@@ -129,12 +140,15 @@ Vulkan, WebGPU and Hgi can expose different native APIs while sharing these
 logical meanings. Viewport, Hydra host, Tessera, Mimikuri and video compositors
 are prospective consumers. Concrete API and synchronization choices belong
 to their integration work; this policy does not assert those integrations
-exist or promise a universal cross-API handle.
+exist or promise a universal cross-API handle. The integration also
+states what happens on resize, device loss, several consumers and capture,
+and keeps a measurable readback fallback.
 
 ## 8. Sequencing
 
-Establish material, tangent and RGBA semantics on Vulkan in v0.5.0; reproduce
-them with WebGPU in v0.6.0; then address GPU texture handoff and host/compositor
-integration. Actual scanout/photon timing is host instrumentation, separate
+Establish material, tangent and RGBA semantics on Vulkan in v0.5.0, and
+shared shadow and lighting across material families in v0.6.0; reproduce
+them with WebGPU in v0.7.0; then address GPU texture handoff and
+host/compositor integration, at roughly v0.8.0 scale. Actual scanout/photon timing is host instrumentation, separate
 from renderer-core completion and submit/present-return measurements
 ([design policy §23](DESIGN_POLICY.md#23-performance-kpis)).

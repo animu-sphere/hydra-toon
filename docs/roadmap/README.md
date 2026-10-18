@@ -18,10 +18,11 @@ repositories' work is planned in their own roadmaps.
 | Milestone | Theme | Page |
 | --- | --- | --- |
 | v0.5.0 | USD interoperability and render output: PreviewSurface, tangents, reusable RGBA and compositing | [v0.5.0.md](v0.5.0.md) |
-| v0.6.0 | WebGPU, the second backend | [later.md](later.md#v060--webgpu) |
-| v0.7.0-scale | Host / compositor integration and GPU texture handoff; version assignment remains provisional | [later.md](later.md#host-and-compositor-integration-v070-scale) |
+| v0.6.0 | Shared shadow and lighting: one light rig and shadow resources across MToon, MMD and PreviewSurface | [later.md](later.md#v060--shared-shadow-and-lighting) |
+| v0.7.0 | WebGPU, the second backend | [later.md](later.md#v070--webgpu) |
+| v0.8.0-scale | Host / compositor integration and GPU texture handoff; version assignment remains provisional | [later.md](later.md#host-and-compositor-integration-v080-scale) |
 | later | Platform and GPU coverage: Linux, and AMD and Intel Vulkan | [later.md](later.md#platform-and-gpu-coverage) |
-| later | GPU-driven rendering and other candidates, as evidence asks | [later.md](later.md#after-v060) |
+| later | Environment lighting, render layers, shadow catchers, GPU-driven rendering and other candidates, as evidence asks | [later.md](later.md#after-v070) |
 | later | glTF PBR fidelity through MaterialX, including mixed MToon/PBR avatars | [later.md](later.md#gltf-pbr-through-materialx) |
 
 ## Priority
@@ -29,10 +30,16 @@ repositories' work is planned in their own roadmaps.
 Work is taken in this order, across milestones:
 
 1. USD interoperability, tangent fidelity and reusable RGBA output
-2. WebGPU parity with the Vulkan semantics
-3. Host / compositor integration and zero-copy consumption
-4. Platform expansion; GPU-driven work when measurements require it
+2. Shared shadow and lighting across material families, on Vulkan
+3. WebGPU parity with the Vulkan semantics
+4. Host / compositor integration and zero-copy consumption
+5. Platform expansion; GPU-driven work when measurements require it
 
+v0.5.0 is finished within its scope, not widened. Shared scene services —
+lights, shadow resources, output and visibility — are settled on Vulkan
+before a second backend reproduces them, so WebGPU implements them once
+rather than following a contract still in motion
+([design policy §35](../design/DESIGN_POLICY.md#35-shared-scene-services)).
 The current milestone is finished before a new feature family is added, and
 platform coverage is not widened before the renderer core, the viewport and
 the fast path are settled
@@ -88,13 +95,16 @@ to that milestone's page.
   model and a renderer that draws 2.1 to compare with.
 - **Dual quaternion skinning on the GPU.** A dual quaternion variant of the
   skinning vertex stage, replacing usdSkelImaging's CPU kernel and its point
-  uploads, when an asset needs it. CPU fallback remains acceptable; neither
-  v0.5.0 nor v0.6.0 gates on GPU dual quaternion skinning.
+  uploads, when a target asset's profile shows the CPU fallback as its
+  bottleneck. CPU fallback remains acceptable; no milestone through v0.7.0
+  gates on GPU dual quaternion skinning.
 - **More viewport debug views.** Outline debug modes, and wireframe and
   normal display
   ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)).
-- **Picking.** Fill the `primId`, `instanceId` and `elementId` AOVs.
-- **Render tags, instancers and the framing data window.**
+- **Picking.** Fill the `primId`, `instanceId` and `elementId` AOVs, when a
+  lookdev viewport needs selection and inspection.
+- **Render tags, instancers and the framing data window**, driven by a
+  concrete generic USD or accessory fixture.
 - **The VRM host session on macOS arm64: the runtime and the VRM package
   only.** `hdToon` has no Metal backend
   ([design policy §4](../design/DESIGN_POLICY.md#4-backends)), so no renderer

@@ -160,7 +160,8 @@ preview_surface
 ```
 
 Beside them, `mmd_shadow` draws MMD's self-shadow map, depth alone, before
-the scene (§10); it shades nothing.
+the scene (§10); it shades nothing. The shared shadow caster pass (§14)
+joins it as another depth-only pass, not a shading pipeline.
 
 MToon and MMD are separate shaders, not one shader with a model switch. They
 share what is truly common — skinning, morph evaluation, the texture table,
@@ -216,12 +217,14 @@ structural.
 | MAT-Q4 | How wide MMD draws an edge of a given `edgeSize` × `edgeScale`: MMD states no unit, and on its own frames an edge of size 0.4 is 0.6 pixels wide from 45 MMD units and 1.57 from 9 at a 30° field of view and 1,080 pixels, neither a constant length nor a constant number of pixels ([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)) | resolved 2026-10-12: a share of the target's height, `edgeSize` × `edgeScale` × (0.00108 + 0.0203 / the vertex's view depth in MMD units). On MMD's frames a 15° field of view leaves an edge as many pixels wide as 30° does, a 2,160-pixel frame doubles it, and from 9, 18 and 30 MMD units it falls as a constant share plus one over the depth; the constants make hdToon's edge MMD's width at those cameras ([report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md)) | v0.4.0 |
 | MAT-Q5 | What MMD's self-shadow map covers and how far behind its depth a point falls into shadow. `full.fx` compares in MMD's own map depth, 1,500 per unit and shadowed from 0.3, but MMD states neither that depth's range nor how its map follows its camera and its self-shadow distance, which the stage does not carry (§10) | resolved 2026-10-17: a 2,048-texel map fitted along the light to every MMD draw that casts or receives the self-shadow, and across it to what the camera sees of the receivers ([report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md)), and the comparison in MMD units, 2.5 per unit and shadowed from 0.3, so a point falls into shadow from 0.12 behind and wholly by 0.52. On MMD's frames of a contact and a grazing shadow, and of a face, a bust and a full body, 2.5 is nearest MMD's of 1 to 50 per unit, on five of seven frames and within 0.04 on the others; 15, report 60's, shadowed layers lying close over others that MMD leaves lit ([report 66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md)). MMD's answer moves with its self-shadow distance, which the stage does not carry; this is MMD's at its default | v0.4.0 |
 | MAT-Q6 | How MMD applies a material morph's texture, sphere and toon tints to a texel. PMX states a multiply and an add for each but not how they combine, and MikuMikuDance does not say (§11) | resolved 2026-10-17: MMD does not apply them. On MMD v9.32's frames of two local models, a morph that only tints (`spa消える`, `toon白くなる`, `toon深まる`, `spa消`) leaves the frame as it was at full and half weight, and `全灰モード` and `全黒モード` change only the colours and edge they also set ([report 62](../reports/renderer/62-2026-10-17-mat-q6-morph-tints.md)). So the MMD path leaves the tints out; a host may ask for MikuMikuEffect's `full.fx` reading, which [report 61](../reports/renderer/61-2026-10-12-mmd-material-morph.md) implements and no MikuMikuEffect frame has checked (§11) | v0.4.0 |
+| MAT-Q7 | How MMD's self-shadow map (§10) relates to the shared shadow resources (§14): whether MMD's receivers read the shared map, keep their own camera-following map beside it, or the shared pass draws MMD's map as one of its resources; and how a non-MMD caster reaches an MMD receiver | none yet; answered by the v0.6.0 shadow contract, with MMD's existing self-shadow checks as the regression bound | v0.6.0 |
 
 ## 10. MMD's self-shadow
 
 MMD's self-shadow is MMD's semantics, asked for by a material's
 `castSelfShadow` and `receiveSelfShadow`, not a general shadow system
-([DESIGN_POLICY.md](DESIGN_POLICY.md) §26, §32). The renderer draws it as
+([DESIGN_POLICY.md](DESIGN_POLICY.md) §26, §32). Shadows between material
+families are §14's; that MMD's self-shadow works does not establish them. The renderer draws it as
 MikuMikuEffect's `full.fx` does, while it is on: on unless the host turns
 it off, as MMD's own switch is (`DrawList::mmd_self_shadow`, the render
 setting `toon:mmdSelfShadow`).
@@ -342,3 +345,31 @@ Validate authored-tangent assets against a reference renderer, generated
 tangents against a glTF reference, and mirrored seams and deformed assets
 under motion. This is a renderer geometry/shading responsibility, not a new
 format schema or avatar evaluator.
+
+## 14. Shadows across material families
+
+A shadow cast by one material family onto another — PreviewSurface onto
+MToon, MToon onto MMD — is a separate condition from a model's own
+self-shadow, and is not established by it. The renderer owns the shadow
+data every family reads, as a shared scene service
+([DESIGN_POLICY.md](DESIGN_POLICY.md) §35): the light rig, light-space
+transforms, shadow settings, the caster geometry and its visibility, and
+the shadow resources drawn from them. The material owns how it receives.
+
+| Model | Receives as |
+| --- | --- |
+| PreviewSurface | attenuation of its direct PBR response, light by light |
+| MToon | its own shade and ramp semantics: the shadow cuts the light that MToon's shift and toony ramp shape, never a PBR attenuation laid over the toon colour |
+| MMD | its self-shadow semantics (§10): where light is cut, the colour falls to its far-side ramp texel without the specular |
+
+Casters are opaque and Mask geometry first, skinned and morphed casters at
+their deformed positions, and a material's cast and receive flags stay its
+own: MMD's `castSelfShadow` and `receiveSelfShadow` keep their meaning.
+Whether MMD's own map is one of the shared resources is
+[MAT-Q7](#9-open-questions). A cast or receive setting is a value in the
+material's slot or the draw's visibility, not a pipeline variant (§7), and
+moving a caster by pose is a value update that reuploads no geometry
+([DESIGN_POLICY.md](DESIGN_POLICY.md) §11, §14).
+
+The cases and release condition belong to
+[v0.6.0](../roadmap/later.md#v060--shared-shadow-and-lighting).

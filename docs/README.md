@@ -26,9 +26,9 @@ and the document is a bug. When a summary disagrees with
 
 | Question | Owner |
 | --- | --- |
-| Purpose, principles, renderer architecture, how milestones are ordered | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
+| Purpose, principles, renderer architecture, shared scene services, how milestones are ordered | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | What this repository owns, what it consumes from which sibling, what it does not own | [design/INTEGRATION_SCOPE_POLICY.md](design/INTEGRATION_SCOPE_POLICY.md) |
-| Reading MToon, MMD and PreviewSurface materials; `ToonMaterial`; outline; draw order; pipelines | [design/MATERIAL_POLICY.md](design/MATERIAL_POLICY.md) |
+| Reading MToon, MMD and PreviewSurface materials; `ToonMaterial`; outline; draw order; pipelines; how each model receives shared shadows | [design/MATERIAL_POLICY.md](design/MATERIAL_POLICY.md) |
 | Reusable RGBA products, background modes, alpha/coverage, viewport compositing and GPU texture handoff | [design/RENDER_OUTPUT_POLICY.md](design/RENDER_OUTPUT_POLICY.md) |
 | Targets, names, directories, dependency directions, build intents, install tree | [architecture/PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | Implemented capabilities — the only statement of current status | [reference/CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) |
