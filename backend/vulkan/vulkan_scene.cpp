@@ -2,6 +2,7 @@
 #include "vulkan_scene.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -1959,13 +1960,17 @@ void MeshCache::Record(VkCommandBuffer command,
     }
   };
   const Matrix4 clip_from_world = VulkanClipFromWorld(draws.view);
-  // A readable material uses its model's pipeline; an unreadable network or
-  // missing binding retains the unlit mesh display colour.
+  // Missing bindings use a rough dielectric with per-draw display colour.
+  // This entry is local: no per-mesh material, slot or texture is allocated.
+  MaterialCache::Entry display_material;
+  display_material.preview_enabled = true;
+  display_material.double_sided = true;
+  // Readable materials use their model; bound diagnostic materials stay unlit.
   const auto surface_material =
-      [&materials](const MeshPart& part) -> const MaterialCache::Entry* {
+      [&](const MeshPart& part) -> const MaterialCache::Entry* {
     const MaterialCache::Entry* material = materials.Find(part.material);
-    return material != nullptr &&
-                   (material->model == ToonShadingModel::MToon ||
+    if (material == nullptr) return &display_material;
+    return (material->model == ToonShadingModel::MToon ||
                        material->model == ToonShadingModel::MMD || material->preview_enabled)
                ? material
                : nullptr;
@@ -2112,6 +2117,12 @@ void MeshCache::Record(VkCommandBuffer command,
                       entry.skin_flags;
     constants.projection_scale = projection_scale;
     constants.outline_scale = units_per_meter;
+    if (&material == &display_material) {
+      constants.flags |= kDrawDisplayColor;
+      constants.material_slot = std::bit_cast<std::uint32_t>(mesh.color.x);
+      constants.projection_scale = mesh.color.y;
+      constants.outline_scale = mesh.color.z;
+    }
     vkCmdSetCullMode(command, cull);
     vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_CLOCKWISE
                                         : VK_FRONT_FACE_COUNTER_CLOCKWISE);

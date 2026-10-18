@@ -96,7 +96,7 @@ bool Gpu(const Toon::SceneShaders& shaders) {
   Require(renderer != nullptr, error.c_str());
 
   // Triangles 1 and 3 in the opaque subset, 0 in the blended one, and 2 in
-  // none, drawn with the mesh's own Mask material; then with none, unlit.
+  // none, drawn with the mesh's own Mask material; then with display colour.
   Scene divided;
   const Toon::MeshId mesh = divided.Mesh(Triangles({1, 3, 0, 2}), divided.materials[2]);
   divided.world.SetMeshSubsets(mesh, {{0, 6, divided.materials[0]}, {6, 3, divided.materials[1]}});

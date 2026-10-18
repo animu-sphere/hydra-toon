@@ -748,7 +748,10 @@ def Mesh "Mixed" {
                color.payload[offset + 3] == 255;
       };
       const auto at = (depth.row_pitch / sizeof(float)) * 32 + 60;
-      const bool pixels = (direct != 0 || pixel(21, {0.6F, 0.1F, 0.2F})) && pixel(99, {0.1F, 0.2F, 0.8F}) &&
+      const auto unbound_offset = color.row_pitch * 32 + 99 * 4;
+      const bool display_lit = direct == 0 ? pixel(99, {0, 0, 0})
+          : color.payload[unbound_offset + 2] > 100 && color.payload[unbound_offset + 3] == 255;
+      const bool pixels = (direct != 0 || pixel(21, {0.6F, 0.1F, 0.2F})) && display_lit &&
                           pixel(60, repaired ? Toon::Float3{0.0625F, 0.275F, 0.1625F} : Toon::Float3{1, 0, 1});
       return Check(pixels && (repaired ? depth.payload[at] == 1 : depth.payload[at] < 1),
           "supported, unsupported or unbound subset colour/depth differs");

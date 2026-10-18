@@ -25,9 +25,12 @@ struct DrawConstants {
   // What mtoon_outline's world-coordinates width is multiplied by: the
   // scene's units per metre, 1 / its metersPerUnit.
   float outline_scale;
+  // kDrawDisplayColor uses asfloat(material_slot), projection_scale and
+  // outline_scale as RGB, without a material buffer lookup or an outline.
 };
 
 static const uint kDrawHasUVs = 1;
+static const uint kDrawDisplayColor = 8;
 // Must match vulkan_internal::kDrawOrthographic.
 static const uint kDrawOrthographic = 16;
 // Must match vulkan_internal::kDrawBlend.

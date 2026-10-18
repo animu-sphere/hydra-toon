@@ -88,8 +88,8 @@ void OutlineOcclusion::Update(const DrawList& draws, std::uint32_t width,
           material->material.model == ToonShadingModel::MToon &&
           (material->material.alpha_mode != ToonAlphaMode::Opaque || !material->material.double_sided);
     };
-    // Unlit fallback meshes are opaque and unculled, regardless of the
-    // unused material parameters. MToon must be Opaque and double-sided,
+    // Unbound display-colour and unlit diagnostic meshes are opaque and
+    // unculled. MToon must be Opaque and double-sided,
     // in every part a mesh's face subsets divide it into.
     if (mesh.parts ? std::any_of(mesh.parts->begin(), mesh.parts->end(),
                          [&](const MeshPart& part) { return excluded(part.material); })

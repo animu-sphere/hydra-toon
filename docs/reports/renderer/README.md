@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [77](77-2026-10-18-display-color-lighting.md) | Unbound mesh display colours shade as rough dielectrics without per-mesh materials; analytic GPU, mixed-subset and local kitchen usdview checks |
 | [76](76-2026-10-18-preview-surface-extended-reference.md) | Storm comparisons extended to curved/grazing surfaces, packed scalar textures and Mask/Blend on a matched opaque clear, with independent channel/cutoff and linear-compositing controls |
 | [75](75-2026-10-18-preview-surface-reference.md) | Controlled Storm/hdToon PBR and mirrored normal-map comparisons, explicit intermediate-metal/rotated-frame differences, and metallic grazing Fresnel correction with an analytic GPU regression |
 | [74](74-2026-10-18-generated-tangents.md) | MikkTSpace rest frames, minimal mirrored seam splits, edit routing and retained skin/morph data; MToon/PreviewSurface analytic CPU-normal comparisons at 1x/4x |

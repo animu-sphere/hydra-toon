@@ -232,7 +232,7 @@ struct MeshSnapshot {
   bool morph_weights_overridden = false;
   Matrix4 transform;
   Float3 color{0.5F, 0.5F, 0.5F};
-  // 0 when the mesh binds no material; it then draws its colour, unlit.
+  // 0 when the mesh binds no material; its colour is then a rough dielectric.
   MaterialId material = 0;
   // The draws the mesh makes, in triangle-list order: each face subset's
   // range with the material it binds, and every run of triangles no subset
@@ -344,8 +344,9 @@ struct ToonMaterial {
 
   // The basic metallic/roughness PreviewSurface realization. For this model,
   // disabling the block draws a bound material's base_color unlit and opaque.
-  // Only an unbound draw uses the mesh's display colour; adapters can choose
-  // a diagnostic colour without adding a shading model or pipeline.
+  // An unbound draw shades the mesh's display colour as an opaque, double-sided
+  // dielectric with roughness 1. Adapters can choose an unlit diagnostic colour
+  // for a bound material without adding a shading model or pipeline.
   struct PreviewSurface {
     bool enabled = false;
     float metallic = 0.0F;
@@ -559,7 +560,7 @@ public:
   void SetMeshTransform(MeshId mesh, const Matrix4& transform);
   void SetMeshColor(MeshId mesh, Float3 color);
   void SetMeshVisible(MeshId mesh, bool visible);
-  // Binds a material by id; 0, or an id no material has, draws unlit.
+  // Binds a material by id; 0, or an unknown id, shades the mesh display colour.
   void SetMeshMaterial(MeshId mesh, MaterialId material);
   // Face subsets that bind their own material, as ranges of the triangle
   // list (UsdGeomSubset's material binding); triangles none covers draw
