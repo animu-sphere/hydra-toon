@@ -361,6 +361,15 @@ sample and display measurements require external host instrumentation.
 `toon-late-frame-test` verifies atomic rejection and GPU image equivalence;
 `check_latency.cmake` checks exported actual presentation endpoints.
 
+Hydra background settings are read in `adapters/hydra2/src/adapter.cpp` at
+render-pass execution and applied to the existing offscreen renderer. The
+adapter retains the last accepted pair across sample-count recreation,
+without editing scene or lighting state. `HdToonRenderBuffer::WriteColor`
+flips/resamples linear premultiplied RGBA8 without changing its channels.
+The existing render-buffer test executable also drives a real UsdImaging
+scene through the Hydra render pass for 1x/4x RGBA checks; no installed
+target or new backend boundary is added.
+
 ## 4. Dependency directions
 
 ```text
