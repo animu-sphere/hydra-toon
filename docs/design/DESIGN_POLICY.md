@@ -15,7 +15,10 @@ owner: hydra-toon
 > coverage after the renderer, and the 2026-10-05 direction, which makes
 > Hydra and direct evaluated-state input two adapters into one renderer core.
 > The 2026-10-17 direction establishes USD interoperability and reusable RGBA
-> semantics before WebGPU parity, then host / compositor integration.
+> semantics before WebGPU parity, then host / compositor integration, and the
+> 2026-10-18 direction puts shared shadow and lighting across material
+> families on Vulkan between them, so WebGPU reproduces a settled contract
+> (§35).
 > Where this repository departs from the
 > implementation policy, §30 records it; §31 onward are this repository's own.
 > Focused documents own the detail of one area each, and **on its own area
@@ -361,7 +364,10 @@ optional shadow → opaque toon → outline → transparent → composite / post
 ```
 
 It exists for resource lifetime, dependencies, barriers, transient resources
-and pass ordering — not as a game-engine graph compiler.
+and pass ordering — not as a game-engine graph compiler. The shadow passes
+draw resources every material family reads (§35); a pass's resources and
+dependencies are documented before any general pass-graph framework is
+considered.
 
 The scene passes produce reusable RGBA; viewport compositing and presentation
 consume it. Background, alpha and multisample coverage follow
@@ -450,7 +456,8 @@ indirect rendering, bindless everything. The main case is a few characters,
 some hundreds of thousands of polygons and tens to hundreds of materials, for
 which CPU-side persistent draw packets should be enough. GPU-driven techniques
 come after a measurement shows the need. Performance work is feature- and
-measurement-driven and, as a rule, is not added before v0.6.0; this includes
+measurement-driven and, as a rule, is not added before WebGPU parity
+(v0.7.0); this includes
 async upload/transfer queues, compute skinning, async compute, pipeline caches
 and shader pre-warming as well as GPU-driven draws.
 
@@ -524,6 +531,13 @@ changed. What each milestone contains, and the order, is the
 - **See it before tuning it.** The dedicated viewport (§31) comes before the
   work it is used to judge: what cannot be seen, measured and compared is not
   tuned. It is built early, and grows with each milestone.
+- **Shared semantics before a second backend.** Scene services that every
+  material family reads — lights, shadow resources, output and visibility
+  (§35) — are settled on Vulkan before WebGPU reproduces them, so they are
+  implemented once on each backend rather than extended across both.
+- **Toon fidelity first.** Generic PBR coverage and shared services never
+  outrank MToon's and MMD's reference looks; a change that regresses them is
+  redesigned.
 - **Platforms after the renderer.** Architecture and quality are settled on
   Windows and the main development GPU. Linux and multi-vendor Vulkan
   validation follow WebGPU and host / compositor integration once the core,
@@ -531,10 +545,11 @@ changed. What each milestone contains, and the order, is the
 
 MMD realization closes toon fidelity before generic coverage expands.
 v0.5.0 establishes USD interoperability, tangents and reusable RGBA semantics;
-v0.6.0 reproduces them on WebGPU. GPU texture handoff and host / compositor
-integration follow, at roughly v0.7.0 scale. GPU dual quaternion skinning is
-introduced when an asset needs it; CPU fallback is acceptable and it is not
-a v0.5.0 or v0.6.0 release gate.
+v0.6.0 establishes shared shadow and lighting across MToon, MMD and
+PreviewSurface on Vulkan; v0.7.0 reproduces them on WebGPU. GPU texture
+handoff and host / compositor integration follow, at roughly v0.8.0 scale.
+GPU dual quaternion skinning is introduced when an asset needs it; CPU
+fallback is acceptable and it is not a release gate through v0.7.0.
 
 Until v0.1.0 the sequence was **Renderer Phase 0–7**. It is retired; reports
 and the v0.1.0 record that name a phase map onto milestones as follows:
@@ -546,8 +561,8 @@ and the v0.1.0 record that name a phase map onto milestones as follows:
 | 3 Animation fast path | v0.3.0, avatar animation fast path |
 | 4 MMD | v0.4.0, MMD realization |
 | 5 UsdPreviewSurface | v0.5.0, USD interoperability and render output |
-| 6 WebGPU | v0.6.0, WebGPU |
-| 7 Optimization | after v0.6.0, as measurement asks |
+| 6 WebGPU | v0.7.0, WebGPU |
+| 7 Optimization | after v0.7.0, as measurement asks |
 
 ## 26. Non-goals
 
@@ -555,7 +570,9 @@ Initially not goals: a general-purpose AAA renderer; a full deferred renderer;
 ray tracing; path tracing; large worlds; a geometry-shader or mesh-shader
 dependency; full MaterialX, production PBR or arbitrary material graphs
 (`UsdPreviewSurface` is a fallback, not a lookdev path); a Metal or OpenGL
-backend; clustered lighting or a production shadow system (§32); a
+backend; clustered lighting or a production shadow system (§32) — the
+shared shadow foundation (§35) is not one, and cascades, point-light cube
+shadows, advanced soft shadows and ray-traced shadows wait for need; a
 screen-space outline before the inverted hull is finished (§10); tuning for
 large generic USD scenes; a renderer core shared with `hydra-merlin` (§3); a
 bindless redesign before the fixed texture table runs out (§22); a large
@@ -695,13 +712,15 @@ A light fixed to the camera is a stand-in, not the design. Scene lights come
 from Hydra:
 
 ```text
-HdLight / scene index → ToonLight → light buffer → MToon
+HdLight / scene index → ToonLight → light buffer → MToon | MMD | PreviewSurface
 ```
 
 First come directional lights, basic point and spot lights, the ambient
-contribution, and MToon's lighting semantics over them. Clustered lighting
-and a production shadow system are not the goal (§26). The viewport carries
-basic light controls, so a lighting change can be compared quickly.
+contribution, and each model's lighting semantics over them. The lights and
+the shadows they cast are shared scene services; each model keeps its own
+response to them (§35). Clustered lighting and a production shadow system
+are not the goal (§26). The viewport carries basic light controls, so a
+lighting change can be compared quickly.
 
 ## 33. Checks for a new feature
 
@@ -769,3 +788,39 @@ the shared avatar result. A future public C ABI or language binding is separate
 work; runtime interoperability must not make upstream orchestration, Hydra or
 format libraries dependencies of the renderer core. Code placement is owned
 by [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md).
+
+## 35. Shared scene services
+
+`hydra-toon` is an avatar-first renderer in which MToon, MMD and
+`UsdPreviewSurface` share one scene: they occlude, light and shadow each
+other. It does not grow into a general USD renderer for that; general scene
+rendering is `hydra-merlin`'s (§3), and what is weighed first stays VRM and
+MMD fidelity, low latency, transparent RGBA and ease of embedding in an
+avatar host (§1).
+
+The renderer core owns four services every material family reads:
+
+| Service | Owns |
+| --- | --- |
+| Scene lighting | the light rig: identities, visibility, transforms and the light buffer (§32) |
+| Shadow services | shadow settings, caster geometry and visibility, shadow passes and their resources |
+| Colour output | the RGBA product, its alpha and colour boundaries ([RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md)) |
+| Visibility | what draws, casts and receives, and into which product |
+
+What is shared is **scene input and render resources**, not the shading
+algorithm. Each model interprets them with its own semantics: MToon's shade
+and ramp, MMD's self-shadow, PreviewSurface's PBR response
+([MATERIAL_POLICY.md §14](MATERIAL_POLICY.md#14-shadows-across-material-families)).
+A shared service does not make one model's look follow another's.
+
+The services live in the core, behind the render world and extraction
+(§7): the Hydra adapter and the fast adapter supply lights, casters and
+visibility as scene data, and neither owns shadow resources or passes. Both
+input paths reach the same services and the same output semantics (§34).
+Existing USD and Hydra contracts — `UsdLux`, `UsdPreviewSurface`, Hydra
+AOVs — come first; a renderer-specific schema is a last resort (§27).
+
+Latency is judged on the services as on everything else: frame-time p95 and
+p99 as well as the mean, CPU-to-GPU update volume and input-to-present
+(§23). A pose-only update moves shadow casters without uploading geometry
+(§11, §14).
