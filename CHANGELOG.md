@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MikkTSpace rest-tangent generation for USD meshes without authored
+  tangents. Mirrored frame seams duplicate only conflicting vertices and
+  preserve skin, morph and auxiliary data. UV/normal edits refresh frames;
+  pose and morph weights retain them. MToon and PreviewSurface have
+  independent CPU-normal image comparisons at 1x/4x MSAA
+  ([renderer report 74](docs/reports/renderer/74-2026-10-18-generated-tangents.md)).
+
 - PreviewSurface normal constants and RGB normal maps through the shared
   tangent frame, including explicit USD texture scale/bias, transformed UVs
   and missing-image fallback. Deformed authored frames, mirrored/rotated

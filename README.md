@@ -114,3 +114,5 @@ for dependencies, the Hydra adapter and the viewport.
 ## License
 
 [Apache-2.0](LICENSE).
+The vendored [MikkTSpace](third_party/mikktspace/README.md)
+implementation retains its own license notices.

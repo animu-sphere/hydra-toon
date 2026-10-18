@@ -1,0 +1,2 @@
+# Preserve upstream source bytes and formatting in the vendored implementation.
+third_party/mikktspace/mikktspace.[ch] -text -whitespace

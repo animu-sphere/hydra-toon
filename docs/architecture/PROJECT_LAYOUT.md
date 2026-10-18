@@ -170,12 +170,33 @@ header. The adapter reads float4 `primvars:tangents`, including Hydra-resolved
 indices and vertex, varying, face-varying, uniform or constant interpolation,
 through the same corner map. This adapter input uses xyz along +U and w
 equal to +/-1, with `w * cross(N,T)` along +V of bottom-left `st`; an adapter
-carrying a top-left source basis must convert its sign. Missing, short or
-invalid frames select the existing derivative fallback. No format schema
+carrying a top-left source basis must convert its sign. Short or invalid
+authored frames select the existing derivative fallback. No format schema
 is introduced. Tangent changes invalidate both late-snapshot and optional
 avatar-state structural bindings.
 CPU point-computation fallbacks, including dual quaternion skinning, retain
 the derivative path because they supply no matching deformed tangent frame.
+
+Without authored tangents, the Hydra adapter's private
+`src/generated_tangents.*` runs the unmodified MikkTSpace implementation
+vendored under the repository's `third_party/mikktspace/`, compiled inside
+`toon-hydra2-runtime`. Third-party source and its license/attribution belong
+under `third_party/<dependency>/`; renderer-owned wrappers stay with their
+consumer. It uses the
+normalized rest triangles, unit normals and bottom-left `st`. The C source
+compiles as C++; no new target, runtime dependency or public header is added.
+Its pinned origin and license are recorded in that directory's README and
+source notices; the license and attribution install under
+`share/toon/licenses/mikktspace`. Missing, short, non-finite or entirely collapsed UV data
+retains the derivative fallback.
+
+Generated corner frames keep the existing indexed layout when possible.
+A shared vertex receiving different frames is duplicated, and the same map
+expands normals, UVs, skin influences, morph ranges, edge scales and extra
+UVs; triangle order and material-subset ranges remain unchanged. A frame
+rebuild follows rest-point, normal, UV or topology edits, never pose or
+morph-weight edits. Only a changed seam map or triangle assignment rebuilds
+the other streams. Authored tangents take precedence over generation.
 
 The Vulkan mesh cache uploads tangents by their own revision. MToon's three
 pipelines and PreviewSurface consume a fourth float4 vertex stream, bound
@@ -197,8 +218,9 @@ its vertices. `RenderWorld::SetMeshNormals` accepts an optional `authored`
 flag, defaulting to true; false retains adapter-derived values while
 keeping `MeshSnapshot::authored_normals` false. Empty or insufficient arrays
 still use core derivation. Source revisions retain the corner map and
-static arrays through pose and weight edits; UV and normal value edits do
-not change topology. `toon-hydra2-primvar-test` checks this normalization
+static arrays through pose and weight edits; UV and normal value edits
+retain topology unless they change a generated tangent seam.
+`toon-hydra2-primvar-test` checks this normalization
 through UsdImaging and compares textured and deformed Vulkan draws to
 independent explicit-vertex fixtures. No backend vertex contract changes.
 

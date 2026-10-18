@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "adapter.hpp"
+#include "generated_tangents.hpp"
 
 #include <pxr/pxr.h>
 
@@ -936,6 +937,13 @@ private:
     return split_ ? PerPoint(values, corner_points_) : values;
   }
 
+  template <typename T>
+  std::vector<T> TangentVertices(const std::vector<T>& values,
+      std::size_t width = 1) const {
+    return generated_.vertices.empty() ? values :
+        PerPoint(values, generated_.vertices, width);
+  }
+
   // Retain source-point geometry locally. Splitting only at this adapter
   // boundary keeps every backend and evaluated-state consumer on the same
   // per-vertex contract. Revisions avoid touching static arrays on pose or
@@ -945,7 +953,7 @@ private:
     const bool split = NeedsCorners(uv_interpolation_) ||
                        NeedsCorners(normal_interpolation_) ||
                        NeedsCorners(tangent_interpolation_);
-    const bool layout = layout_dirty_ || split != split_;
+    bool layout = layout_dirty_ || split != split_;
     split_ = split;
     HdToonTriangulation triangles;
     if (layout) {
@@ -987,7 +995,7 @@ private:
               std::lower_bound(corners_.begin(), corners_.end(), corner) - corners_.begin());
         }
       }
-      state_->SetMeshTopology(mesh_, std::move(triangles));
+      triangles_ = std::move(triangles);
     }
 
     const auto& before_normals = source_frame_.meshes[0];
@@ -1004,9 +1012,39 @@ private:
       source_.Commit(source_frame_);
     }
     const auto& source = source_frame_.meshes[0];
+    const bool points_changed = source.points_revision != published_.points_revision;
+    const bool normals_changed = normals_dirty_ || source.normals_revision != published_.normals_revision;
+    const bool uvs_changed = source.uvs_revision != published_.uvs_revision ||
+        uv_interpolation_ != published_uv_interpolation_ ||
+        (uv_interpolation_ == HdInterpolationConstant && points_changed);
+    const bool frames_changed = layout || points_changed || normals_changed ||
+        uvs_changed || tangents_dirty_;
+    if (frames_changed) {
+      Toon::detail::GeneratedTangents generated;
+      if (tangents_.empty() && !cpu_deformed_) {
+        auto normals = NeedsCorners(normal_interpolation_)
+            ? Primvar(normals_, normal_interpolation_) : std::vector<Toon::Float3>{};
+        if (normals.empty()) normals = split_ ? PerPoint(*source.normals, corner_points_) : *source.normals;
+        generated = Toon::detail::GenerateTangents(
+            split_ ? PerPoint(*source.points, corner_points_) : *source.points,
+            normals, Primvar(uvs_, uv_interpolation_), triangles_.indices);
+      }
+      // Only a changed seam map requires republishing the other streams.
+      // UV/normal edits that keep this layout update the frame independently.
+      layout |= generated.vertices != generated_.vertices;
+      const auto& next_indices = generated.indices.empty() ? triangles_.indices : generated.indices;
+      const auto& old_indices = generated_.indices.empty() ? triangles_.indices : generated_.indices;
+      layout |= next_indices != old_indices;
+      generated_ = std::move(generated);
+    }
+    if (layout) {
+      auto output = triangles_;
+      if (!generated_.indices.empty()) output.indices = generated_.indices;
+      state_->SetMeshTopology(mesh_, std::move(output));
+    }
     if (layout || source.points_revision != published_.points_revision) {
-      state_->SetMeshPoints(mesh_, split_ ?
-          PerPoint(*source.points, corner_points_) : *source.points);
+      state_->SetMeshPoints(mesh_, TangentVertices(split_ ?
+          PerPoint(*source.points, corner_points_) : *source.points));
     }
     if (layout || normals_dirty_ || source.normals_revision != published_.normals_revision) {
       auto normals = NeedsCorners(normal_interpolation_)
@@ -1015,27 +1053,25 @@ private:
       if (normals.empty()) {
         normals = split_ ? PerPoint(*source.normals, corner_points_) : *source.normals;
       }
-      state_->SetMeshNormals(mesh_, std::move(normals), authored);
+      state_->SetMeshNormals(mesh_, TangentVertices(normals), authored);
     }
     if (layout || source.uvs_revision != published_.uvs_revision ||
         (uv_interpolation_ == HdInterpolationConstant &&
             source.points_revision != published_.points_revision) ||
         uv_interpolation_ != published_uv_interpolation_) {
-      state_->SetMeshUVs(mesh_, Primvar(uvs_, uv_interpolation_));
+      state_->SetMeshUVs(mesh_, TangentVertices(Primvar(uvs_, uv_interpolation_)));
     }
-    if (layout || tangents_dirty_ ||
-        (tangent_interpolation_ == HdInterpolationConstant &&
-            source.points_revision != published_.points_revision)) {
+    if (layout || frames_changed) {
       state_->SetMeshTangents(mesh_, cpu_deformed_ ? std::vector<Toon::Float4>{} :
-          Primvar(tangents_, tangent_interpolation_));
+          (tangents_.empty() ? generated_.tangents : Primvar(tangents_, tangent_interpolation_)));
     }
     if (layout || source.edge_scales_revision != published_.edge_scales_revision) {
-      state_->SetMeshEdgeScales(mesh_, split_ ?
-          PerPoint(*source.edge_scales, corner_points_) : *source.edge_scales);
+      state_->SetMeshEdgeScales(mesh_, TangentVertices(split_ ?
+          PerPoint(*source.edge_scales, corner_points_) : *source.edge_scales));
     }
     if (layout || source.sub_texture_uvs_revision != published_.sub_texture_uvs_revision) {
-      state_->SetMeshSubTextureUVs(mesh_, split_ ?
-          PerPoint(*source.sub_texture_uvs, corner_points_) : *source.sub_texture_uvs);
+      state_->SetMeshSubTextureUVs(mesh_, TangentVertices(split_ ?
+          PerPoint(*source.sub_texture_uvs, corner_points_) : *source.sub_texture_uvs));
     }
     if (layout || source.skin_revision != published_.skin_revision) {
       Toon::ToonSkin skin;
@@ -1045,11 +1081,13 @@ private:
       skin.influences = split_ && !skin.constant && skin.influences_per_point != 0 ?
           PerPoint(*source.influences, corner_points_, skin.influences_per_point) :
           *source.influences;
+      if (!skin.constant && skin.influences_per_point != 0)
+        skin.influences = TangentVertices(skin.influences, skin.influences_per_point);
       state_->SetMeshSkin(mesh_, std::move(skin));
     }
     if (layout || source.morph_revision != published_.morph_revision) {
-      Toon::ToonMorph morph{*source.morph_offsets, split_ ?
-          PerPoint(*source.morph_ranges, corner_points_) : *source.morph_ranges};
+      Toon::ToonMorph morph{*source.morph_offsets, TangentVertices(split_ ?
+          PerPoint(*source.morph_ranges, corner_points_) : *source.morph_ranges)};
       state_->SetMeshMorph(mesh_, std::move(morph));
     }
     published_ = source;
@@ -1758,6 +1796,8 @@ private:
   Toon::FrameSnapshot source_frame_;
   Toon::MeshSnapshot published_;
   HdMeshTopology topology_;
+  HdToonTriangulation triangles_;
+  Toon::detail::GeneratedTangents generated_;
   std::vector<std::uint32_t> corners_, corner_points_, corner_faces_;
   std::vector<Toon::Float2> uvs_;
   std::vector<Toon::Float3> normals_;

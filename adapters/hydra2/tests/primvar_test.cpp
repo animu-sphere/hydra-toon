@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "adapter.hpp"
+#include "generated_tangents.hpp"
 
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -247,7 +249,244 @@ def Mesh "Body" {
   if (!Check(host.Sync().meshes[0].tangents->empty(), "malformed signs retained stale tangents")) return false;
   prim.RemoveProperty(TfToken("primvars:tangents"));
   prim.RemoveProperty(TfToken("primvars:tangents:indices"));
-  if (!Check(host.Sync().meshes[0].tangents->empty(), "removed tangents remained resident")) return false;
+  if (!Check(host.Sync().meshes[0].tangents->empty(), "short UVs must not generate frames")) return false;
+  expanded.resize(4);
+  UsdGeomMesh(prim).GetPointsAttr().Set(expanded);
+  if (!Check(*host.Sync().meshes[0].tangents == std::vector<Toon::Float4>(4, {1,0,0,1}),
+          "removing authored tangents must restore generation when UVs cover the points")) return false;
+  return true;
+}
+
+bool Generated(const std::string& shaders) {
+  const std::vector<Toon::Float3> points{{-0.6F,-0.6F,0},{0.6F,-0.6F,0},
+      {0.6F,0.6F,0},{-0.6F,0.6F,0}};
+  const std::vector<Toon::Float3> normals(4, {0,0,1});
+  const std::vector<Toon::Float2> uvs{{0,0},{1,0},{0,1},{1,1}};
+  const std::vector<std::uint32_t> triangles{0,1,2,0,2,3};
+  const std::vector<std::uint32_t> vertices{0,1,2,3,0,2};
+  const std::vector<std::uint32_t> split_indices{0,1,2,4,5,3};
+  const std::vector<Toon::Float4> frames{{1,0,0,1},{1,0,0,1},{1,0,0,1},
+      {-1,0,0,-1},{-1,0,0,-1},{-1,0,0,-1}};
+  const auto generated = Toon::detail::GenerateTangents(points, normals, uvs, triangles);
+  if (!Check(generated.vertices == vertices && generated.indices == split_indices &&
+                 generated.tangents == frames,
+          "generated mirrored frames must split only the two conflicting shared vertices")) return false;
+  const auto reordered = Toon::detail::GenerateTangents(points, normals, uvs, {2,3,0,1,2,0});
+  // Compare per-corner results: numbering may differ with visitation order.
+  const std::vector<unsigned> order{4,5,3,1,2,0};
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    if (!Check(reordered.tangents[reordered.indices[i]] == frames[split_indices[order[i]]],
+            "face order and cyclic corner order changed a generated frame")) return false;
+  }
+  auto invalid_normals = normals;
+  invalid_normals[0].x = std::numeric_limits<float>::quiet_NaN();
+  if (!Check(Toon::detail::GenerateTangents(points, normals, {}, triangles).tangents.empty() &&
+                 Toon::detail::GenerateTangents(points, invalid_normals, uvs, triangles).tangents.empty() &&
+                 Toon::detail::GenerateTangents(points, normals, uvs, {0,1,99}).tangents.empty() &&
+                 Toon::detail::GenerateTangents(points, normals, std::vector<Toon::Float2>(4), triangles).tangents.empty(),
+          "incomplete, non-finite or collapsed data must keep the fallback frame")) return false;
+
+  const auto stage = UsdStage::CreateInMemory();
+  if (!stage->GetRootLayer()->ImportFromString(R"USD(#usda 1.0
+def Mesh "Body" {
+ uniform token subdivisionScheme = "none"
+ point3f[] points = [(-0.6,-0.6,0), (0.6,-0.6,0), (0.6,0.6,0), (-0.6,0.6,0)]
+ int[] faceVertexCounts = [3,3]
+ int[] faceVertexIndices = [0,1,2,0,2,3]
+ texCoord2f[] primvars:st = [(0,0), (1,0), (0,1), (1,1)] (interpolation = "vertex")
+ float[] primvars:mmd:edgeScale = [1,2,3,4] (interpolation = "vertex")
+ float4[] primvars:mmd:uv1 = [(0,0,0,0), (1,1,0,0), (2,2,0,0), (3,3,0,0)] (interpolation = "vertex")
+}
+)USD")) return false;
+  Host host(stage);
+  const auto first = host.Sync();
+  const auto mesh = first.meshes[0];
+  if (!Check(*mesh.tangents == frames && *mesh.indices == split_indices &&
+                 *mesh.edge_scales == std::vector<float>{1,2,3,4,1,3} &&
+                 *mesh.sub_texture_uvs == std::vector<Toon::Float2>{{0,0},{1,1},{2,2},{3,3},{0,0},{2,2}},
+          "generated seam did not propagate its map to all auxiliary streams")) return false;
+  for (std::size_t i = 0; i < vertices.size(); ++i) {
+    if (!Check((*mesh.points)[i] == points[vertices[i]] && (*mesh.normals)[i] == normals[vertices[i]] &&
+                   (*mesh.uvs)[i] == uvs[vertices[i]], "generated seam corrupted a vertex stream")) return false;
+  }
+  if (!shaders.empty()) {
+    // Independent analytic normals for each UV orientation. The oracle
+    // has no UVs, normal map or tangent stream.
+    for (const bool preview : {false, true}) {
+      Toon::RenderWorld reference;
+      reference.SetMeshPoints(reference.CreateMesh(),
+          {points[0],points[1],points[2],points[0],points[2],points[3]});
+      reference.SetMeshTopology(1, {0,1,2,3,4,5});
+      const float x = 191 / 255.0F * 2 - 1, y = 230 / 255.0F * 2 - 1, z = 204 / 255.0F * 2 - 1;
+      const float length = std::sqrt(x*x + y*y + z*z);
+      const Toon::Float3 a{x/length, (preview ? y : -y)/length, z/length};
+      const Toon::Float3 b{-a.x, a.y, a.z};
+      reference.SetMeshNormals(1, {a,a,a,b,b,b});
+      Toon::ToonMaterial material;
+      material.model = preview ? Toon::ToonShadingModel::PreviewSurface : Toon::ToonShadingModel::MToon;
+      material.preview.enabled = preview;
+      material.mtoon.shading_toony = 0;
+      const auto mat = reference.CreateMaterial();
+      reference.SetMaterial(mat, material); reference.SetMeshMaterial(1, mat);
+      const auto expected = reference.Commit();
+      Toon::RenderWorld resources;
+      Toon::ToonTexture texture;
+      texture.width = texture.height = 1;
+      texture.encoding = Toon::ToonTextureEncoding::Linear;
+      texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+          std::vector<std::uint8_t>{191,230,204,255});
+      const auto tex = resources.CreateTexture(); resources.SetTexture(tex, texture);
+      material.normal_texture.texture = tex;
+      material.preview.inputs[5].connected = preview;
+      material.preview.inputs[5].scale = {2,2,2,1};
+      material.preview.inputs[5].bias = {-1,-1,-1,0};
+      resources.SetMaterial(resources.CreateMaterial(), material);
+      auto actual = first;
+      actual.materials = resources.Commit().materials; actual.textures = resources.Commit().textures;
+      actual.meshes[0].material = mat; actual.meshes[0].parts = expected.meshes[0].parts;
+      if (!Gpu(actual, expected, shaders, 2)) return false;
+    }
+  }
+  auto prim = stage->GetPrimAtPath(SdfPath("/Body"));
+  auto st = UsdGeomPrimvarsAPI(prim).GetPrimvar(TfToken("st"));
+  // Scale preserves both the seam layout and frame; no geometry upload.
+  st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(2,0),GfVec2f(0,2),GfVec2f(2,2)});
+  const auto scaled = host.Sync();
+  if (!Check(SameGeometry(mesh, scaled.meshes[0]) && mesh.tangents == scaled.meshes[0].tangents,
+          "UV scaling rebuilt an unchanged generated frame or seam map")) return false;
+  // A UV rotation changes frames but retains the mirrored split.
+  st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(0,1),GfVec2f(-1,0),GfVec2f(-1,1)});
+  const auto rotated = host.Sync();
+  if (!Check(SameGeometry(mesh, rotated.meshes[0]) && mesh.tangents_revision != rotated.meshes[0].tangents_revision,
+          "UV rotation must update generated frames without resending geometry")) return false;
+  // Restore ordinary UVs, eliminating the tangent discontinuity.
+  st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(1,0),GfVec2f(1,1),GfVec2f(0,1)});
+  const auto ordinary = host.Sync();
+  if (!Check(ordinary.meshes[0].points->size() == 4 && *ordinary.meshes[0].indices == triangles &&
+                 *ordinary.meshes[0].tangents == std::vector<Toon::Float4>(4,{1,0,0,1}),
+          "removing a generated seam must restore the original indexed layout")) return false;
+  UsdGeomMesh usd_mesh(prim);
+  VtVec3fArray moved_points;
+  for (const auto& p : points) moved_points.push_back(GfVec3f(-p.y,p.x,p.z));
+  usd_mesh.GetPointsAttr().Set(moved_points);
+  const auto moved = host.Sync();
+  if (!Check(moved.meshes[0].topology_revision == ordinary.meshes[0].topology_revision &&
+                 *moved.meshes[0].tangents == std::vector<Toon::Float4>(4,{0,1,0,1}),
+          "rest-point edits must regenerate tangent directions without retriangulation")) return false;
+  moved_points.clear();
+  for (const auto& p : points) moved_points.push_back(GfVec3f(p.x,p.y,p.z));
+  usd_mesh.GetPointsAttr().Set(moved_points);
+  const auto restored = host.Sync();
+  usd_mesh.SetNormalsInterpolation(UsdGeomTokens->constant);
+  usd_mesh.CreateNormalsAttr().Set(VtVec3fArray{GfVec3f(0.6F,0,0.8F)});
+  const auto tilted = host.Sync();
+  const auto& tilted_tangent = (*tilted.meshes[0].tangents)[0];
+  if (!Check(tilted.meshes[0].points_revision == restored.meshes[0].points_revision &&
+                 tilted.meshes[0].topology_revision == restored.meshes[0].topology_revision &&
+                 std::abs(tilted_tangent.x - 0.8F) < 1e-6F && std::abs(tilted_tangent.z + 0.6F) < 1e-6F,
+          "rest-normal edits must reproject tangents without rebuilding geometry")) return false;
+  const auto tangent = UsdGeomPrimvarsAPI(prim).CreatePrimvar(TfToken("tangents"),
+      SdfValueTypeNames->Float4Array, UsdGeomTokens->constant);
+  tangent.Set(VtVec4fArray{GfVec4f(0,1,0,-1)});
+  if (!Check(*host.Sync().meshes[0].tangents == std::vector<Toon::Float4>(4,{0,1,0,-1}),
+          "authored tangents must take precedence over generation")) return false;
+  prim.RemoveProperty(TfToken("primvars:tangents"));
+  st.Set(VtVec2fArray(4, GfVec2f(0,0)));
+  if (!Check(host.Sync().meshes[0].tangents->empty(), "collapsed UVs retained stale frames")) return false;
+  std::cout << "MikkTSpace mirrored seams, analytic normal mapping and edit routing passed\n";
+  return true;
+}
+
+bool GeneratedSkin(const char* filename, const std::string& shaders) {
+  const auto stage = UsdStage::Open(filename);
+  if (!stage) return false;
+  UsdGeomMesh mesh(stage->GetPrimAtPath(SdfPath("/Root/Linear")));
+  mesh.GetFaceVertexCountsAttr().Set(VtIntArray{3,3});
+  mesh.GetFaceVertexIndicesAttr().Set(VtIntArray{0,1,2,0,2,3});
+  for (const char* path : {"/Root/Linear", "/Root/DualQuaternion"}) {
+    const auto st = UsdGeomPrimvarsAPI(stage->GetPrimAtPath(SdfPath(path)))
+        .CreatePrimvar(TfToken("st"), SdfValueTypeNames->TexCoord2fArray, UsdGeomTokens->vertex);
+    st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(1,0),GfVec2f(0,1),GfVec2f(1,1)});
+  }
+  // A uniform normal-only morph makes the analytic mapped normal constant
+  // on each triangle, so the CPU oracle does not share fragment math.
+  stage->GetPrimAtPath(SdfPath("/Root/Skel/Anim"))
+      .GetAttribute(TfToken("blendShapeWeights")).Set(VtFloatArray{0,1,0}, 3);
+  Host host(stage);
+  Toon::MeshSnapshot initial;
+  const std::vector<unsigned> source{0,1,2,3,0,2};
+  for (const int time : {1,2,3}) {
+    auto actual = host.Sync(time);
+    const Toon::MeshSnapshot* linear = nullptr;
+    for (const auto& entry : actual.meshes) {
+      if (Toon::IsSkinned(entry)) linear = &entry;
+      else if (!Check(entry.tangents->empty(), "CPU deformation must keep derivative frames even with usable UVs")) return false;
+    }
+    if (!Check(linear && linear->points->size() == 6 && linear->tangents->size() == 6 &&
+                   *linear->indices == std::vector<std::uint32_t>{0,1,2,4,5,3},
+            "generated skinned mirror seam is missing")) return false;
+    for (std::size_t i = 0; i < source.size(); ++i) {
+      if (!Check((*linear->influences)[i].joint == (source[i] < 2 ? 1U : 0U) &&
+                     (*linear->morph_ranges)[i] == (*linear->morph_ranges)[source[i]],
+              "generated seam lost skin influences or sparse morph ranges")) return false;
+      const auto& t = (*linear->tangents)[i];
+      const float sign = i < 3 ? 1.0F : -1.0F;
+      if (!Check(std::abs(t.x - 0.8F * sign) < 1e-6F && std::abs(t.y) < 1e-6F &&
+                     std::abs(t.z + 0.6F * sign) < 1e-6F && t.w == sign,
+              "generated rest frame does not match the analytic slanted-normal frame")) return false;
+    }
+    if (time == 1) initial = *linear;
+    else if (!Check(SameGeometry(initial, *linear) && initial.tangents == linear->tangents &&
+                        initial.tangents_revision == linear->tangents_revision,
+                 "pose and normal-morph weights regenerated rest frames or geometry")) return false;
+    if (shaders.empty()) continue;
+    actual.meshes = {*linear};
+    for (const bool preview : {false, true}) {
+      Toon::RenderWorld reference, resources;
+      const float shift = time == 1 ? 0.0F : 1.0F;
+      reference.SetMeshPoints(reference.CreateMesh(),
+          {{0,0,0},{1,0,0},{1+shift,1,0},{0,0,0},{1+shift,1,0},{shift,1,0}});
+      reference.SetMeshTopology(1, {0,1,2,3,4,5});
+      const float ny = time == 3 ? 0.25F : 0.0F;
+      const float nl = std::sqrt(1 + ny*ny);
+      const Toon::Float3 n{0.6F/nl, ny/nl, 0.8F/nl};
+      const Toon::Float3 t{0.8F,0,-0.6F};
+      const Toon::Float3 b{-0.6F*n.y, n.z*0.8F+n.x*0.6F, -0.8F*n.y};
+      const auto mapped = [&](float sign) {
+        const float x = preview ? 0.3F : 191 / 255.0F * 2 - 1;
+        const float y = preview ? 0.5F : -(230 / 255.0F * 2 - 1);
+        const float z = preview ? 0.8F : 204 / 255.0F * 2 - 1;
+        Toon::Float3 v{sign*t.x*x+b.x*y+n.x*z, b.y*y+n.y*z, sign*t.z*x+b.z*y+n.z*z};
+        const float length = std::sqrt(v.x*v.x+v.y*v.y+v.z*v.z);
+        return Toon::Float3{v.x/length,v.y/length,v.z/length};
+      };
+      const auto a = mapped(1), bnormal = mapped(-1);
+      reference.SetMeshNormals(1, {a,a,a,bnormal,bnormal,bnormal});
+      Toon::ToonMaterial material;
+      material.model = preview ? Toon::ToonShadingModel::PreviewSurface : Toon::ToonShadingModel::MToon;
+      material.preview.enabled = preview;
+      material.mtoon.shading_toony = 0;
+      const auto mat = reference.CreateMaterial();
+      reference.SetMaterial(mat, material); reference.SetMeshMaterial(1, mat);
+      Toon::ToonView view;
+      view.projection.m[0] = view.projection.m[5] = 0.6F;
+      view.projection.m[10] = 0.3F; view.projection.m[12] = -0.6F; view.projection.m[13] = -0.3F;
+      reference.SetView(view);
+      const auto expected = reference.Commit();
+      Toon::ToonTexture texture;
+      texture.width = texture.height = 1; texture.encoding = Toon::ToonTextureEncoding::Linear;
+      texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+          std::vector<std::uint8_t>{191,230,204,255});
+      const auto tex = resources.CreateTexture(); resources.SetTexture(tex, texture);
+      material.normal_texture.texture = preview ? 0 : tex;
+      material.preview.normal = {0.3F,0.5F,0.8F};
+      resources.SetMaterial(resources.CreateMaterial(), material);
+      actual.materials = resources.Commit().materials; actual.textures = resources.Commit().textures;
+      actual.view = view; actual.meshes[0].material = mat; actual.meshes[0].parts = expected.meshes[0].parts;
+      if (!Gpu(actual, expected, shaders, 2)) return false;
+    }
+  }
+  std::cout << "Generated skin/morph frames, sparse seam data and analytic shading passed\n";
   return true;
 }
 
@@ -512,7 +751,8 @@ int main(int argc, char** argv) {
   TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   const std::string shaders = argc == 3 ? argv[2] : "";
   if (!shaders.empty() && !Toon::ProbeVulkanBackend().available) return 77;
-  if (!PreviewNormals(shaders) || !Tangents(shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
+  if (!PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
+      !GeneratedSkin(argv[1], shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
   return 0;
 }
