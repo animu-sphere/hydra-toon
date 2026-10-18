@@ -2,6 +2,7 @@
 #include <toon/vulkan_backend.hpp>
 
 #include <cstring>
+#include <cmath>
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -142,6 +143,7 @@ public:
     return statistics_;
   }
   void SetLateFrameSource(LateFrameSource source) override { late_.source = source; }
+  bool SetBackground(const BackgroundSettings& settings, std::string& error) override;
 
 private:
   bool EnsureTargets(std::uint32_t width, std::uint32_t height,
@@ -179,6 +181,7 @@ private:
   HostBuffer depth_readback_;
   OffscreenStatistics statistics_;
   vulkan_internal::LateFrameState late_;
+  BackgroundSettings background_;
 };
 
 FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
@@ -234,7 +237,8 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
   queue_create.pQueuePriorities = &priority;
   SceneDeviceFeatures features;
   VkDeviceCreateInfo device_create{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-  device_create.pNext = features.EnableRequired();
+  device_create.pNext = features.EnableRequired(physical_device_);
+  pipelines_.alpha_to_one = features.core.features.alphaToOne == VK_TRUE;
   device_create.queueCreateInfoCount = 1;
   device_create.pQueueCreateInfos = &queue_create;
   if (!VulkanOk(vkCreateDevice(physical_device_, &device_create, nullptr,
@@ -304,6 +308,28 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
   statistics_.validation_available = instance_.validation_available;
   statistics_.validation_detail = instance_.validation_detail;
   return FrameStatus::Pass;
+}
+
+bool VulkanOffscreenRenderer::SetBackground(const BackgroundSettings& settings,
+    std::string& error) {
+  const auto valid_channel = [](float value) {
+    return std::isfinite(value) && value >= 0 && value <= 1;
+  };
+  if ((settings.mode != BackgroundMode::Opaque &&
+          settings.mode != BackgroundMode::Transparent) ||
+      !valid_channel(settings.color.x) || !valid_channel(settings.color.y) ||
+      !valid_channel(settings.color.z)) {
+    error = "background requires Opaque or Transparent and finite linear RGB in [0,1]";
+    return false;
+  }
+  if (settings.mode == BackgroundMode::Transparent && statistics_.samples > 1 &&
+      !pipelines_.alpha_to_one) {
+    error = "transparent MSAA requires Vulkan alphaToOne; use one sample on this device";
+    return false;
+  }
+  background_ = settings;
+  error.clear();
+  return true;
 }
 
 bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
@@ -399,7 +425,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
     attachments = {color_samples_.view, depth_samples_.view, color_.view,
         depth_.view};
   }
-  BeginSceneRendering(command_, attachments, {width_, height_});
+  BeginSceneRendering(command_, attachments, {width_, height_}, background_);
   vulkan_internal::SceneRecord record;
   meshes_.Record(command_, pipelines_, materials_, draws, {width_, height_}, &record);
   statistics_.outline_draws = record.hulls;
@@ -477,6 +503,8 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   color.pixel_format = "rgba8-unorm";
   color.origin = "top-left";
   color.color_space = "linear";
+  color.transfer_function = "linear";
+  color.alpha_convention = "premultiplied";
   color.payload.resize(static_cast<std::size_t>(width_) * height_ * 4U);
   std::memcpy(color.payload.data(), color_readback_.mapped,
       color.payload.size());

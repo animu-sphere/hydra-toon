@@ -19,7 +19,10 @@ SceneDeviceFeatures::SceneDeviceFeatures() {
   vulkan12.pNext = &vulkan13;
 }
 
-void* SceneDeviceFeatures::EnableRequired() {
+void* SceneDeviceFeatures::EnableRequired(VkPhysicalDevice device) {
+  VkPhysicalDeviceFeatures supported{};
+  vkGetPhysicalDeviceFeatures(device, &supported);
+  core.features.alphaToOne = supported.alphaToOne;
   core.features.shaderSampledImageArrayDynamicIndexing = VK_TRUE;
   vulkan12.timelineSemaphore = VK_TRUE;
   vulkan13.dynamicRendering = VK_TRUE;
@@ -243,6 +246,10 @@ bool CreateScenePipeline(VkDevice device,
       description.alpha_to_coverage && pipelines.samples != VK_SAMPLE_COUNT_1_BIT
           ? VK_TRUE
           : VK_FALSE;
+  // Coverage selects samples once. Each selected opaque/Mask sample writes
+  // alpha one, so resolve averages coverage rather than squaring opacity.
+  multisample.alphaToOneEnable =
+      multisample.alphaToCoverageEnable && pipelines.alpha_to_one;
   VkPipelineDepthStencilStateCreateInfo depth_state{
       VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
   depth_state.depthTestEnable = VK_TRUE;
@@ -263,6 +270,11 @@ bool CreateScenePipeline(VkDevice device,
   blend_attachment.colorWriteMask =
       VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  if (multisample.alphaToCoverageEnable && !pipelines.alpha_to_one) {
+    // Opaque output remains valid on devices without alphaToOne. Transparent
+    // MSAA is rejected by the offscreen settings boundary on those devices.
+    blend_attachment.colorWriteMask &= ~VK_COLOR_COMPONENT_A_BIT;
+  }
   VkPipelineColorBlendStateCreateInfo blend{
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   blend.attachmentCount = description.depth_only ? 0U : 1U;
@@ -962,14 +974,17 @@ VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkImageAspectFlags aspect,
 }
 
 void BeginSceneRendering(VkCommandBuffer command,
-    const SceneAttachments& attachments, VkExtent2D extent) {
+    const SceneAttachments& attachments, VkExtent2D extent,
+    const BackgroundSettings& background) {
   VkRenderingAttachmentInfo color_attachment{
       VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
   color_attachment.imageView = attachments.color;
   color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  color_attachment.clearValue.color = {{0.05F, 0.10F, 0.15F, 1.0F}};
+  color_attachment.clearValue.color = background.mode == BackgroundMode::Transparent
+      ? VkClearColorValue{{0, 0, 0, 0}}
+      : VkClearColorValue{{background.color.x, background.color.y, background.color.z, 1}};
   if (attachments.color_resolve != VK_NULL_HANDLE) {
     color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     color_attachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;

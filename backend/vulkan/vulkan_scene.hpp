@@ -280,13 +280,13 @@ struct SceneDeviceFeatures {
   SceneDeviceFeatures(const SceneDeviceFeatures&) = delete;
   SceneDeviceFeatures& operator=(const SceneDeviceFeatures&) = delete;
 
-  // The chain to pass as VkDeviceCreateInfo::pNext, with every feature the
-  // scene path needs enabled.
-  void* EnableRequired();
+  // The chain to pass as VkDeviceCreateInfo::pNext, with required features
+  // and the device's optional alphaToOne enabled.
+  void* EnableRequired(VkPhysicalDevice device);
 };
 
-// Whether `device` is a Vulkan 1.3 device with every SceneDeviceFeatures
-// feature; otherwise `detail` names what is missing.
+// Whether `device` has the required scene features; alphaToOne is optional.
+// Otherwise `detail` names what is missing.
 bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail);
 
 // The highest sample count at or below `requested` that `device` offers for
@@ -323,6 +323,9 @@ struct ScenePipeline {
 // created once and survives every resize, every material and every mesh
 // with or without UVs or a skin.
 struct ScenePipelines {
+  // Optional alphaToOne is enabled on the device when available. Without
+  // it Mask keeps the opaque clear's alpha; transparent MSAA is unavailable.
+  bool alpha_to_one = false;
   ScenePipeline mesh;
   ScenePipeline preview;
   ScenePipeline mtoon;
@@ -421,7 +424,8 @@ struct SceneAttachments {
 // background and depth to 1, with the viewport and scissor covering
 // `extent`.
 void BeginSceneRendering(VkCommandBuffer command,
-    const SceneAttachments& attachments, VkExtent2D extent);
+    const SceneAttachments& attachments, VkExtent2D extent,
+    const BackgroundSettings& background = {});
 
 // A host-visible buffer mapped for its whole life.
 struct HostBuffer {

@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Offscreen opaque/transparent background settings, explicit linear-transfer
+  and premultiplied-alpha readback metadata, and MToon Mask sample-alpha
+  correction. Controlled 1x/4x RGBA checks cover three material families,
+  Blend layering, silhouettes, Mask and hulls
+  ([renderer report 78](docs/reports/renderer/78-2026-10-18-offscreen-rgba.md)).
+
 - Lightweight documentation link, anchor, owner and index validation through
   `scripts/check_docs.py` and a dedicated docs CI workflow.
 
