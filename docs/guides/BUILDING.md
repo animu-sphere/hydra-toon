@@ -333,6 +333,16 @@ Without `--with`, every VRM material draws as PreviewSurface. The digest
 must be in the local registry: pull it as
 [the VRM host session](#the-vrm-host-session) does.
 
+To open an interactive USD-capable viewport without naming an asset:
+
+```sh
+ost renderer viewport --intent viewport-usd --profile lookdev
+```
+
+Choose the asset with **Open File...** or Ctrl+O after launch. Add `--with`
+when its format or material realization needs an imaging bundle. For
+separate windows, run the command in separate terminals.
+
 For repeatable animation evaluation, `--time T` sets an initial USD time
 code and `--time-step S` advances by S time codes per presented frame.
 Without `--time`, stepping starts at the stage's start time. Without playback
