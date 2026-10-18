@@ -10,7 +10,7 @@ target_include_directories(toon-render-vulkan PUBLIC
 target_link_libraries(toon-render-vulkan PUBLIC Toon::RenderExtraction)
 target_compile_features(toon-render-vulkan PUBLIC cxx_std_20)
 if(TOON_WITH_VULKAN)
-  target_sources(toon-render-vulkan PRIVATE vulkan_overlay.cpp vulkan_scene.cpp)
+  target_sources(toon-render-vulkan PRIVATE vulkan_overlay.cpp vulkan_scene.cpp vulkan_composite.cpp)
   target_link_libraries(toon-render-vulkan PRIVATE Vulkan::Vulkan)
   target_compile_definitions(toon-render-vulkan PRIVATE TOON_HAS_VULKAN=1)
 
@@ -26,6 +26,7 @@ if(TOON_WITH_VULKAN)
     shaders/mmd_outline.slang
     shaders/mmd_shadow.slang
     shaders/overlay.slang
+    shaders/composite.slang
     INCLUDES shaders/skinning.slang shaders/surface_common.slang
       shaders/mtoon_common.slang shaders/mmd_common.slang)
   set(TOON_SHADER_SPVS "${TOON_SHADER_SPVS}" PARENT_SCOPE)

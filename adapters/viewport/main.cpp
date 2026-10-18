@@ -71,6 +71,7 @@ struct Arguments {
   float camera_pan_y = 0.0F;
   float camera_dolly = 0.0F;
   Toon::RenderOptions options;
+  Toon::CompositeBackground background;
   // A USD stage to draw through Hydra instead of the bootstrap scene.
   std::string usd;
   // Fail unless the last frame drew this many meshes.
@@ -143,6 +144,15 @@ Arguments ParseArguments(int argc, char** argv) {
       result.frame_limit = ReadUnsigned(next(), option);
     } else if (option == "--telemetry-output") {
       result.telemetry_output = next();
+    } else if (option == "--background") {
+      const auto value = next();
+      if (value != "solid" && value != "checkerboard")
+        throw std::invalid_argument("--background must be solid or checkerboard");
+      result.background.checkerboard = value == "checkerboard";
+    } else if (option == "--background-color") {
+      result.background.color.x = ReadFiniteFloat(next(), option);
+      result.background.color.y = ReadFiniteFloat(next(), option);
+      result.background.color.z = ReadFiniteFloat(next(), option);
     } else if (option == "--samples") {
       result.options.samples =
           static_cast<std::uint32_t>(ReadUnsigned(next(), option));
@@ -291,6 +301,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --expect-hulls N         check actual last-frame hulls\n"
                    "  --camera-pan X Y         initial drag in window pixels\n"
                    "  --camera-dolly N         initial wheel notches (in > 0)\n"
+                   "  --background solid|checkerboard  preview background\n"
+                   "  --background-color R G B  linear RGB in [0,1]\n"
                    "  --samples N              MSAA samples per pixel (default\n"
                    "                           4; 1 turns anti-aliasing off)\n"
                    "  --switch-samples N       ask for N samples halfway\n"
@@ -723,6 +735,9 @@ int RunViewport(int argc, char** argv) {
           std::make_unique<Toon::viewport::Overlay>(window->content_scale());
     }
     bool overlay_shown = overlay != nullptr;
+    auto background = arguments.background;
+    if (!session->SetCompositeBackground(background, error))
+      throw std::runtime_error(error);
     bool outlines = arguments.outlines;
     bool mmd_self_shadow = arguments.mmd_self_shadow;
     bool mmd_morph_tints = arguments.mmd_morph_tints;
@@ -998,6 +1013,7 @@ int RunViewport(int argc, char** argv) {
         shown.height = height;
         shown.vsync = arguments.vsync;
         shown.outlines = outlines;
+        shown.background = background;
         shown.mmd_self_shadow = mmd_self_shadow;
         shown.mmd_morph_tints = mmd_morph_tints;
         shown.lighting = lighting;
@@ -1069,6 +1085,12 @@ int RunViewport(int argc, char** argv) {
         }
         if (controls.samples != 0) {
           session->SetSamples(controls.samples);
+        }
+        if (controls.background_changed) {
+          if (!session->SetCompositeBackground(controls.background, error))
+            throw std::runtime_error(error);
+          background = controls.background;
+          telemetry = {};
         }
         if (controls.outlines_changed) {
           outlines = controls.outlines;

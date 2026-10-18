@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Viewport consumption of an independent premultiplied linear RGBA target,
+  GPU solid/checkerboard compositing, background UI/CLI controls and explicit
+  foreground readback; controlled 1x/4x source-over, offscreen equality,
+  hull, coverage, resize and isolation checks
+  ([renderer report 80](docs/reports/renderer/80-2026-10-18-viewport-compositing.md)).
+
 - Hydra opaque/transparent background settings and premultiplied linear
   RGBA colour AOV preservation, with 1x/4x render-pass/readback checks for
   Blend, silhouettes, settings rejection and source-over recomposition

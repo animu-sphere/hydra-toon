@@ -74,7 +74,7 @@ FrameTelemetry::FrameTelemetry()
       overlay_(kWindow), wait_(kWindow), submit_(kWindow),
       gpu_uploads_(kWindow), gpu_shadow_(kWindow), gpu_image_wait_(kWindow),
       gpu_unlit_(kWindow), gpu_outline_(kWindow), gpu_opaque_(kWindow),
-      gpu_transparent_(kWindow), gpu_resolve_(kWindow),
+      gpu_transparent_(kWindow), gpu_resolve_(kWindow), gpu_composite_(kWindow),
       gpu_capture_(kWindow), gpu_overlay_(kWindow), gpu_work_(kWindow),
       gpu_frame_(kWindow) {
   latency_frames_.reserve(kWindow);
@@ -140,6 +140,7 @@ void FrameTelemetry::PushGpu(const PresentGpuTimes& times) {
   gpu_opaque_.Push(times.opaque);
   gpu_transparent_.Push(times.transparent);
   gpu_resolve_.Push(times.resolve);
+  gpu_composite_.Push(times.composite);
   gpu_capture_.Push(times.capture);
   gpu_overlay_.Push(times.overlay);
   gpu_work_.Push(times.frame - times.image_wait);
@@ -157,7 +158,7 @@ std::vector<FrameTelemetry::Named> FrameTelemetry::Gpu() const {
       {"image_wait", &gpu_image_wait_},
       {"unlit", &gpu_unlit_}, {"outline", &gpu_outline_},
       {"opaque", &gpu_opaque_}, {"transparent", &gpu_transparent_},
-      {"resolve", &gpu_resolve_}, {"capture", &gpu_capture_},
+      {"resolve", &gpu_resolve_}, {"composite", &gpu_composite_}, {"capture", &gpu_capture_},
       {"overlay", &gpu_overlay_}, {"work", &gpu_work_},
       {"frame", &gpu_frame_}};
 }
