@@ -658,7 +658,16 @@ The driver captures the same controlled USD fixture through Storm and
 hdToon, writes generated textures, PNGs, logs, hashes, `summary.json` and
 `comparison.png` under `build/preview-reference/` (or `--output`). It needs
 a desktop OpenGL context and Vulkan device. Its exit code checks matching
-cases, sensitivity to input changes and two bounded known differences;
+cases, sensitivity to input changes, independent channel/opacity controls
+and two bounded known differences;
 `reference_equivalent` remains false for the full set. The cases, measured
-errors and limitations are recorded in
-[renderer report 75](../reports/renderer/75-2026-10-18-preview-surface-reference.md).
+errors and limitations are recorded in renderer reports
+[75](../reports/renderer/75-2026-10-18-preview-surface-reference.md) and
+[76](../reports/renderer/76-2026-10-18-preview-surface-extended-reference.md).
+The worker matches usdview's opaque clear to the backend's fixed linear
+`(0.05, 0.10, 0.15, 1)` and checks its encoded pixels; it does not establish
+transparent output or a background-mode API. Curved and 70-degree grazing
+surfaces use their own saved interior measurement masks. The scalar cases
+compare texture quadrants to constant-input captures and verify Mask cutoff
+and linear Blend over the fixed opaque clear, excluding silhouette/MSAA
+edges and texture transitions.
