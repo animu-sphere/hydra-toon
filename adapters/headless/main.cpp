@@ -3134,6 +3134,23 @@ Toon::Matrix4 Translation(float x) {
   return matrix;
 }
 
+// Default display-colour shading at N=V=(0,0,1), roughness 1, with the
+// normalized camera key (0.25,0.5,1) and ambient 0.25. Independent CPU BRDF
+// oracle for the bootstrap and skinning checks' linear UNORM centre pixel.
+bool DefaultDisplayPixel(const std::array<std::uint8_t, 4>& pixel) {
+  constexpr float pi = 3.14159265359F;
+  const float nl = 1.0F / std::sqrt(1.3125F);
+  const float nh = std::sqrt((1.0F + nl) * 0.5F);
+  const float fresnel = 0.04F + 0.96F * std::pow(1.0F - nh, 5.0F);
+  const float base[] = {0.8F, 0.2F, 0.1F};
+  for (std::size_t channel = 0; channel < 3; ++channel) {
+    const float expected = base[channel] * 0.96F * 0.25F +
+        ((1.0F - fresnel) * base[channel] / pi + fresnel / (2.0F * pi * (1.0F + nl))) * nl;
+    if (std::abs(pixel[channel] - expected * 255.0F) > 2.0F) return false;
+  }
+  return pixel[3] == 255;
+}
+
 // GPU skinning (design policy §11): the bootstrap triangle, every point
 // bound to joint 1 alone. Its geometry bind moves it right by 1.2 and joint
 // 1's skinning transform left by as much, so it draws where it is. A pose
@@ -3203,7 +3220,7 @@ Check SkinningCheck(const Toon::SceneShaders& shaders) {
   if (third.validation_message_count != 0) {
     return {id, "fail", third.validation_detail};
   }
-  if (bound[0] < 150U || bound[2] > 80U) {
+  if (!DefaultDisplayPixel(bound)) {
     return {id, "fail",
         "a joint undoing the geometry bind must draw the triangle in place"};
   }
@@ -3290,10 +3307,7 @@ int main(int argc, char** argv) {
                frame.color.color_space == "linear" &&
                frame.color.payload.size() == 64U * 64U * 4U &&
                center + 3U < frame.color.payload.size() &&
-               frame.color.payload[center] > 150U &&
-               frame.color.payload[center + 1U] < 100U &&
-               frame.color.payload[center + 2U] < 80U &&
-               frame.color.payload[center + 3U] > 240U;
+               DefaultDisplayPixel(CenterPixel(frame.color));
 
     const std::size_t depth_center =
         (frame.depth.height / 2U) * frame.depth.width + frame.depth.width / 2U;

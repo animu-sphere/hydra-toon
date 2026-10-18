@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Lit display-colour fallback for meshes and subsets without an available
+  material: an opaque, double-sided rough dielectric using the existing
+  PreviewSurface pipeline, scene lights and camera fallback. Per-draw colours
+  require no material slots; unreadable bound materials retain unlit magenta
+  ([renderer report 77](docs/reports/renderer/77-2026-10-18-display-color-lighting.md)).
+
 - Extended PreviewSurface Storm comparisons: curved and 70-degree grazing
   surfaces, packed scalar textures, Mask and Blend over a matching opaque
   clear, saved measurement masks and independent channel/compositing

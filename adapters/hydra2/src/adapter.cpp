@@ -1774,7 +1774,7 @@ private:
     return points;
   }
 
-  // Constant display colour only, for a mesh that draws unlit; anything
+  // Constant display colour only, for a mesh without a material; anything
   // else falls back to grey.
   static Toon::Float3 ReadDisplayColor(const VtValue& value) {
     if (value.IsHolding<VtVec3fArray>()) {

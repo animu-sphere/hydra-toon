@@ -47,7 +47,16 @@ TangentVertexStageOutput vertex_main(TangentVertexInput input) {
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     float3 view_position : TEXCOORD1, float4 view_tangent : TEXCOORD2,
     bool front : SV_IsFrontFace) : SV_Target {
-  const PreviewParameters material = materials[draw.material_slot];
+  PreviewParameters material;
+  if ((draw.flags & kDrawDisplayColor) != 0) {
+    material = (PreviewParameters)0;
+    material.base_color = float4(asfloat(draw.material_slot), draw.projection_scale, draw.outline_scale, 1);
+    // Opaque, rough dielectric, with the geometry's normal and no textures.
+    material.surface = float4(0, 1, -1, 0);
+    material.normal = float4(0, 0, 1, 0);
+  } else {
+    material = materials[draw.material_slot];
+  }
   const float opacity = saturate(PreviewScalar(material.inputs[4], st, material.base_color.a));
   const float alpha = (draw.flags & kDrawBlend) != 0 ? opacity : 1.0;
   const float3 base = max(PreviewColor(material.inputs[0], st, material.base_color.rgb), 0.0);

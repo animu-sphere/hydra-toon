@@ -340,7 +340,14 @@ This covers an empty or missing surface terminal, an unknown terminal
 shader and unsupported PreviewSurface specular workflow. The diagnostic
 colour does not depend on lights, display colour, textures or the unreadable
 graph's opacity. A mesh or subset with no available bound material instead
-uses the mesh's display colour. A readable surface with an unsupported
+shades the mesh's display colour through the basic PreviewSurface realization:
+an opaque, double-sided dielectric with metallic 0, roughness 1, no emission
+or textures, and the geometry's normal. It receives the same direct lights
+and diffuse uniform ambient as a readable PreviewSurface, including the
+camera key and ambient when no supported scene lights exist. Display colour
+is a linear base colour, with the mesh's default colour when absent; it is
+not an unlit diagnostic. This fallback does not author a USD material or
+allocate one material per mesh. A readable surface with an unsupported
 individual texture connection retains that input's constant; a missing
 image uses the texture node's fallback. Neither makes the whole surface
 unreadable. Repairing a graph restores ordinary material selection.

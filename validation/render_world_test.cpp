@@ -381,7 +381,7 @@ int main() {
     return 1;
   }
 
-  // A mesh binds a material by id; unbinding or an unknown id draws unlit.
+  // A mesh binds a material by id; unbinding or an unknown id uses display colour.
   const Toon::MaterialId bound = world.CreateMaterial();
   world.SetMeshMaterial(quad, bound);
   const Toon::FrameSnapshot binding = world.Commit();

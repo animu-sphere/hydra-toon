@@ -76,12 +76,16 @@ struct SurfaceDrawConstants {
   // What mtoon_outline's world-coordinates width, which MToon gives in
   // metres, is multiplied by: the scene's units per metre.
   float outline_scale;
+  // For kDrawDisplayColor, material_slot holds the float bits of red and
+  // projection_scale/outline_scale hold green/blue. No material slot or
+  // outline is used; this keeps the shared push constants within 128 bytes.
 };
 static_assert(sizeof(SurfaceDrawConstants) == 128);
 
 constexpr std::uint32_t kDrawHasUVs = 1U;
 constexpr std::uint32_t kDrawSkinned = 2U;
 constexpr std::uint32_t kDrawConstantInfluences = 4U;
+constexpr std::uint32_t kDrawDisplayColor = 8U;
 // The camera is orthographic: every fragment is seen along view-space +z.
 constexpr std::uint32_t kDrawOrthographic = 16U;
 // The material is transparent: mtoon_outline's hull returns the surface's

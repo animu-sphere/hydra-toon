@@ -151,12 +151,13 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   Toon::ColorProduct color;
   Toon::DepthProduct depth;
   float direct = 0;
+  float ambient = 0;
   Toon::Float3 key_direction{0, 0, 1};
   const auto render = [&] {
     world.SetMaterial(id, material);
     auto draws = Toon::ExtractDrawList(world.Commit());
     draws.lighting.direct_scale = direct;
-    draws.lighting.ambient_scale = 0;
+    draws.lighting.ambient_scale = ambient;
     draws.lighting.key_direction = key_direction;
     Require(renderer->Render(draws, 64, 64, color, depth, error), error.c_str());
     return Center(color);
@@ -370,10 +371,36 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
       "unlit material value edit must retain geometry and pipelines");
   const auto mesh_color = world.Commit().meshes.front().color;
   world.SetMeshMaterial(mesh, 0);
-  const auto unbound = render();
-  Near(unbound[0], mesh_color.x, "unbound draw must retain mesh display colour R");
-  Near(unbound[1], mesh_color.y, "unbound draw must retain mesh display colour G");
-  Near(unbound[2], mesh_color.z, "unbound draw must retain mesh display colour B");
+  Require(render() == std::array<int, 4>{0, 0, 0, 255},
+      "unbound draw without illumination must be opaque black");
+  Require(center_depth() < 1, "unbound back face must write depth");
+  world.SetMeshTopology(mesh, {0, 1, 2});
+  direct = 1;
+  const auto lit = render();
+  Near(lit[0], expected(mesh_color.x, 0, 1), "display colour dielectric R");
+  Near(lit[1], expected(mesh_color.y, 0, 1), "display colour dielectric G");
+  Near(lit[2], expected(mesh_color.z, 0, 1), "display colour dielectric B");
+  const auto display_resident = renderer->statistics();
+  world.SetMeshColor(mesh, {0.2F, 0.4F, 0.7F});
+  const auto recolored = render();
+  Near(recolored[0], expected(0.2F, 0, 1), "display colour edit R");
+  Near(recolored[1], expected(0.4F, 0, 1), "display colour edit G");
+  Near(recolored[2], expected(0.7F, 0, 1), "display colour edit B");
+  key_direction = {0, 0, -1};
+  Require(render() == std::array<int, 4>{0, 0, 0, 255}, "display colour must respond to light direction");
+  direct = 0;
+  ambient = 1;
+  const auto indirect = render();
+  Near(indirect[0], 0.2F * 0.96F * 0.25F, "display colour ambient R");
+  Near(indirect[1], 0.4F * 0.96F * 0.25F, "display colour ambient G");
+  Near(indirect[2], 0.7F * 0.96F * 0.25F, "display colour ambient B");
+  const auto display_edited = renderer->statistics();
+  Require(display_edited.point_uploads == display_resident.point_uploads &&
+              display_edited.topology_uploads == display_resident.topology_uploads &&
+              display_edited.material_writes == display_resident.material_writes &&
+              display_edited.texture_uploads == display_resident.texture_uploads &&
+              display_edited.pipelines_created == display_resident.pipelines_created,
+      "display colour and light edits must retain geometry, materials, textures and pipelines");
   Require(renderer->statistics().validation_message_count == 0, "Vulkan validation error");
   std::cout << "preview_surface samples=" << samples << " constants, textures, UV transforms, GGX, Mask, Blend and slot edits passed\n";
   return true;
