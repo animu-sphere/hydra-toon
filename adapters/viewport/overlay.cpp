@@ -552,6 +552,19 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
         controls.samples = samples;
       }
     }
+    controls.background = frame.background;
+    if (ImGui::CollapsingHeader("Background")) {
+      controls.background_changed = ImGui::Checkbox("Checkerboard", &controls.background.checkerboard);
+      controls.background_changed |= ImGui::ColorEdit3("Colour (linear)", &controls.background.color.x);
+      if (controls.background.checkerboard) {
+        controls.background_changed |= ImGui::ColorEdit3("Alternate (linear)", &controls.background.alternate.x);
+        int size = static_cast<int>(controls.background.checker_size);
+        if (ImGui::SliderInt("Checker pixels", &size, 1, 128)) {
+          controls.background.checker_size = static_cast<std::uint32_t>(size);
+          controls.background_changed = true;
+        }
+      }
+    }
     controls.outlines = frame.outlines;
     controls.outlines_changed = ImGui::Checkbox("Outlines", &controls.outlines);
     controls.mmd_self_shadow = frame.mmd_self_shadow;

@@ -3,13 +3,14 @@
 // VkSurfaceKHR and every swapchain object; the window layer only supplies the
 // surface-creation callback and the platform instance extensions. One frame
 // in flight, tracked by a timeline semaphore; the scene pipelines use dynamic
-// rendering, so a resize rebuilds only the swapchain and its depth image.
+// rendering, so a resize rebuilds only presentation and scene attachments.
 // Every frame writes GPU timestamps between its parts, which the next frame
 // reads once it has waited for this one, and draws the host's overlay last.
 #include <toon/vulkan_present.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -24,6 +25,7 @@
 
 #include "vulkan_internal.hpp"
 #include "vulkan_overlay.hpp"
+#include "vulkan_composite.hpp"
 #include "vulkan_scene.hpp"
 #endif
 
@@ -82,6 +84,7 @@ using vulkan_internal::ValidationState;
 using vulkan_internal::VulkanOk;
 
 constexpr std::uint64_t kFrameTimeoutNs = 10'000'000'000ULL;
+constexpr VkFormat kColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 
 // The timestamps a frame writes, in the order it writes them; each part of
@@ -97,6 +100,7 @@ enum Timestamp : std::uint32_t {
   kOpaqueEnd,
   kTransparentEnd,
   kResolveEnd,
+  kCompositeEnd,
   kCaptureEnd,
   kOverlayEnd,
   kTimestampCount,
@@ -182,6 +186,23 @@ public:
     requested_samples_ = std::max(requested, 1U);
   }
 
+  bool SetCompositeBackground(const CompositeBackground& settings, std::string& error) override {
+    error.clear();
+    const auto valid = [](Float3 c) {
+      return std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z) &&
+          c.x >= 0 && c.x <= 1 && c.y >= 0 && c.y <= 1 && c.z >= 0 && c.z <= 1;
+    };
+    if (!valid(settings.color) || !valid(settings.alternate) || settings.checker_size == 0) {
+      error = "compositor requires finite colours in [0,1] and a positive checker size";
+      return false;
+    }
+    background_ = settings;
+    return true;
+  }
+  void RequestForegroundCapture() override { foreground_capture_requested_ = true; }
+  bool TakeForegroundCapture(ColorProduct& color, std::string& error) override {
+    return ReadCapture(color, true, error);
+  }
   void RequestCapture() override {
     capture_requested_ = true;
   }
@@ -199,6 +220,8 @@ public:
   }
 
 private:
+  bool ReadCapture(ColorProduct& color, bool foreground, std::string& error);
+
   // Whether the surface format is one TakeCapture can turn into RGBA8, and
   // whether its bytes are in BGRA order.
   static bool CapturableFormat(VkFormat format, bool& bgra);
@@ -244,6 +267,9 @@ private:
   std::vector<std::uint32_t> overlay_vertex_words_;
   std::vector<std::uint32_t> overlay_fragment_words_;
   OverlayRenderer overlay_;
+  vulkan_internal::CompositeRenderer compositor_;
+  CompositeBackground background_;
+  std::vector<std::uint32_t> composite_vertex_words_, composite_fragment_words_;
   // Null when the queue writes no timestamps.
   VkQueryPool timestamps_ = VK_NULL_HANDLE;
   // Nanoseconds per timestamp tick, and the bits a timestamp holds.
@@ -261,8 +287,13 @@ private:
   std::vector<VkImage> images_;
   std::vector<VkImageView> views_;
   // Multisampled, the pass draws into `color_samples_` and resolves it into
-  // the swapchain image; `depth_` then holds samples too.
+  // independent foreground image; `depth_` then holds samples too.
   DeviceImage color_samples_;
+  DeviceImage foreground_;
+  bool foreground_capture_requested_ = false;
+  std::uint64_t foreground_capture_frame_ = 0;
+  VkExtent2D foreground_capture_extent_{};
+  HostBuffer foreground_capture_;
   DeviceImage depth_;
   // Present-wait semaphores are per swapchain image: a single semaphore may
   // still be in use by an outstanding present when the next frame needs it.
@@ -304,7 +335,9 @@ PresentSetupStatus VulkanPresentSession::Initialize(
   }
   if (!LoadSceneShaders(shaders, words_, error) ||
       !LoadSpirv(shaders.overlay_vertex, overlay_vertex_words_, error) ||
-      !LoadSpirv(shaders.overlay_fragment, overlay_fragment_words_, error)) {
+      !LoadSpirv(shaders.overlay_fragment, overlay_fragment_words_, error) ||
+      !LoadSpirv(shaders.composite_vertex, composite_vertex_words_, error) ||
+      !LoadSpirv(shaders.composite_fragment, composite_fragment_words_, error)) {
     return PresentSetupStatus::Error;
   }
 
@@ -465,9 +498,13 @@ PresentSetupStatus VulkanPresentSession::Initialize(
   requested_samples_ = std::max(options.samples, 1U);
   applied_samples_ = requested_samples_;
   const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
-      surface_format_.format, kDepthFormat, requested_samples_);
+      kColorFormat, kDepthFormat, requested_samples_);
+  if (samples != VK_SAMPLE_COUNT_1_BIT && !pipelines_.alpha_to_one) {
+    error = "viewport transparent MSAA requires Vulkan alphaToOne; use --samples 1";
+    return PresentSetupStatus::Error;
+  }
   statistics_.samples = static_cast<std::uint32_t>(samples);
-  if (!CreateScenePipelines(device_, words_, surface_format_.format,
+  if (!CreateScenePipelines(device_, words_, kColorFormat,
           kDepthFormat, samples, pipelines_, error) ||
       !materials_.Initialize(physical_device_, device_,
           pipelines_.material_layout, error) ||
@@ -482,6 +519,9 @@ PresentSetupStatus VulkanPresentSession::Initialize(
           statistics_.srgb_encoded, error)) {
     return PresentSetupStatus::Error;
   }
+
+  if (!compositor_.Initialize(device_, composite_vertex_words_, composite_fragment_words_,
+          surface_format_.format, error)) return PresentSetupStatus::Error;
 
   // A queue whose timestamps hold no bits cannot time the frame; the frame
   // still draws, and the statistics say so.
@@ -646,6 +686,14 @@ bool VulkanPresentSession::RecreateSwapchain(std::uint32_t width,
 }
 
 bool VulkanPresentSession::CreateSampleTargets(std::string& error) {
+  if (foreground_.image == VK_NULL_HANDLE) {
+    if (!CreateDeviceImage(physical_device_, device_, kColorFormat,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT, extent_.width, extent_.height, foreground_, error))
+      return false;
+    compositor_.SetForeground(foreground_.view);
+  }
   // Only the resolved colour outlives the pass.
   const VkSampleCountFlagBits samples = pipelines_.samples;
   const VkImageUsageFlags transient =
@@ -658,7 +706,7 @@ bool VulkanPresentSession::CreateSampleTargets(std::string& error) {
     return false;
   }
   return samples == VK_SAMPLE_COUNT_1_BIT ||
-         CreateDeviceImage(physical_device_, device_, surface_format_.format,
+         CreateDeviceImage(physical_device_, device_, kColorFormat,
              VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | transient,
              VK_IMAGE_ASPECT_COLOR_BIT, extent_.width, extent_.height,
              color_samples_, error, 1, samples);
@@ -668,9 +716,14 @@ bool VulkanPresentSession::ApplySamples(std::string& error) {
   if (requested_samples_ == applied_samples_) {
     return true;
   }
-  applied_samples_ = requested_samples_;
   const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
-      surface_format_.format, kDepthFormat, requested_samples_);
+      kColorFormat, kDepthFormat, requested_samples_);
+  if (samples != VK_SAMPLE_COUNT_1_BIT && !pipelines_.alpha_to_one) {
+    requested_samples_ = applied_samples_;
+    error = "viewport transparent MSAA requires Vulkan alphaToOne; use one sample";
+    return false;
+  }
+  applied_samples_ = requested_samples_;
   if (samples == pipelines_.samples) {
     return true;
   }
@@ -680,7 +733,7 @@ bool VulkanPresentSession::ApplySamples(std::string& error) {
     return false;
   }
   DestroyScenePipelineObjects(device_, pipelines_);
-  if (!CreateScenePipelineObjects(device_, words_, surface_format_.format,
+  if (!CreateScenePipelineObjects(device_, words_, kColorFormat,
           kDepthFormat, samples, pipelines_, error)) {
     return false;
   }
@@ -792,6 +845,16 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
     }
   }
 
+  const bool capture_foreground = foreground_capture_requested_;
+  if (capture_foreground) {
+    const VkDeviceSize size = static_cast<VkDeviceSize>(extent_.width) * extent_.height * 4U;
+    if (foreground_capture_.capacity < size) {
+      DestroyHostBuffer(device_, foreground_capture_);
+      if (!CreateHostBuffer(physical_device_, device_, size,
+              VK_BUFFER_USAGE_TRANSFER_DST_BIT, foreground_capture_, error)) return false;
+    }
+  }
+
   if (!VulkanOk(vkResetCommandBuffer(command_, 0), "vkResetCommandBuffer",
           error)) {
     return false;
@@ -811,12 +874,12 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   WriteTimestamp(kUploadsEnd);
   shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
   WriteTimestamp(kShadowEnd);
-  // The colour transitions wait at the stage the acquire semaphore gates;
-  // a resolve into the swapchain image writes it at that stage too.
+  // Scene colour is always linear premultiplied RGBA, independent of the
+  // swapchain format. The presentation acquire gates colour output.
   const bool multisampled = color_samples_.image != VK_NULL_HANDLE;
   const VkImageMemoryBarrier2 to_attachment[] = {
-      ImageBarrier(images_[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
-          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
+      ImageBarrier(foreground_.image, VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT,
           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL),
@@ -842,11 +905,11 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   vkCmdPipelineBarrier2(command_, &dependency);
   // After the transition, which waits for the image to be acquired.
   WriteTimestamp(kImageReady);
-  SceneAttachments attachments{views_[image_index], depth_.view};
+  SceneAttachments attachments{foreground_.view, depth_.view};
   if (multisampled) {
-    attachments = {color_samples_.view, depth_.view, views_[image_index]};
+    attachments = {color_samples_.view, depth_.view, foreground_.view};
   }
-  BeginSceneRendering(command_, attachments, extent_);
+  BeginSceneRendering(command_, attachments, extent_, {BackgroundMode::Transparent, {}});
   SceneRecord record;
   record.timestamps = timestamps_;
   record.first_query = kUnlitEnd;
@@ -854,6 +917,44 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   WriteTimestamp(kTransparentEnd);
   vkCmdEndRendering(command_);
   WriteTimestamp(kResolveEnd);
+  const VkImageMemoryBarrier2 to_composite[] = {
+      ImageBarrier(foreground_.image, VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+      ImageBarrier(images_[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
+          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)};
+  dependency.imageMemoryBarrierCount = 2;
+  dependency.pImageMemoryBarriers = to_composite;
+  vkCmdPipelineBarrier2(command_, &dependency);
+  compositor_.Record(command_, views_[image_index], extent_, background_);
+  WriteTimestamp(kCompositeEnd);
+  if (capture_foreground) {
+    const auto to_copy = ImageBarrier(foreground_.image, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &to_copy;
+    vkCmdPipelineBarrier2(command_, &dependency);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {extent_.width, extent_.height, 1};
+    vkCmdCopyImageToBuffer(command_, foreground_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        foreground_capture_.buffer, 1, &copy);
+    VkMemoryBarrier2 host{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    host.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo host_dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    host_dependency.memoryBarrierCount = 1;
+    host_dependency.pMemoryBarriers = &host;
+    vkCmdPipelineBarrier2(command_, &host_dependency);
+  }
   VkImageLayout rendered = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   VkPipelineStageFlags2 rendered_stage =
       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -963,6 +1064,11 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
       record.transparent, record.triangles, record.pipeline_binds,
       overlay_draws, static_cast<std::uint32_t>(overlay.vertices.size()),
       record.hulls};
+  if (capture_foreground) {
+    foreground_capture_requested_ = false;
+    foreground_capture_frame_ = submitted_;
+    foreground_capture_extent_ = extent_;
+  }
   if (capture) {
     capture_requested_ = false;
     capture_frame_ = submitted_;
@@ -1004,33 +1110,40 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
 
 bool VulkanPresentSession::TakeCapture(ColorProduct& color,
     std::string& error) {
+  return ReadCapture(color, false, error);
+}
+
+bool VulkanPresentSession::ReadCapture(ColorProduct& color, bool foreground, std::string& error) {
+  auto& frame = foreground ? foreground_capture_frame_ : capture_frame_;
+  auto& buffer = foreground ? foreground_capture_ : capture_;
+  const auto extent = foreground ? foreground_capture_extent_ : capture_extent_;
   error.clear();
-  if (capture_frame_ == 0) {
+  if (frame == 0) {
     return false;
   }
   VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
   wait.semaphoreCount = 1;
   wait.pSemaphores = &timeline_;
-  wait.pValues = &capture_frame_;
+  wait.pValues = &frame;
   if (!VulkanOk(vkWaitSemaphores(device_, &wait, kFrameTimeoutNs),
           "vkWaitSemaphores(capture)", error) ||
-      !InvalidateIfNeeded(device_, capture_, error)) {
+      !InvalidateIfNeeded(device_, buffer, error)) {
     return false;
   }
-  capture_frame_ = 0;
+  frame = 0;
   bool bgra = false;
-  CapturableFormat(surface_format_.format, bgra);
-  color.width = capture_extent_.width;
-  color.height = capture_extent_.height;
+  if (!foreground) CapturableFormat(surface_format_.format, bgra);
+  color.width = extent.width;
+  color.height = extent.height;
   color.row_pitch = color.width * 4U;
   color.pixel_format = "rgba8-unorm";
   color.origin = "top-left";
-  color.color_space = "as-presented";
-  color.transfer_function = statistics_.srgb_encoded ? "srgb" : "linear";
-  color.alpha_convention = "opaque";
+  color.color_space = foreground ? "linear" : "as-presented";
+  color.transfer_function = !foreground && statistics_.srgb_encoded ? "srgb" : "linear";
+  color.alpha_convention = foreground ? "premultiplied" : "opaque";
   color.payload.resize(static_cast<std::size_t>(color.width) * color.height *
                        4U);
-  std::memcpy(color.payload.data(), capture_.mapped, color.payload.size());
+  std::memcpy(color.payload.data(), buffer.mapped, color.payload.size());
   if (bgra) {
     for (std::size_t pixel = 0; pixel < color.payload.size(); pixel += 4U) {
       std::swap(color.payload[pixel], color.payload[pixel + 2U]);
@@ -1086,7 +1199,8 @@ void VulkanPresentSession::ReadTimestamps() {
   gpu.opaque = between(kOutlineEnd, kOpaqueEnd);
   gpu.transparent = between(kOpaqueEnd, kTransparentEnd);
   gpu.resolve = between(kTransparentEnd, kResolveEnd);
-  gpu.capture = between(kResolveEnd, kCaptureEnd);
+  gpu.composite = between(kResolveEnd, kCompositeEnd);
+  gpu.capture = between(kCompositeEnd, kCaptureEnd);
   gpu.overlay = between(kCaptureEnd, kOverlayEnd);
   gpu.frame = between(kFrameStart, kOverlayEnd);
   statistics_.gpu_frame = frame;
@@ -1097,6 +1211,7 @@ void VulkanPresentSession::DestroySwapchainObjects() {
     vkDestroySemaphore(device_, semaphore, nullptr);
   }
   render_finished_.clear();
+  DestroyDeviceImage(device_, foreground_);
   DestroyDeviceImage(device_, depth_);
   DestroyDeviceImage(device_, color_samples_);
   for (VkImageView view : views_) {
@@ -1116,6 +1231,8 @@ void VulkanPresentSession::Destroy() {
     vkDeviceWaitIdle(device_);
     DestroySwapchainObjects();
     DestroyHostBuffer(device_, capture_);
+    DestroyHostBuffer(device_, foreground_capture_);
+    compositor_.Destroy();
     shadow_.Destroy();
     meshes_.Destroy();
     textures_.Destroy();

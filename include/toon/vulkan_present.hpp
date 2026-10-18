@@ -12,6 +12,14 @@
 
 namespace Toon {
 
+// Consumer background, in linear sRGB. It never changes the foreground.
+struct CompositeBackground {
+  bool checkerboard = false;
+  Float3 color{0.05F, 0.10F, 0.15F};
+  Float3 alternate{0.35F, 0.35F, 0.35F};
+  std::uint32_t checker_size = 16; // Framebuffer pixels, at least one.
+};
+
 // The window layer supplies the native pieces the backend needs to own a
 // VkSurfaceKHR, without Vulkan or windowing types crossing this header.
 // Handles travel encoded in std::uintptr_t: `create_surface` receives the
@@ -47,12 +55,14 @@ struct PresentGpuTimes {
   // The scene pass in the order it draws: unlit meshes, opaque MToon's
   // outline hulls, its surfaces, and the transparent draws with their hulls
   // (design policy §24). `resolve` ends the pass, averaging the samples into
-  // the swapchain image when multisampled.
+  // the reusable linear RGBA image when multisampled.
   double unlit = 0.0;
   double outline = 0.0;
   double opaque = 0.0;
   double transparent = 0.0;
   double resolve = 0.0;
+  // Fullscreen source-over and output transfer into the swapchain.
+  double composite = 0.0;
   // The copy a capture reads back; 0 in a frame without one.
   double capture = 0.0;
   double overlay = 0.0;
@@ -92,7 +102,7 @@ struct PresentStatistics {
   // Whether the swapchain encodes the pipelines' linear colour to sRGB as it
   // is written; false only on a surface that offers no 8-bit sRGB format.
   bool srgb_encoded = false;
-  // Frames read back to the CPU: one per capture taken, none otherwise.
+  // Products read back to the CPU: one per capture taken, none otherwise.
   std::uint64_t readbacks = 0;
   // What reached the GPU, as OffscreenStatistics counts it: geometry,
   // material slots, textures, skins and poses, each only when it changed.
@@ -127,10 +137,11 @@ struct PresentStatistics {
   std::string device_name;
 };
 
-// One swapchain presentation session drawing a scene's DrawList, through the
-// same mesh pipeline as the offscreen renderer, and an OverlayDrawList over
-// it. One frame in flight, FIFO present mode when vsync is on, IMMEDIATE
-// (when available) otherwise.
+// One presentation session drawing a scene's DrawList into an independent
+// linear premultiplied RGBA8 image, through the offscreen scene pipelines.
+// The GPU composites it over a consumer background into the swapchain, then
+// draws an OverlayDrawList. One frame in flight, FIFO present mode when vsync
+// is on, IMMEDIATE (when available) otherwise.
 class PresentSession {
 public:
   virtual ~PresentSession() = default;
@@ -151,7 +162,14 @@ public:
   // from the current one waits for the frame in flight and rebuilds the
   // scene pipelines and the multisampled targets, keeping every mesh,
   // material and texture on the GPU.
+  // Transparent MSAA requires optional alphaToOne; an unsupported request
+  // fails the next RenderFrame with an error, retaining the previous count.
   virtual void SetSamples(std::uint32_t requested) = 0;
+
+  // Finite colours in [0,1], positive checker size; invalid settings retain
+  // the last accepted background. No scene uploads or pipeline changes.
+  [[nodiscard]] virtual bool SetCompositeBackground(
+      const CompositeBackground& background, std::string& error) = 0;
 
   // The next frame belongs to a different scene, whose resource ids and
   // revisions may overlap the previous scene's. Release its cached scene
@@ -162,6 +180,12 @@ public:
   // Asks the next frame RenderFrame presents to be copied back to the CPU as
   // well: a screenshot, never an ordinary frame (design policy §31).
   virtual void RequestCapture() = 0;
+
+  // Explicit readback of the reusable foreground, before compositing/UI:
+  // top-left linear-sRGB premultiplied RGBA8, like OffscreenRenderer.
+  virtual void RequestForegroundCapture() = 0;
+  [[nodiscard]] virtual bool TakeForegroundCapture(ColorProduct& color,
+      std::string& error) = 0;
 
   // The captured frame's colour as presented, RGBA8 with its origin at the
   // top left, waiting for that frame to complete. False with `error` empty

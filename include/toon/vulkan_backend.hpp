@@ -89,6 +89,9 @@ struct SceneShaders {
   // and unbound mesh display colour as an opaque rough dielectric.
   std::string preview_vertex;
   std::string preview_fragment;
+  // Fullscreen premultiplied foreground compositor; presentation only.
+  std::string composite_vertex;
+  std::string composite_fragment;
 };
 
 // The shaders as the build and install trees lay them out: `<module>.vert.spv`

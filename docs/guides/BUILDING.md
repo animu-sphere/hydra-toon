@@ -413,6 +413,24 @@ panel and the final `Avatar runtime:` lines show what was published, applied
 late and bound
 ([renderer report 49](../reports/renderer/49-2026-10-11-viewport-avatar-runtime.md)).
 
+For a background-independent foreground preview, expand `Background` in the
+viewport overlay and select a solid colour or checkerboard. Both colours
+are linear sRGB; the controls affect only composition. For a bounded
+checkerboard capture (run from the repository root with the lookdev runtime's
+`bin` and `lib` on `PATH`):
+
+```sh
+build/cy2026-windows-x86_64-py313-lookdev--viewport-usd/adapters/viewport/toon-viewport --hidden --frames 4 --vsync off --background checkerboard --background-color 0.2 0.25 0.3 --width 640 --height 360 --screenshot build/viewport-composite-cli.ppm
+```
+
+The PPM includes the selected background and omits UI. A backend consumer can
+request the independent linear premultiplied product through
+`PresentSession::RequestForegroundCapture` / `TakeForegroundCapture`; this is
+explicit CPU readback. Multisample foreground requires Vulkan `alphaToOne`;
+use `--samples 1` if session creation reports that feature missing.
+[Renderer report 80](../reports/renderer/80-2026-10-18-viewport-compositing.md)
+records the controlled source-over and foreground-isolation checks.
+
 For a VRM stage with the material and file plugins registered, use the same
 time options with `--samples 1`, `4` or `8` and `--outlines on` or `off`.
 [Renderer report 24](../reports/renderer/24-2026-09-30-outline-stability-cost.md)

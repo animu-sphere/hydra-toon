@@ -119,6 +119,14 @@ if(TOON_ENABLE_HYDRA2)
 endif()
 
 if(TOON_BUILD_TESTS)
+  add_executable(toon-viewport-composite-test composite_test.cpp)
+  toon_configure_warnings(toon-viewport-composite-test)
+  target_link_libraries(toon-viewport-composite-test PRIVATE Toon::Vulkan Vulkan::Vulkan glfw)
+  add_dependencies(toon-viewport-composite-test toon-renderer-shaders)
+  add_test(NAME toon-viewport-composite-gpu COMMAND toon-viewport-composite-test
+    "${CMAKE_BINARY_DIR}/backend/vulkan/shaders" "${CMAKE_CURRENT_BINARY_DIR}")
+  set_tests_properties(toon-viewport-composite-gpu PROPERTIES
+    LABELS "gpu;viewport;presentation;rgba" SKIP_RETURN_CODE 77 TIMEOUT 60)
   add_test(NAME toon-viewport-present
     COMMAND toon-viewport --hidden --frames 8 --vsync off)
   # A capture reads back the frame it asks for and no other.

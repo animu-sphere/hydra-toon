@@ -42,7 +42,9 @@ SceneShaders SceneShadersIn(const std::string& directory) {
       (root / "overlay.vert.spv").string(),
       (root / "overlay.frag.spv").string(),
       (root / "preview_surface.vert.spv").string(),
-      (root / "preview_surface.frag.spv").string()};
+      (root / "preview_surface.frag.spv").string(),
+      (root / "composite.vert.spv").string(),
+      (root / "composite.frag.spv").string()};
 }
 
 BackendCapability ProbeVulkanBackend() {

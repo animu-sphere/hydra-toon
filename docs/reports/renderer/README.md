@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [80](80-2026-10-18-viewport-compositing.md) | Independent linear RGBA viewport foreground, GPU solid/checkerboard source-over, display transfer and foreground/UI isolation at 1x/4x |
 | [79](79-2026-10-18-hydra-rgba.md) | Hydra background settings, premultiplied linear colour AOV/readback, Blend silhouette coverage and source-over at 1x/4x |
 | [78](78-2026-10-18-offscreen-rgba.md) | Offscreen opaque/transparent clears, linear premultiplied RGBA metadata, Mask sample-alpha correction and analytic source-over checks at 1x/4x |
 | [77](77-2026-10-18-display-color-lighting.md) | Unbound mesh display colours shade as rough dielectrics without per-mesh materials; analytic GPU, mixed-subset and local kitchen usdview checks |

@@ -69,6 +69,7 @@ struct OverlayFrame {
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   bool vsync = true;
+  CompositeBackground background;
   bool outlines = true;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints = false;
@@ -109,6 +110,8 @@ struct OverlayControls {
   bool open_file = false;
   // MSAA samples per pixel; 0 when unchanged.
   std::uint32_t samples = 0;
+  bool background_changed = false;
+  CompositeBackground background;
   bool outlines_changed = false;
   bool outlines = true;
   bool mmd_self_shadow_changed = false;

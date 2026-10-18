@@ -101,6 +101,7 @@ private:
   Series gpu_opaque_;
   Series gpu_transparent_;
   Series gpu_resolve_;
+  Series gpu_composite_;
   Series gpu_capture_;
   Series gpu_overlay_;
   // The frame without its image wait: the GPU's own work.
