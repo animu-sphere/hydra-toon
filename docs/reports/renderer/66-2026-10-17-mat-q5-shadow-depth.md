@@ -115,7 +115,7 @@ cheek goes. So MMD's answer to MAT-Q5 moves with its self-shadow distance,
 as a depth range set by that distance would make it. The stage does not
 carry the distance, as it carries no camera of MMD's, so the renderer
 takes MMD's default; a host that wants another would need a setting, which
-v0.4.0 does not add ([the roadmap](../../roadmap/README.md#not-yet-in-a-milestone)).
+v0.4.0 does not add ([the roadmap](../../roadmap/later.md#not-yet-in-a-milestone)).
 
 ## 5. The change
 

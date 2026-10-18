@@ -134,12 +134,13 @@ is a reference for, and what is designed separately here, is
 
 ## 6. Cross-repository observations
 
-Discrepancies seen while writing this document. They are raised with the
-owner, not resolved here.
+Track cross-repository questions at their owner; this page does not mirror
+resolution status. Renderer consumption rules belong to the sections above
+and current renderer support belongs to the capability matrix.
 
-| Observed | Where | Owner |
-| --- | --- | --- |
-| The imaging policy records the Hydra path `hydra-toon` reads as not measured, and the Step I3 handshake as the place to measure it. [Renderer report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md) measured it: the `vrm` container reaches a classic `HdMaterial` through the terminal scene index, and a value-only change (§28.3's path for high-frequency values) produces no `Sync` under emulation | `usd-vrm-plugins` imaging policy §27, §28.3 | `usd-vrm-plugins`; raised as [usd-vrm-plugins#252](https://github.com/animu-sphere/usd-vrm-plugins/issues/252) |
-| Published state carries no per-input source time: `ArStateView` echoes only the host's `input_revision`, so a consumer reporting sample ages needs the host to keep each input's times by that revision. The runtime records retained source provenance as open | [`usd-avatar-runtime` input frame §3](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/INPUT_FRAME.md#3-intake-and-ownership) | `usd-avatar-runtime`; raised as [usd-avatar-runtime#22](https://github.com/animu-sphere/usd-avatar-runtime/issues/22): revision 4 retains each selected input's and a provider's pose sample time with the snapshot ([evaluated state](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md#source-sample-provenance)) |
-| Revision-3 material values are scalar, vec3 or vec4, with no vec2. `Toon::AvatarState` carries texture offset and scale as vec3 with zero z, a consumer-side convention; no runtime provider emits texture transforms yet | [`usd-avatar-runtime` evaluated state §1](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md#1-state-groups) | `usd-avatar-runtime`; raised as [usd-avatar-runtime#23](https://github.com/animu-sphere/usd-avatar-runtime/issues/23): revision 4 adds vec2, which `Toon::AvatarState` now requires for offset/scale |
-| The runtime's target layout places an `avatarHydraToonBridge` under `adapters/hydra-toon/`; here, matching runtime identities to described resident targets is the external host's work ([v0.3.0](../releases/v0.3.0.md)). Which repository owns that matching is not agreed | [`usd-avatar-runtime` project layout](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/PROJECT_LAYOUT.md#target-responsibility-layout), [boundary policy §9](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/design/BOUNDARY_POLICY.md#9-core-dependency-policy) | `usd-avatar-runtime` with `hydra-toon`; raised as [usd-avatar-runtime#24](https://github.com/animu-sphere/usd-avatar-runtime/issues/24): matching belongs to a renderer-side host and the bridge target is withdrawn ([resident target matching](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md#resident-target-matching)) |
+| Question | Owning discussion / contract |
+| --- | --- |
+| Hydra canonical-value observation under emulation | [usd-vrm-plugins#252](https://github.com/animu-sphere/usd-vrm-plugins/issues/252) |
+| Evaluated-state source provenance | [usd-avatar-runtime#22](https://github.com/animu-sphere/usd-avatar-runtime/issues/22) · [source provenance contract](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md#source-sample-provenance) |
+| Texture offset/scale value types | [usd-avatar-runtime#23](https://github.com/animu-sphere/usd-avatar-runtime/issues/23) · [state groups](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md#1-state-groups) |
+| Resident target matching responsibility | [usd-avatar-runtime#24](https://github.com/animu-sphere/usd-avatar-runtime/issues/24) · [output path boundary](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md#resident-target-matching) |

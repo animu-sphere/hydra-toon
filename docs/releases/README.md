@@ -41,14 +41,19 @@ Before a `v0.x.0` is tagged, the validation its milestone needs has passed:
   at least one real GPU, Vulkan validation, a representative scene and a
   representative avatar, with frame evidence and performance evidence, each
   a [report](../reports/).
-- **Evidence by tier.** Fast deterministic unit and state tests run on
-  every change; GPU smoke tests run where a GPU is present; reference
+- **Evidence by tier.** Documentation-only changes run the
+  [documentation lint](../contributing/documentation.md#change-checklist).
+  For implementation changes, fast deterministic unit and state tests run;
+  GPU smoke tests run where a GPU is present; reference
   images run on the changes that touch them and at the release; performance
   evidence runs when a change can move it. Heavy evaluation is not a
   nightly premise. An unsupported or `SKIP` result is never counted as a
   pass, the curated fixture set does not grow without bound, restricted
   assets and captures stay out of the repository, and a measurement names
   its GPU, resolution, samples, vsync and scene.
+  PreviewSurface comparison additions follow the
+  [material stop rule](../design/MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule);
+  perfect Storm agreement is not a release gate.
 - **Packaging**: the GitHub release, a source archive, the binary package,
   its manifest and SPDX SBOM, checksums, the OCI package on GHCR, and the
   digests a Formation pins.

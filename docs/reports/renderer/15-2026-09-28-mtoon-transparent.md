@@ -7,7 +7,7 @@
   (`sha256:b982656c…`) and the published `vrmImaging` 0.10.0
   (`sha256:894fd616…`) of [report 12](12-2026-09-28-published-vrmimaging.md)
 - Occasion: the first item of the
-  [roadmap's priority](../../roadmap/README.md#priority), MToon transparency,
+  [roadmap's priority](../../roadmap/README.md#sequence), MToon transparency,
   in [v0.2.0](../../releases/v0.2.0.md)
 
 ## TL;DR

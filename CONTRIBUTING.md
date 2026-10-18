@@ -17,7 +17,8 @@ vulnerabilities through the [security policy](SECURITY.md), not a public issue.
 ## Make a change
 
 1. Fork the repository and make a focused branch.
-2. Follow the [building and testing guide](docs/guides/BUILDING.md) for
+2. For documentation-only changes, run `python scripts/check_docs.py`.
+   For implementation changes, follow the [building and testing guide](docs/guides/BUILDING.md) for
   prerequisites and platform-specific setup. Build and test with plain CMake:
 
   ```sh

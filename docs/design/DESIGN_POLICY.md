@@ -18,7 +18,8 @@ owner: hydra-toon
 > semantics before WebGPU parity, then host / compositor integration, and the
 > 2026-10-18 direction puts shared shadow and lighting across material
 > families on Vulkan between them, so WebGPU reproduces a settled contract
-> (§35).
+> (§35). It also fixes PreviewSurface's practical interoperability scope and
+> makes reusable RGBA, alpha/coverage and compositing the release focus.
 > Where this repository departs from the
 > implementation policy, §30 records it; §31 onward are this repository's own.
 > Focused documents own the detail of one area each, and **on its own area
@@ -485,7 +486,7 @@ Maximum FPS is not the measure. In order of priority:
   a submission/presentation API endpoint, not scanout or photon time. Report
   only measured endpoints. v0.3.0 requires producer-to-submit/present-return
   evidence; actual display instrumentation is tracked separately in the
-  [roadmap](../roadmap/README.md#not-yet-in-a-milestone).
+  [roadmap](../roadmap/later.md#not-yet-in-a-milestone).
 - **Frame consistency:** p50 / p95 / p99 frame time and its variance, hitch
   count, shader compilation stalls, upload stalls.
 - **Update cost:** joint-buffer writes, morph updates, material parameter
@@ -544,12 +545,12 @@ changed. What each milestone contains, and the order, is the
   viewport and fast path are settled, and are no release gate before then (§4).
 
 MMD realization closes toon fidelity before generic coverage expands.
-v0.5.0 establishes USD interoperability, tangents and reusable RGBA semantics;
-v0.6.0 establishes shared shadow and lighting across MToon, MMD and
-PreviewSurface on Vulkan; v0.7.0 reproduces them on WebGPU. GPU texture
-handoff and host / compositor integration follow, at roughly v0.8.0 scale.
-GPU dual quaternion skinning is introduced when an asset needs it; CPU
-fallback is acceptable and it is not a release gate through v0.7.0.
+PreviewSurface serves practical interoperability alongside toon assets;
+perfect Storm agreement is not a release gate. Its bounded comparison rules
+belong to [material policy §12.1](MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule).
+The [roadmap](../roadmap/README.md) owns version assignments and remaining
+work. GPU dual quaternion skinning waits for a measured asset bottleneck;
+CPU fallback is acceptable.
 
 Until v0.1.0 the sequence was **Renderer Phase 0–7**. It is retired; reports
 and the v0.1.0 record that name a phase map onto milestones as follows:
@@ -698,13 +699,9 @@ what is the [roadmap](../roadmap/README.md).
 
 ### 31.1 Open questions
 
-None open. DP-Q1 — how the Hydra-fed viewport is populated so that a VRM
-avatar selects MToon, since `hdToon` reads the `vrm` container that
-`vrmImaging` contributes to the stage scene index
-([MATERIAL_POLICY.md](MATERIAL_POLICY.md) §2) — is answered as proposed:
-through UsdImaging's scene index chain, with `vrmImaging` supplied to the
-run as a Formation supplies it. The avatar's 20 draws are 20 MToon
-([renderer report 19](../reports/renderer/19-2026-09-28-hydra-fed-viewport.md)).
+DP-Q1's viewport population contract is specified in §31. Its historical
+validation belongs to [renderer report 19](../reports/renderer/19-2026-09-28-hydra-fed-viewport.md);
+current host support belongs to the capability matrix.
 
 ## 32. Scene lighting
 
@@ -729,8 +726,10 @@ Before a feature is added, it is checked against these questions:
 1. Does it improve how an avatar looks? Then it is high priority.
 2. Does it shorten motion-to-photon latency? Then it is high priority.
 3. Does it steady frame time? Then it is high priority.
-4. Does it make something easier to measure or compare in the viewport
-   (§31)? Then, for now, it is high priority.
+4. Does it make a concrete product defect or changed behaviour easier to
+   measure in the viewport (§31)? Prioritize the targeted check. Additional
+   reference comparisons follow the
+   [material stop rule](MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule).
 5. Does it break the separation of the slow and fast paths (§2)? Then it is
    redesigned.
 6. Does it bring a Hydra or Vulkan type into the core (§7)? Then that part
