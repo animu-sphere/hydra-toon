@@ -244,6 +244,10 @@ compiler is introduced.
 the committed `adapters/hydra2/tests/preview-reference.usda` through Storm
 and the installed or build-tree Hydra plugin. Generated images, logs and
 the measured comparison summary stay under the selected output directory.
+The worker generates curved and grazing geometry in the session layer and
+uses a matching opaque linear clear for scalar-texture and Mask/Blend checks;
+measurement masks and independent channel/compositing controls accompany
+the reference comparisons. This is not a renderer background setting.
 This uses the existing Hydra/validation layout and adds no target or
 dependency to renderer libraries.
 

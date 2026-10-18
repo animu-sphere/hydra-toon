@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Extended PreviewSurface Storm comparisons: curved and 70-degree grazing
+  surfaces, packed scalar textures, Mask and Blend over a matching opaque
+  clear, saved measurement masks and independent channel/compositing
+  controls at 1x/4x MSAA
+  ([renderer report 76](docs/reports/renderer/76-2026-10-18-preview-surface-extended-reference.md)).
+
 - Controlled PreviewSurface comparisons through OpenUSD Storm and hdToon,
   with a redistributable mirrored-UV fixture, generated colour/normal maps,
   1x/4x captures, numerical summaries and sensitivity checks. Intermediate

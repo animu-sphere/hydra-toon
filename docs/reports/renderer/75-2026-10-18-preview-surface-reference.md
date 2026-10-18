@@ -1,5 +1,8 @@
 # PreviewSurface reference comparisons
 
+Follow-up: [report 76](76-2026-10-18-preview-surface-extended-reference.md)
+extends the reference set to curved/grazing surfaces, scalar textures and opacity.
+
 - Date: 2026-10-18
 - Machine: Windows x86_64, NVIDIA RTX A5000, driver 597.16
 - Build: MSVC 14.51; canonical CY2026 OpenUSD 26.08 `lookdev`, combined

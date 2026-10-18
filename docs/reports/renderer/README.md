@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [76](76-2026-10-18-preview-surface-extended-reference.md) | Storm comparisons extended to curved/grazing surfaces, packed scalar textures and Mask/Blend on a matched opaque clear, with independent channel/cutoff and linear-compositing controls |
 | [75](75-2026-10-18-preview-surface-reference.md) | Controlled Storm/hdToon PBR and mirrored normal-map comparisons, explicit intermediate-metal/rotated-frame differences, and metallic grazing Fresnel correction with an analytic GPU regression |
 | [74](74-2026-10-18-generated-tangents.md) | MikkTSpace rest frames, minimal mirrored seam splits, edit routing and retained skin/morph data; MToon/PreviewSurface analytic CPU-normal comparisons at 1x/4x |
 | [73](73-2026-10-18-preview-surface-normals.md) | PreviewSurface signed normal constants/textures on shared authored and derivative frames; USD graph, seam, scale/bias, UV transforms, fallback and deformed CPU-normal comparisons at 1x/4x |
