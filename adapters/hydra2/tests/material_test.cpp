@@ -31,6 +31,8 @@
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
+#include <toon/vulkan_backend.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -52,6 +54,12 @@ bool Check(bool condition, const char* message) {
     std::cerr << message << '\n';
   }
   return condition;
+}
+
+Toon::ToonMaterial Fallback() {
+  Toon::ToonMaterial result;
+  result.base_color = {1, 0, 1};
+  return result;
 }
 
 using Field = std::pair<const char*, HdDataSourceBaseHandle>;
@@ -619,8 +627,8 @@ def Material "Specular" {
                    defaults->GetToonMaterial().base_color == Toon::Float3{0.18F, 0.18F, 0.18F} &&
                    defaults->GetToonMaterial().preview.roughness == 0.5F &&
                    defaults->GetToonMaterial().alpha_mode == Toon::ToonAlphaMode::Opaque &&
-                   unsupported->GetToonMaterial() == Toon::ToonMaterial{} &&
-                   specular->GetToonMaterial() == Toon::ToonMaterial{},
+                   unsupported->GetToonMaterial() == Fallback() &&
+                   specular->GetToonMaterial() == Fallback(),
             "PreviewSurface defaults or unsupported-terminal fallback differ"))
       return false;
     const auto network = scene.finalSceneIndex->GetPrim(SdfPath("/Preview")).dataSource->Get(TfToken("material"));
@@ -631,7 +639,137 @@ def Material "Specular" {
             "PreviewSurface must not override a canonical toon material"))
       return false;
   }
+  // A dangling surface terminal uses the diagnostic, without selecting
+  // unused nodes. Canonical toon selection still outranks an unknown graph.
+  const auto unknown_network = scene.finalSceneIndex->GetPrim(SdfPath("/Unsupported")).dataSource->Get(TfToken("material"));
+  if (!Check(HdToonReadMaterial(Container({{"material", unknown_network},
+                  {"vrm", Container({{"mtoon", Container({})}})}})).values.model == Toon::ToonShadingModel::MToon &&
+                 HdToonReadMaterial(Container({{"material", unknown_network},
+                  {"mmd", Container({{"material", Container({})}})}})).values.model == Toon::ToonShadingModel::MMD,
+          "unsupported universal network must not override canonical toon selection")) return false;
+  stage->RemovePrim(SdfPath("/Unsupported/Other"));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  if (!Check(FindMaterial(*index, SdfPath("/Unsupported"))->GetToonMaterial() == Fallback(),
+          "dangling surface terminal must use the diagnostic fallback")) return false;
   return true;
+}
+
+// The same mesh mixes a supported surface, an unreadable surface and an
+// unbound face. Check the actual USD-to-GPU route and repairing the graph,
+// including opaque/Blend transitions and retained static resources.
+int FallbackGpu(const std::string& shaders) {
+  for (const unsigned samples : {1U, 4U}) {
+    Toon::FrameStatus status;
+    std::string error;
+    auto renderer = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error, {samples});
+    if (status == Toon::FrameStatus::Skip) {
+      std::cout << error << '\n';
+      return 77;
+    }
+    if (!Check(renderer != nullptr, error.c_str())) return 1;
+    const auto stage = UsdStage::CreateInMemory();
+    if (!stage->GetRootLayer()->ImportFromString(R"usd(#usda 1.0
+def Material "Known" {
+    token outputs:surface.connect = </Known/Pbr.outputs:surface>
+    def Shader "Pbr" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:diffuseColor = (0, 0, 0)
+        color3f inputs:emissiveColor = (0.6, 0.1, 0.2)
+        token outputs:surface
+    }
+}
+def Material "Broken" {
+    token outputs:surface.connect = </Broken/Pbr.outputs:surface>
+    def Shader "Pbr" {
+        uniform token info:id = "UnrecognizedShader"
+        color3f inputs:diffuseColor = (0, 0, 0)
+        color3f inputs:emissiveColor = (0.1, 0.8, 0.2)
+        float inputs:opacity = 0.25
+        token outputs:surface
+    }
+}
+def Mesh "Mixed" {
+    uniform token subdivisionScheme = "none"
+    point3f[] points = [(-0.95,-0.8,0),(-0.35,-0.8,0),(-0.65,0.8,0),
+                       (-0.3,-0.8,0),(0.3,-0.8,0),(0,0.8,0),
+                       (0.35,-0.8,0),(0.95,-0.8,0),(0.65,0.8,0)]
+    int[] faceVertexCounts = [3,3,3]
+    int[] faceVertexIndices = [0,1,2,3,4,5,6,7,8]
+    color3f[] primvars:displayColor = [(0.1,0.2,0.8)] (interpolation = "constant")
+    def GeomSubset "Known" (prepend apiSchemas = ["MaterialBindingAPI"]) {
+        uniform token elementType = "face"
+        uniform token familyName = "materialBind"
+        int[] indices = [0]
+        rel material:binding = </Known>
+    }
+    def GeomSubset "Broken" (prepend apiSchemas = ["MaterialBindingAPI"]) {
+        uniform token elementType = "face"
+        uniform token familyName = "materialBind"
+        int[] indices = [1]
+        rel material:binding = </Broken>
+    }
+}
+)usd")) return 1;
+    UsdImagingCreateSceneIndicesInfo info;
+    info.stage = stage;
+    const auto scene = UsdImagingCreateSceneIndices(info);
+    HdToonRenderDelegate delegate;
+    std::unique_ptr<HdRenderIndex> index(HdRenderIndex::New(&delegate, {}));
+    index->InsertSceneIndex(scene.finalSceneIndex, SdfPath::AbsoluteRootPath());
+    const auto sync = [&] {
+      scene.stageSceneIndex->SetTime(UsdTimeCode(0));
+      scene.stageSceneIndex->ApplyPendingUpdates();
+      index->EnqueueCollectionToSync(HdRprimCollection(HdTokens->geometry,
+          HdReprSelector(HdReprTokens->smoothHull)));
+      HdTaskSharedPtrVector tasks;
+      HdTaskContext context;
+      index->SyncAll(&tasks, &context);
+      return delegate.CommitScene();
+    };
+    const auto first = sync();
+    if (!Check(first.meshes.size() == 1 && first.meshes.front().parts && first.meshes.front().parts->size() == 3,
+            "mixed fallback fixture must commit three parts on one mesh")) return 1;
+    Toon::ColorProduct color;
+    Toon::DepthProduct depth;
+    const auto render = [&](const Toon::FrameSnapshot& frame, bool repaired, float direct) {
+      auto draws = Toon::ExtractDrawList(frame);
+      draws.lighting.direct_scale = direct;
+      draws.lighting.ambient_scale = 0;
+      if (!Check(renderer->Render(draws, 120, 64, color, depth, error), error.c_str())) return false;
+      const auto pixel = [&](unsigned x, Toon::Float3 expected) {
+        const auto offset = color.row_pitch * 32 + x * 4;
+        return std::abs(color.payload[offset] - expected.x * 255) <= 2 &&
+               std::abs(color.payload[offset + 1] - expected.y * 255) <= 2 &&
+               std::abs(color.payload[offset + 2] - expected.z * 255) <= 2 &&
+               color.payload[offset + 3] == 255;
+      };
+      const auto at = (depth.row_pitch / sizeof(float)) * 32 + 60;
+      const bool pixels = (direct != 0 || pixel(21, {0.6F, 0.1F, 0.2F})) && pixel(99, {0.1F, 0.2F, 0.8F}) &&
+                          pixel(60, repaired ? Toon::Float3{0.0625F, 0.275F, 0.1625F} : Toon::Float3{1, 0, 1});
+      return Check(pixels && (repaired ? depth.payload[at] == 1 : depth.payload[at] < 1),
+          "supported, unsupported or unbound subset colour/depth differs");
+    };
+    if (!render(first, false, 0)) return 1;
+    const auto resident = renderer->statistics();
+    stage->GetAttributeAtPath(SdfPath("/Broken/Pbr.info:id")).Set(TfToken("UsdPreviewSurface"));
+    if (!render(sync(), true, 0)) return 1;
+    stage->GetAttributeAtPath(SdfPath("/Broken/Pbr.info:id")).Set(TfToken("UnrecognizedShader"));
+    const auto broken_again = sync();
+    if (!render(broken_again, false, 0)) return 1;
+    // Changing illumination must not change unlit diagnostic pixels.
+    if (!render(broken_again, false, 10)) return 1;
+    const auto after = renderer->statistics();
+    if (!Check(after.point_uploads == resident.point_uploads &&
+                   after.topology_uploads == resident.topology_uploads &&
+                   after.texture_uploads == resident.texture_uploads &&
+                   after.material_writes == resident.material_writes + 2 &&
+                   after.pipelines_created == resident.pipelines_created &&
+                   after.validation_message_count == 0,
+            "fallback transitions must retain geometry/pipelines without validation messages")) return 1;
+    std::cout << "fallback samples=" << samples << " mixed subsets, repair and opaque/Blend transitions passed\n";
+  }
+  return 0;
 }
 
 bool PreviewTextureCheck() {
@@ -758,6 +896,23 @@ def Material "Textured" {
                  uv_before.parameters_revision != uv_after.parameters_revision &&
                  uv_after.material.base_texture.texture == first,
           "USD transform edit must change parameters alone")) return false;
+  // Becoming unreadable releases all graph images and input state. Repair
+  // must reacquire them and restore the surface, not keep stale fallback.
+  const auto shader_id = stage->GetAttributeAtPath(SdfPath("/Textured/Pbr.info:id"));
+  shader_id.Set(TfToken("UnrecognizedShader"));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  if (!Check(FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial() == Fallback() &&
+                 delegate.CommitScene().textures.empty(),
+          "unsupported graph must release textures and reset surface parameters")) return false;
+  shader_id.Set(TfToken("UsdPreviewSurface"));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  const auto& repaired = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
+  if (!Check(repaired.preview.enabled && repaired.base_texture.texture != 0 &&
+                 repaired.preview.opacity_texture.texture != 0 &&
+                 delegate.CommitScene().textures.size() == 2,
+          "repaired graph must restore surface inputs and shared images")) return false;
   // An unresolved file retains the texture node's fallback. Unsupported UV
   // sets and unsupported output connections retain the surface constants.
   stage->GetAttributeAtPath(SdfPath("/Textured/Color.inputs:file")).Set(SdfAssetPath("missing-preview-image.png"));
@@ -782,10 +937,12 @@ def Material "Textured" {
 int RunRetained() {
   if (!PreviewNetworkCheck()) return 1;
   if (!PreviewTextureCheck()) return 1;
-  if (!Check(HdToonReadMaterial(nullptr).values == Toon::ToonMaterial{},
+  if (!Check(HdToonReadMaterial(nullptr).values == Fallback(),
           "a material with nothing readable must be the fallback material")) {
     return 1;
   }
+  if (!Check(HdToonReadMaterial(Container({{"material", Value(7)}})).values == Fallback(),
+          "malformed material container must use the diagnostic fallback")) return 1;
 
   const SdfPath toon_id("/Looks/Toon");
   const SdfPath mtoon_only_id("/Looks/MToonOnly");
@@ -855,10 +1012,10 @@ int RunRetained() {
                      mtoon_only,
           "vrm/mtoon alone must be MToon with the common defaults") ||
       !Check(gltf_only != nullptr &&
-                 gltf_only->GetToonMaterial() == Toon::ToonMaterial{},
+                 gltf_only->GetToonMaterial() == Fallback(),
           "vrm/material without vrm/mtoon must be PreviewSurface") ||
       !Check(plain != nullptr &&
-                 plain->GetToonMaterial() == Toon::ToonMaterial{},
+                 plain->GetToonMaterial() == Fallback(),
           "a material without vrm must be PreviewSurface")) {
     return 1;
   }
@@ -1089,6 +1246,9 @@ int main(int argc, char** argv) {
   if (argc == 3 && std::strcmp(argv[1], "--stage") == 0) {
     return RunStage(argv[2]);
   }
-  std::cerr << "usage: toon-hydra2-material-test [--stage <file>]\n";
+  if (argc == 3 && std::strcmp(argv[1], "--fallback-gpu") == 0) {
+    return FallbackGpu(argv[2]);
+  }
+  std::cerr << "usage: toon-hydra2-material-test [--stage <file> | --fallback-gpu <shaders>]\n";
   return 2;
 }

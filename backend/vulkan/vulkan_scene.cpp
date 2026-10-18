@@ -1527,6 +1527,7 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.model = material.material.model;
       entry.preview_enabled = material.material.model == ToonShadingModel::PreviewSurface &&
                               material.material.preview.enabled;
+      entry.unlit_color = material.material.base_color;
       entry.double_sided = material.material.double_sided;
       entry.outline = HasOutline(material.material);
       entry.outline_width = material.material.outline_width;
@@ -1985,19 +1986,21 @@ void MeshCache::Record(VkCommandBuffer command,
     const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
     std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
         sizeof(constants.clip_from_object));
-    constants.color[0] = mesh.color.x;
-    constants.color[1] = mesh.color.y;
-    constants.color[2] = mesh.color.z;
     constants.color[3] = 1.0F;
     constants.flags = entry.skin_flags;
-    vkCmdPushConstants(command, pipelines.mesh.layout,
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-        sizeof(constants), &constants);
     for (const MeshPart& part : parts) {
       if (surface_material(part) != nullptr ||
           !Fits(part, entry.index_count)) {
         continue;
       }
+      const auto* material = materials.Find(part.material);
+      const Float3 color = material ? material->unlit_color : mesh.color;
+      constants.color[0] = color.x;
+      constants.color[1] = color.y;
+      constants.color[2] = color.z;
+      vkCmdPushConstants(command, pipelines.mesh.layout,
+          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+          sizeof(constants), &constants);
       vkCmdDrawIndexed(command, part.index_count, 1, part.first_index, 0, 0);
       ++counts.unlit;
       counts.triangles += part.index_count / 3U;

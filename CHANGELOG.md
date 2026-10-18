@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Explicit unsupported-material fallback: unreadable bound Hydra materials
+  draw opaque unlit magenta through the existing mesh pipeline, independently
+  per subset. Unbound faces retain mesh display colour. Repairing a graph
+  restores its surface and images without geometry uploads or pipeline
+  creation; mixed-subset Vulkan checks cover 1x/4x MSAA
+  ([renderer report 71](docs/reports/renderer/71-2026-10-18-material-fallback.md)).
+
 - Generic USD mesh primvars: face-varying, uniform and constant `st` and
   normals, including indexed data resolved by Hydra. Corner vertices retain
   skin influences, morph ranges, MMD edge scales and additional UVs; smooth
@@ -27,12 +34,16 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - Basic constant-input metallic/roughness `UsdPreviewSurface` rendering:
   universal surface-terminal traversal, time-sampled diffuse colour,
   metallic, roughness, emission and opacity; GGX direct lighting, diffuse
-  ambient, Opaque, hard-cutoff Mask and Blend. Unreadable networks retain
-  mesh display colour. MToon and MMD keep selection priority. Texture
+  ambient, Opaque, hard-cutoff Mask and Blend. MToon and MMD keep selection
+  priority. Texture
   connections and normal mapping remain outside this increment
   ([renderer report 68](docs/reports/renderer/68-2026-10-17-preview-surface-constants.md)).
 
 ### Changed
+
+- A bound core material with `preview.enabled == false` draws its own
+  `base_color` unlit and opaque; a default material is white. Mesh display
+  colour applies only when the draw has no available bound material.
 
 - Left-handed mesh winding uses `HdMeshUtil`'s conversion once, preserving
   the front face instead of reversing it again in the adapter.

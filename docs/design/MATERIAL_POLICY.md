@@ -324,8 +324,18 @@ their textures and basic texture transforms through the ordinary Hydra
 material network. Preserve Opaque, Mask and Blend behaviour, including mixed
 toon and PreviewSurface materials in one scene. Emission retains its
 authored strength. Mesh input must preserve the UV data these networks use,
-including face-varying `st`. Unsupported materials use an explicit fallback
-rather than breaking the scene.
+including face-varying `st`.
+
+An unreadable bound material uses opaque, unlit magenta `(1, 0, 1)`, drawn
+on both faces and writing depth through the existing unlit mesh pipeline.
+This covers an empty or missing surface terminal, an unknown terminal
+shader and unsupported PreviewSurface specular workflow. The diagnostic
+colour does not depend on lights, display colour, textures or the unreadable
+graph's opacity. A mesh or subset with no available bound material instead
+uses the mesh's display colour. A readable surface with an unsupported
+individual texture connection retains that input's constant; a missing
+image uses the texture node's fallback. Neither makes the whole surface
+unreadable. Repairing a graph restores ordinary material selection.
 
 Material opacity defines surface behaviour; it does not select the background
 mode. Final product alpha, compositing and boundary conversions belong to

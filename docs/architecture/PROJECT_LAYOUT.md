@@ -187,6 +187,16 @@ by five 96-byte texture-input records. Primvar fallback coordinates occupy
 the UV rows' padding. The texture cache and fixed pipelines are shared with
 the existing models; no new target or material compiler is introduced.
 
+Unreadable Hydra materials normalize to unlit magenta in that same reader.
+For `ToonShadingModel::PreviewSurface`, `preview.enabled == false` means a
+bound material draws its common `base_color` unlit and opaque, without
+sampling images. The Vulkan material cache retains that colour and the
+unlit pass pushes it per mesh part; only a part without an available material
+uses `MeshSnapshot::color`. A default core material is therefore unlit white.
+No new shader, pipeline, parameter layout or dependency is needed.
+`toon-renderer-hydra-material-fallback-gpu` exercises mixed subset bindings
+and graph repair through UsdImaging at 1x and 4x MSAA.
+
 Offscreen and presentation statistics expose
 `morph_uploads` and `morph_weight_writes`; the viewport shows both in its
 upload panel. Rest/joint outline envelopes cannot certify a morphed hull,
