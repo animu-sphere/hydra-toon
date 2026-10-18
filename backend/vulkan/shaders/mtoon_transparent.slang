@@ -8,16 +8,16 @@
 #include "mtoon_common.slang"
 
 [shader("vertex")]
-VertexStageOutput vertex_main(VertexInput input) {
-  return SurfaceVertex(input);
+TangentVertexStageOutput vertex_main(TangentVertexInput input) {
+  return TangentSurfaceVertex(input);
 }
 
 [shader("fragment")]
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    float3 view_position : TEXCOORD1, bool front : SV_IsFrontFace)
+    float3 view_position : TEXCOORD1, float4 view_tangent : TEXCOORD2, bool front : SV_IsFrontFace)
     : SV_Target {
   const MToonParameters material = materials[draw.material_slot];
   const MToonSurface surface =
-      ShadeSurface(material, view_normal, view_position, st, front);
+      ShadeSurface(material, view_normal, view_tangent, view_position, st, front);
   return float4(surface.color, saturate(surface.alpha));
 }

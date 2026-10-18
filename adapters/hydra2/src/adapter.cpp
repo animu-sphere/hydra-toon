@@ -397,6 +397,11 @@ public:
     world_.SetMeshSubTextureUVs(mesh, std::move(uvs));
   }
 
+  void SetMeshTangents(Toon::MeshId mesh, std::vector<Toon::Float4> tangents) {
+    std::scoped_lock lock(mutex_);
+    world_.SetMeshTangents(mesh, std::move(tangents));
+  }
+
   void SetMeshNormals(Toon::MeshId mesh, std::vector<Toon::Float3> normals,
       bool authored = true) {
     std::scoped_lock lock(mutex_);
@@ -848,6 +853,10 @@ public:
       uvs_ = ReadUVs(delegate);
       source_.SetMeshUVs(source_mesh_, uvs_);
     }
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, TangentsToken())) {
+      tangents_ = ReadTangents(delegate);
+      tangents_dirty_ = true;
+    }
     if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, EdgeScaleToken())) {
       source_.SetMeshEdgeScales(source_mesh_, ReadEdgeScales(delegate));
     }
@@ -934,7 +943,8 @@ private:
   void PublishGeometry() {
     source_.Commit(source_frame_);
     const bool split = NeedsCorners(uv_interpolation_) ||
-                       NeedsCorners(normal_interpolation_);
+                       NeedsCorners(normal_interpolation_) ||
+                       NeedsCorners(tangent_interpolation_);
     const bool layout = layout_dirty_ || split != split_;
     split_ = split;
     HdToonTriangulation triangles;
@@ -1013,6 +1023,12 @@ private:
         uv_interpolation_ != published_uv_interpolation_) {
       state_->SetMeshUVs(mesh_, Primvar(uvs_, uv_interpolation_));
     }
+    if (layout || tangents_dirty_ ||
+        (tangent_interpolation_ == HdInterpolationConstant &&
+            source.points_revision != published_.points_revision)) {
+      state_->SetMeshTangents(mesh_, cpu_deformed_ ? std::vector<Toon::Float4>{} :
+          Primvar(tangents_, tangent_interpolation_));
+    }
     if (layout || source.edge_scales_revision != published_.edge_scales_revision) {
       state_->SetMeshEdgeScales(mesh_, split_ ?
           PerPoint(*source.edge_scales, corner_points_) : *source.edge_scales);
@@ -1040,6 +1056,7 @@ private:
     published_uv_interpolation_ = uv_interpolation_;
     layout_dirty_ = false;
     normals_dirty_ = false;
+    tangents_dirty_ = false;
   }
 
   // HdMeshUtil already converts left-handed topology to the core's
@@ -1122,6 +1139,11 @@ private:
   // pose alone (design policy §11). Dual quaternion skinning, or inputs of
   // another shape, run the computation's CPU kernel here instead, as
   // HdEmbree does.
+  void SetCpuDeformed(bool value) {
+    if (cpu_deformed_ != value) tangents_dirty_ = true;
+    cpu_deformed_ = value;
+  }
+
   void SyncPoints(HdSceneDelegate* delegate) {
     for (const HdExtComputationPrimvarDescriptor& descriptor :
         delegate->GetExtComputationPrimvarDescriptors(GetId(),
@@ -1130,9 +1152,14 @@ private:
         continue;
       }
       if (SyncSkin(delegate, descriptor.sourceComputationId)) {
+        SetCpuDeformed(false);
         return;
       }
       Unskin();
+      // A CPU point computation does not publish a matching tangent frame.
+      // Keep the derivative path rather than shade deformed points with a
+      // rest tangent. The GPU classicLinear path deforms both together.
+      SetCpuDeformed(true);
       const HdExtComputationUtils::ValueStore values =
           HdExtComputationUtils::GetComputedPrimvarValues({descriptor},
               delegate);
@@ -1143,6 +1170,7 @@ private:
       return;
     }
     Unskin();
+    SetCpuDeformed(false);
     SetSourcePoints(ReadPoints(GetPoints(delegate)));
   }
 
@@ -1613,6 +1641,32 @@ private:
     return uvs;
   }
 
+  static const TfToken& TangentsToken() {
+    static const TfToken tangents("tangents");
+    return tangents;
+  }
+
+  std::vector<Toon::Float4> ReadTangents(HdSceneDelegate* delegate) {
+    tangent_interpolation_ = HdInterpolationVertex;
+    for (const HdInterpolation interpolation :
+        {HdInterpolationVertex, HdInterpolationVarying,
+            HdInterpolationFaceVarying, HdInterpolationUniform, HdInterpolationConstant}) {
+      for (const auto& descriptor : GetPrimvarDescriptors(delegate, interpolation)) {
+        if (descriptor.name != TangentsToken()) continue;
+        tangent_interpolation_ = interpolation;
+        const VtValue value = GetPrimvar(delegate, TangentsToken());
+        std::vector<Toon::Float4> result;
+        if (value.IsHolding<VtVec4fArray>()) {
+          for (const auto& t : value.UncheckedGet<VtVec4fArray>()) {
+            result.push_back({t[0], t[1], t[2], t[3]});
+          }
+        }
+        return result;
+      }
+    }
+    return {};
+  }
+
   static const TfToken& EdgeScaleToken() {
     static const TfToken edge_scale("mmd:edgeScale");
     return edge_scale;
@@ -1707,6 +1761,10 @@ private:
   std::vector<std::uint32_t> corners_, corner_points_, corner_faces_;
   std::vector<Toon::Float2> uvs_;
   std::vector<Toon::Float3> normals_;
+  std::vector<Toon::Float4> tangents_;
+  HdInterpolation tangent_interpolation_ = HdInterpolationVertex;
+  bool tangents_dirty_ = true;
+  bool cpu_deformed_ = false;
   HdInterpolation uv_interpolation_ = HdInterpolationVertex;
   HdInterpolation normal_interpolation_ = HdInterpolationVertex;
   HdInterpolation published_uv_interpolation_ = HdInterpolationVertex;

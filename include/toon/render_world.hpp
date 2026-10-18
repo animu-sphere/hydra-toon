@@ -101,6 +101,7 @@ struct ToonJointInfluence {
 using PointArray = std::shared_ptr<const std::vector<Float3>>;
 using IndexArray = std::shared_ptr<const std::vector<std::uint32_t>>;
 using TexCoordArray = std::shared_ptr<const std::vector<Float2>>;
+using TangentArray = std::shared_ptr<const std::vector<Float4>>;
 using PixelArray = std::shared_ptr<const std::vector<std::uint8_t>>;
 using InfluenceArray = std::shared_ptr<const std::vector<ToonJointInfluence>>;
 using MatrixArray = std::shared_ptr<const std::vector<Matrix4>>;
@@ -190,6 +191,11 @@ struct MeshSnapshot {
   // no texture.
   TexCoordArray uvs;
   std::uint64_t uvs_revision = 0;
+  // Authored rest tangents: xyz points along +U, w is +/-1 such that
+  // +V in the mesh's bottom-left st space is w * cross(normal, tangent).
+  // Empty/short arrays use the backend's derivative fallback for now.
+  TangentArray tangents;
+  std::uint64_t tangents_revision = 0;
   // MMD's per-vertex edge scale (`primvars:mmd:edgeScale`), one per point,
   // which multiplies an MMD material's edge size. Empty when the mesh has
   // none; its edge then scales by 1 everywhere.
@@ -527,6 +533,10 @@ public:
   // One per point; any other count, or none, draws without textures.
   // Setting the UVs a mesh already has changes nothing.
   void SetMeshUVs(MeshId mesh, std::vector<Float2> uvs);
+  // One float4 per point; w must be +/-1 and xyz finite and nonzero.
+  // Invalid values clear the array, selecting the same fallback as absence.
+  // Identical values retain the immutable array and revision.
+  void SetMeshTangents(MeshId mesh, std::vector<Float4> tangents);
   // MMD's edge scale, one per point; any other count, or none, scales an
   // MMD edge by 1. Setting the scales a mesh already has changes nothing.
   void SetMeshEdgeScales(MeshId mesh, std::vector<float> scales);

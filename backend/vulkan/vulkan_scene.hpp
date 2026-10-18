@@ -713,6 +713,7 @@ private:
     OutlineBounds outline_bounds;
     HostBuffer normals;
     HostBuffer uvs;
+    HostBuffer tangents;
     HostBuffer edge_scales;
     HostBuffer sub_texture_uvs;
     HostBuffer indices;
@@ -727,6 +728,8 @@ private:
     std::uint64_t points_revision = 0;
     std::uint64_t normals_revision = 0;
     std::uint64_t uvs_revision = 0;
+    std::uint64_t tangents_revision = 0;
+    bool has_tangents = false;
     std::uint64_t edge_scales_revision = 0;
     std::uint64_t sub_texture_uvs_revision = 0;
     std::uint64_t topology_revision = 0;
@@ -769,6 +772,7 @@ private:
   // Bound with stride 0 in place of a mesh's missing UVs or sub-texture
   // UVs.
   HostBuffer zero_uv_;
+  HostBuffer zero_tangent_;
   // Bound with stride 0 in place of a mesh's missing edge scales: 1.
   HostBuffer unit_edge_scale_;
   // Bound, never read, in place of an unskinned mesh's skin.

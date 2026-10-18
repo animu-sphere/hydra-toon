@@ -112,6 +112,46 @@ float3 ViewNormal(float3 normal) {
   return mul(NormalMatrix(), normal);
 }
 
+// Shared authored-frame path. Directions use the forward transform while
+// normals use its inverse transpose. Keep the sign through reflections;
+// re-orthogonalization belongs after interpolation in the fragment stage.
+float4 ViewTangent(float4 tangent) {
+  const float3x3 linear = float3x3(draw.view_from_object_rows[0].xyz,
+      draw.view_from_object_rows[1].xyz, draw.view_from_object_rows[2].xyz);
+  return float4(mul(linear, tangent.xyz),
+      tangent.w * (determinant(linear) < 0.0 ? -1.0 : 1.0));
+}
+
+struct TangentVertexInput {
+  float3 position : POSITION;
+  float3 normal : NORMAL;
+  float2 st : TEXCOORD0;
+  float4 tangent : TANGENT;
+  uint vertex : SV_VulkanVertexID;
+};
+
+struct TangentVertexStageOutput {
+  float4 position : SV_Position;
+  float3 view_normal : NORMAL;
+  float2 st : TEXCOORD0;
+  float3 view_position : TEXCOORD1;
+  float4 view_tangent : TEXCOORD2;
+};
+
+TangentVertexStageOutput TangentSurfaceVertex(TangentVertexInput input) {
+  TangentVertexStageOutput output;
+  float3 position = input.position;
+  float3 normal = input.normal;
+  float4 tangent = input.tangent;
+  Skin(draw.flags, input.vertex, position, normal, tangent);
+  output.position = mul(draw.clip_from_object, float4(position, 1.0));
+  output.view_normal = ViewNormal(normal);
+  output.view_tangent = ViewTangent(tangent);
+  output.st = input.st;
+  output.view_position = ViewPosition(position);
+  return output;
+}
+
 // The surface's vertex stage, every surface pipeline's but an outline's:
 // the point and normal skinned, then seen through the camera.
 VertexStageOutput SurfaceVertex(VertexInput input) {
