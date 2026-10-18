@@ -57,8 +57,7 @@ distinguishes existing late-frame input from runtime integration. Hydra is the
 scene integration layer: `usdview` checks the integration, and the renderer itself
 is judged in its own viewport. See the
 [design policy](docs/design/DESIGN_POLICY.md).
-Reusable RGBA output treats the viewport as one consumer, with shared alpha
-and background semantics defined by the
+The output contract belongs to the
 [render output policy](docs/design/RENDER_OUTPUT_POLICY.md).
 
 ## Components

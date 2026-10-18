@@ -240,23 +240,21 @@ coordinates occupy the UV rows' padding. The texture cache and fixed
 pipelines are shared with the existing models; no new target or material
 compiler is introduced.
 
-`scripts/evaluate_preview_surface.py` and its `testusdview` worker compare
-the committed `adapters/hydra2/tests/preview-reference.usda` through Storm
-and the installed or build-tree Hydra plugin. Generated images, logs and
-the measured comparison summary stay under the selected output directory.
-The worker generates curved and grazing geometry in the session layer and
-uses a matching opaque linear clear for scalar-texture and Mask/Blend checks;
-measurement masks and independent channel/compositing controls accompany
-the reference comparisons. This is not a renderer background setting.
-This uses the existing Hydra/validation layout and adds no target or
-dependency to renderer libraries.
+`scripts/evaluate_preview_surface.py`, its `testusdview` worker and
+`adapters/hydra2/tests/preview-reference.usda` belong to validation, with no
+dependency from renderer libraries. Generated images, logs and summaries
+stay in the selected output directory. Comparison scope and stop rules
+belong to [material policy §12.1](../design/MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule);
+dated evidence belongs to [renderer reports](../reports/renderer/).
 
 Unreadable Hydra materials normalize to unlit magenta in that same reader.
 For `ToonShadingModel::PreviewSurface`, `preview.enabled == false` means a
 bound material draws its common `base_color` unlit and opaque, without
 sampling images. The Vulkan material cache retains that colour and the
-unlit pass pushes it per mesh part; only a part without an available material
-uses `MeshSnapshot::color`. A default core material is therefore unlit white.
+unlit pass pushes it per mesh part. A part without an available material uses
+a temporary rough-dielectric PreviewSurface entry with `MeshSnapshot::color`,
+without allocating a per-mesh material or slot. A default bound core material
+is unlit white.
 No new shader, pipeline, parameter layout or dependency is needed.
 `toon-renderer-hydra-material-fallback-gpu` exercises mixed subset bindings
 and graph repair through UsdImaging at 1x and 4x MSAA.

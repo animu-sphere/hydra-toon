@@ -10,8 +10,9 @@ GPU handoff contracts. It expands
 [DESIGN_POLICY.md](DESIGN_POLICY.md) and wins on output semantics. Materials
 and their draw order belong to [MATERIAL_POLICY.md](MATERIAL_POLICY.md).
 Implementation status belongs to the
-[capability matrix](../reference/CAPABILITY_MATRIX.md); milestone work and
-acceptance evidence belong to the [roadmap](../roadmap/README.md).
+[capability matrix](../reference/CAPABILITY_MATRIX.md); unfinished work and
+acceptance criteria belong to the [roadmap](../roadmap/README.md), and dated
+acceptance evidence belongs to [renderer reports](../reports/renderer/).
 
 ## 1. Product and consumers
 
@@ -109,12 +110,10 @@ consumed foreground product.
 
 ## 6. Evidence boundary and additional outputs
 
-The [v0.5.0 reference matrix](../roadmap/v0.5.0.md#reference-evidence-and-release-condition)
-tests the same RGBA product over white, black, checkerboard and an arbitrary
-image. Compare the expected composite for each background, keeping the
-foreground product fixed; final RGB naturally differs between backgrounds.
-Include transparent hair, outlines, Mask, Blend, emissive and normal maps
-across the three material families.
+Acceptance must test background independence and foreground alpha together.
+The bounded fixture work and done-when criteria belong to the
+[output milestone](../roadmap/v0.5.0.md#bounded-validation); measurements and
+accepted differences belong to reports.
 
 Ground/contact/drop shadows and shadow catchers are separate future work,
 after host / compositor integration, reusing the shared shadow pass.
@@ -146,9 +145,7 @@ and keeps a measurable readback fallback.
 
 ## 8. Sequencing
 
-Establish material, tangent and RGBA semantics on Vulkan in v0.5.0, and
-shared shadow and lighting across material families in v0.6.0; reproduce
-them with WebGPU in v0.7.0; then address GPU texture handoff and
-host/compositor integration, at roughly v0.8.0 scale. Actual scanout/photon timing is host instrumentation, separate
+Version assignments and work order belong to the [roadmap](../roadmap/README.md).
+Actual scanout/photon timing is host instrumentation, separate
 from renderer-core completion and submit/present-return measurements
 ([design policy §23](DESIGN_POLICY.md#23-performance-kpis)).

@@ -1,191 +1,139 @@
 # After v0.5.0
 
-The milestones after USD interoperability and RGBA output, in less detail
-than the next one. Each gets its own page when it becomes next.
+Unfinished work after reusable RGBA output. Each milestone gets its own page
+when it becomes next; [the index](README.md) owns the sequence. All work below
+is owned by `hydra-toon`; upstream prerequisites are linked to their owners.
 
 ## v0.6.0 — Shared shadow and lighting
 
-Meshes of different material families occlude, light and shadow each other
-from one scene geometry and one light rig: a PreviewSurface object casts on
-an MToon avatar, MToon on MMD, and each still shades as its own model. What
-is shared is scene input and render resources, not the shading algorithm
-([design policy §35](../design/DESIGN_POLICY.md#35-shared-scene-services),
-[material policy §14](../design/MATERIAL_POLICY.md#14-shadows-across-material-families)):
+Start after v0.5.0 closes. Implement shared scene lights, caster visibility,
+shadow passes and resources under [design policy §35](../design/DESIGN_POLICY.md#35-shared-scene-services).
+Receiver interpretation belongs to [material policy §14](../design/MATERIAL_POLICY.md#14-shadows-across-material-families).
+Share inputs and resources while retaining each material's shading algorithm.
 
-```text
-Hydra / fast evaluated scene
-          │
-      RenderWorld
-          ├── scene lights + shadow settings
-          ├── shadow caster geometry / visibility
-          └── material-specific shading parameters
-                         │
-               shared shadow passes
-                         │
-                 shadow resources
-                    ├── PreviewSurface receiver (PBR response)
-                    ├── MToon receiver (toon response)
-                    └── MMD receiver (MMD-compatible response)
-```
+- Agree a short shadow RFC before code: light identity and transforms,
+  settings, caster/receiver boundaries, resource ownership and MMD self-shadow
+  migration ([MAT-Q7](../design/MATERIAL_POLICY.md#9-open-questions)).
+- Implement a shared caster pass for Opaque and Mask geometry at its static,
+  skinned or morphed position, followed by material-specific receivers.
+- Stage one directional shadow first, then multiple directional and spot
+  shadows. Add resolution, depth/normal bias, basic PCF, on/off and a debug
+  view. Atlas work follows measured need.
+- Check PreviewSurface → MToon, MToon → PreviewSurface, MMD → MToon,
+  MToon → MMD and self-shadow, including deformed casters. Preserve MMD's
+  self-shadow regression evidence and toon looks.
+- Verify Hydra/fast-path parity: pose-only caster updates reupload no geometry.
 
-Work proceeds as a shadow contract first, then the shared pass, then the
-cross-material cases, then diagnostics and the release gate:
+Point-light cube shadows, cascades, advanced soft shadows, ray tracing and
+IBL are outside this milestone.
 
-- **The shadow contract.** A short RFC before code: the boundary between the
-  render world, light data, casters, receivers and shadow resources, and how
-  MMD's self-shadow map relates to the shared one
-  ([MAT-Q7](../design/MATERIAL_POLICY.md#9-open-questions)).
-- **Light data.** Directional and spot lights first: light identity,
-  visibility, light-space transform, shadow map reference, bias and
-  filtering, defined independently of material, compatible with the
-  existing light buffer.
-- **The shared caster pass.** Opaque and Mask geometry into a common shadow
-  depth: static and dynamic meshes, skinned and morphed casters correct.
-- **Material-specific receivers.** PreviewSurface attenuates its PBR
-  response; MToon keeps its shade and ramp semantics; MMD keeps its
-  self-shadow semantics. MMD's existing self-shadow checks stay green.
-- **Cross-material cases.** PreviewSurface → MToon, MToon → PreviewSurface,
-  MMD → MToon, MToon → MMD and self-shadow, with skinned and morphed
-  casters.
-- **Quality controls and diagnostics.** Resolution, depth bias, normal bias,
-  basic PCF, shadow on/off and a debug view, so look and cost can be traced.
-- **Fast-path parity.** A caster moved by motion shadows the same through
-  Hydra and the fast path, and a pose-only update reuploads no geometry.
-
-Staged: one directional shadow, then multiple directional and spot
-shadows, then quality and atlas work. Point-light cube shadows, cascades,
-advanced soft shadows and ray tracing are outside the first release gate,
-and the shadow atlas need not start as a general large-scale allocator.
-Environment lighting is not implemented here; only the interface leaves
-room for it.
-
-**Done when** meshes of different material families cast on and receive
-from each other, MToon's and MMD's representative looks show no regression,
-and each fixture records the shadowed frame's CPU and GPU timing, p95/p99
-included, and its memory use.
+**Done when** different material families cast and receive shared shadows,
+MToon and MMD show no representative look regressions, and bounded fixtures
+record CPU/GPU timing (including p95/p99) and memory use.
 
 ## v0.7.0 — WebGPU
 
-The architecture proven on Vulkan, realized a second time
-([design policy §4](../design/DESIGN_POLICY.md#4-backends), §9):
+Reproduce the Vulkan contracts through v0.6.0 in `backend/webgpu/`, following
+[the backend boundary](../design/DESIGN_POLICY.md#4-backends) and
+[project layout](../architecture/PROJECT_LAYOUT.md#3-where-new-code-goes).
 
-```text
-RenderWorld → draw list → Vulkan | WebGPU → same logical RGBA product
-```
+- Implement device/queue, resources, synchronization, presentation,
+  descriptors/bind groups and pass encoding.
+- Reproduce material, deformation, outline, shared lighting/shadow and
+  [output semantics](../design/RENDER_OUTPUT_POLICY.md) with the same core and
+  extraction path. Optimize from measured avatar p95/p99.
 
-Shared with Vulkan: the render world, render extraction, the material model,
-shader semantics, MToon / MMD / PreviewSurface realization, the animation
-fast path, skinning, morphs, outline, the shared lights and shadows, background
-mode and alpha semantics.
-Backend-specific: device and queue, resource allocation, synchronization,
-presentation, descriptors / bind groups, pipelines and render-pass encoding.
-Implement backend resources, material passes, deformation, outline and
-presentation in `backend/webgpu/`
-([PROJECT_LAYOUT.md §3](../architecture/PROJECT_LAYOUT.md#3-where-new-code-goes)).
-
-This milestone reproduces the semantics established through v0.6.0; it does
-not redesign renderer-core semantics while implementing WebGPU, and a WebGPU
-restriction is no reason to loosen the core's texture or resource contract.
-Optimization starts from measured p95/p99 on the avatar fixtures.
-
-**Done when** the same canonical scenes and extraction path produce visually
-equivalent Vulkan and WebGPU results, with transparent background, outline,
-Blend, normal map, GPU skinning/morph and cross-material shadow parity, and
-practical performance evidence. Semantic parity is the condition; pixel
-identity is not. The shared output contract is
-[RENDER_OUTPUT_POLICY.md](../design/RENDER_OUTPUT_POLICY.md).
+**Done when** bounded canonical scenes establish Vulkan/WebGPU semantic and
+visual parity for transparent output, outline, Blend, normals, skinning,
+morphs and cross-material shadows, with practical performance evidence.
+Pixel identity is not required.
 
 ## Host and compositor integration (v0.8.0-scale)
 
-After WebGPU parity, make the GPU RGBA product consumable without per-frame
-CPU `HdRenderBuffer` readback. The version is provisional; the ordering is
-intentional. Candidates include Vulkan image handoff, Hgi interop, shared GPU
-textures, external memory/semaphores and compositor APIs, with Mimikuri and
-Tessera as prospective host consumers.
+Start after WebGPU parity; the version assignment remains provisional.
 
-Specify and validate the
-[GPU handoff contract](../design/RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff):
-extent, format, colour space, alpha convention, ownership, lifetime,
-synchronization, frame identity, producer timestamp and resource state. A
-native handle alone does not establish a usable integration. Handle resize,
-device loss, several consumers and capture, and keep a measurable readback
-fallback beside readback-less presentation. Keep host orchestration and
-avatar evaluation outside the renderer.
+- Deliver the RGBA product to an intended host without per-frame CPU
+  `HdRenderBuffer` readback, using the
+  [GPU handoff contract](../design/RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff).
+- Select an integration from actual consumer needs: Vulkan image handoff,
+  Hgi interop, shared textures, external memory/semaphores or compositor APIs.
+  Mimikuri and Tessera are prospective consumers.
+- Validate resize, device loss, multiple consumers and capture, retaining a
+  measurable readback fallback. Keep orchestration and avatar evaluation at
+  their owning boundaries.
 
-**Done when** one foreground render product reaches an intended host without
-CPU readback, and the viewport's and the compositor's results are checked.
-
-Actual motion-to-photon instrumentation remains a separate host measurement
-task in the [roadmap](README.md#not-yet-in-a-milestone), distinct from the
-renderer core's completion and from submit/present API return.
+**Done when** one foreground product reaches an intended host without CPU
+readback and its viewport/compositor results are checked. Actual display
+latency is the separate measurement task [below](#not-yet-in-a-milestone).
 
 ## Platform and GPU coverage
 
-Vulkan portability beyond Windows and the main development GPU, as its own
-piece of work, taken up after WebGPU and host / compositor integration, once
-the renderer core, the viewport and the fast path are settled
-([design policy §25](../design/DESIGN_POLICY.md#25-implementation-phases));
-until then it is no release gate. Linux x86_64, with NVIDIA, AMD and Intel
-Vulkan, and what differs between them: vendor quirks, validation layer
-differences and shader compiler differences. On Linux x86_64:
+Take up Linux x86_64 and NVIDIA/AMD/Intel Vulkan after WebGPU and host
+integration, once the core, viewport and fast path are settled, and a concrete
+consumer or reproducible portability requirement asks for them.
 
-- the `hydra` intent built, tested and validated against the Linux leaf of
-  the canonical `lookdev` runtime;
-- the release workflow building and publishing the Linux package beside the
-  Windows one;
-- the VRM host session run as a Formation of the Linux runtime, `vrmImaging`'s
-  Linux package from `usd-vrm-plugins`' release pins, and the published
-  Linux `toon` package.
-
-Each measured configuration is a [report](../reports/) and a row of
-[supported configurations](../reference/SUPPORTED_CONFIGURATIONS.md).
+- Build/test/validate `hydra` against the Linux canonical runtime.
+- Publish the Linux package beside Windows and exercise the VRM host Formation
+  with owner-published runtime and VRM packages.
+- Record vendor/compiler/validation differences in a report; add actually
+  measured environments to [supported configurations](../reference/SUPPORTED_CONFIGURATIONS.md).
 
 ## glTF PBR through MaterialX
 
-No milestone is assigned yet. Support glTF metallic-roughness PBR materials
-through their imported MaterialX realization, including PBR materials mixed
-with MToon in a VRM avatar. PreviewSurface remains the ordinary USD fallback;
-glTF PBR fidelity is evaluated on the MaterialX path. MToon continues to read
-its canonical material inputs with selection priority, preserving its look.
-The format owner authors the realization; this repository consumes it rather
-than parsing glTF or VRM.
+Unassigned; take up when a mixed MToon/PBR avatar has a reproducible material
+requirement beyond [PreviewSurface's scope](../design/MATERIAL_POLICY.md#12-previewsurface-and-generic-usd-fallback).
+Consume the format owner's imported MaterialX realization, retaining toon
+selection priority. Bound its vocabulary to base colour/textures, metallic,
+roughness, normals, emission/strength and Opaque/Mask/Blend for those assets.
 
-Preserve base colour and textures, metallic and roughness, normals, emission
-including strength, and Opaque, Mask and Blend behaviour. Bound the supported
-MaterialX vocabulary around those avatar materials; this does not introduce
-general material-graph compilation or production PBR as a renderer goal.
-
-Use Seed-san's `backpack_metal`, `backpack_nm`, `backpack_plastic`,
-`anim_logo`, `wear_metal`, `green_emit` and `glass` as local reproduction
-cases: retain the backpack's texture, the logo's colour and green emission,
-and let glass reveal the surface behind it. Establish redistributable
-controlled fixtures and a local avatar comparison against a reference
-renderer, keeping restricted assets and captures out of the repository.
-These are outside v0.5.0's release condition.
+Establish redistributable fixtures and one local avatar/reference comparison;
+keep restricted models and captures out of the repository. General material
+graph compilation and production PBR remain outside the renderer's goals.
 
 ## After v0.7.0
 
-Candidates, taken up as features and measurements require them; performance
-work is not introduced before WebGPU parity as a rule, and GPU-driven work
-waits for evidence
-([design policy §22](../design/DESIGN_POLICY.md#22-gpu-driven-rendering)).
-Each waits for its trigger:
+Unassigned candidates, owned here and accepted for consideration only when
+their trigger is met. Detail belongs to the linked design policies.
 
-| Candidate | Taken up when |
+| Candidate | Start when |
 | --- | --- |
-| Environment lighting and IBL | ambient alone falls short for mixed PBR and toon scenes; v0.6.0 leaves only the interface |
-| Exposure, tone mapping and HDR output | display differences with OBS, UI or an editor, or an HDR requirement; v0.5.0 states only the RGBA and transfer contract |
-| Render layers and visibility masks | a host needs character, background and shadow as separate products; a minimal design from that requirement, with no new schema |
-| Shadow catchers and contact shadows | compositing over video, live action or 3DGS; after host / compositor integration, reusing the shared shadow pass |
-| A lightweight render-pass graph | added passes make manual synchronization hard to follow; pass resources and dependencies are documented first |
-| Bindless or a larger texture table | an actual avatar or scene exceeds the fixed 128 entries, or descriptors measure as the bottleneck; designed from an interface that allows for both backends |
-| Off-thread staging and asynchronous transfer | first load or texture streaming hitches, shown by p95/p99 ([design policy §20](../design/DESIGN_POLICY.md#20-asset-upload)) |
-| GPU-driven rendering, meshlets, GPU culling, indirect draw | many draws or instances are measured as the bottleneck; a candidate to the last |
+| Environment lighting and IBL | a reproducible mixed PBR/toon scene requirement exceeds uniform ambient |
+| Exposure, tone mapping and HDR | an intended host has reproducible display differences or an HDR requirement |
+| Render layers and visibility masks | a host needs separate character, background and shadow products |
+| Shadow catchers and contact shadows | a video/live-action/3DGS compositor needs them, after host integration, reusing shared shadows |
+| Lightweight pass graph | documented pass/resource dependencies make manual synchronization hard to follow |
+| Bindless or a larger texture table | an actual asset exceeds capacity or descriptor cost is a measured bottleneck |
+| Off-thread staging and asynchronous transfer | measured first-load/streaming p95/p99 shows upload hitches; [upload policy](../design/DESIGN_POLICY.md#20-asset-upload) |
+| GPU-driven rendering, meshlets, culling and indirect draw | draw/instance count is a measured bottleneck; [GPU-driven policy](../design/DESIGN_POLICY.md#22-gpu-driven-rendering) |
 
-Further candidates on the same terms: point-light cube shadows, cascades and
-advanced soft shadows beyond v0.6.0's, bloom, colour grading, advanced
-temporal reconstruction, a visibility buffer, compute skinning and morphs,
-async compute, pipeline caching and shader pre-warming, stereo rendering,
-OpenXR, WebXR, foveated rendering, and a WASM / browser runtime. Picking,
-instancers, GPU dual quaternion skinning and display timing are planned in
-the [roadmap](README.md#not-yet-in-a-milestone).
+Do not add speculative feature lists without a trigger and an owning
+repository. Propose a separate scope decision when a new requirement appears.
+
+## Not yet in a milestone
+
+Unassigned renderer work. Move a row to the milestone page when selected;
+completed work leaves this list in the same change.
+
+Project infrastructure, independent of renderer milestones:
+
+- Add a generated OpenStrata pull-request lane for implementation changes:
+  `core` with capability-gated GPU skips and `hydra` against a digest-pinned
+  runtime. Documentation-only changes use the lightweight docs lane.
+- Make the core boundary check discover all public core headers instead of
+  enumerating them, so newly added headers cannot evade the
+  [dependency check](../architecture/PROJECT_LAYOUT.md#4-dependency-directions).
+
+| Work | Start when / owner prerequisite |
+| --- | --- |
+| Actual display latency evidence | a host can instrument scanout/photon timing and map source clocks; trace the displayed sample under [performance policy §23](../design/DESIGN_POLICY.md#23-performance-kpis) |
+| Runtime Hydra-publication parity | the [runtime's output path](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md) is available for comparing with the fast adapter |
+| Material binds on a real avatar | a redistributable or local avatar exercises colour/texture-transform binds exposed by the [format owner's expression contract](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/plugins/vrmSchema/docs/SCHEMA_CONTRACT.md) and upstream runtime |
+| MMD self-shadow distance and mode 2 host settings | a host needs non-default settings and provides reference captures; [existing evidence](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md) |
+| PMX 2.1 vertex colours, points and lines | a target PMX 2.1 asset and a renderer that draws it provide an independent oracle; [material policy §7](../design/MATERIAL_POLICY.md#7-pipelines-and-parameter-buffers) |
+| GPU dual quaternion skinning | a target profile identifies CPU fallback/point upload as the bottleneck; CPU fallback is acceptable otherwise |
+| Outline, wireframe and normal debug views | an avatar/viewport defect needs a view beyond [existing diagnostics](../reference/CAPABILITY_MATRIX.md#hosts) |
+| Picking via primId, instanceId and elementId AOVs | a lookdev viewport needs selection/inspection |
+| Render tags, instancers and framing data window | a concrete generic USD/accessory fixture requires them |
+
+Runtime/VRM-only macOS session work belongs to the upstream runtime and format
+owners; it is not a renderer task. See [integration scope](../design/INTEGRATION_SCOPE_POLICY.md).

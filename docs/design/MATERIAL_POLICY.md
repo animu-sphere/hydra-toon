@@ -172,14 +172,10 @@ Normalizing a new material writes a slot; it never compiles a shader. A
 feature a material does not use is a zero or a disabled flag in its slot, not
 a pipeline variant.
 
-PMX 2.1's three material flags, `vertexColor`, `drawPoints` and
-`drawLines`, are read into the MMD block and not drawn. A PMX 2.0 source
-keeps their bits without 2.1's meaning
-([`usd-mmd-plugins` material policy](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md)),
-every local model is PMX 2.0, and MikuMikuDance v9.32 reads no PMX 2.1, so
-no MMD frame shows what they draw; drawing points or lines would also
-change a draw's primitives, not a value in its slot. They are left for a
-later milestone ([later](../roadmap/README.md#not-yet-in-a-milestone)).
+PMX 2.1's `vertexColor`, `drawPoints` and `drawLines` require a separate
+scope decision: drawing points or lines changes primitives, not just a value
+in a material slot. Preserve the [format owner's semantics](https://github.com/animu-sphere/usd-mmd-plugins/blob/main/docs/design/MATERIAL_POLICY.md);
+selection of that work belongs to the [later roadmap](../roadmap/later.md#not-yet-in-a-milestone).
 
 ## 8. Values that change at run time
 
@@ -209,15 +205,24 @@ structural.
 
 ## 9. Open questions
 
-| Id | Question | Proposed answer | Resolve by |
-| --- | --- | --- | --- |
-| MAT-Q1 | How `inputs:mmd:material:*` reaches the render delegate. For MToon this is answered by §2 and §8 ([report 02](../reports/renderer/02-2026-09-26-mat-q1-material-inputs.md)) | resolved 2026-10-11: the same shape for both models, a container on the Hydra material prim read from the terminal scene index. `usd-mmd-plugins` froze `mmdImaging`'s view on 2026-10-04, and every material of 41 local MMD stages selects MMD through it (§2, §3; [report 53](../reports/renderer/53-2026-10-11-mmd-material-read.md)) | agreed with `usd-mmd-plugins` before v0.4.0 |
-| MAT-Q2 | MMD's shared toon ramps (`sharedToonIndex` 0–9) belong to MMD and are not redistributable, and the stage names no image for them | resolved 2026-10-11: `hydra-toon` generates its own ten ramps, under its own licence, from the colours MMD's `toon01`–`toon10` show, and maps the index to them; no MMD image is copied or shipped ([report 56](../reports/renderer/56-2026-10-11-mmd-surface.md)) | v0.4.0 |
-| MAT-Q3 | MMD colours are authored as stored, with no declared colour space, and MMD shades without colour management | resolved 2026-10-11: MMD computes its terms on the values as stored and writes them undecoded and unencoded; lowering its light colour scales a model's pixels by the factor its lighting term computes on stored values, flat across brightness ([report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md)). The MMD path samples its textures without sRGB decoding, computes MMD's terms on them and the factors as authored, and converts the result from sRGB to linear once, so the host's encoding writes MMD's values. Blending stays in the linear target, so a partly transparent material approximates MMD's | v0.4.0 |
-| MAT-Q4 | How wide MMD draws an edge of a given `edgeSize` × `edgeScale`: MMD states no unit, and on its own frames an edge of size 0.4 is 0.6 pixels wide from 45 MMD units and 1.57 from 9 at a 30° field of view and 1,080 pixels, neither a constant length nor a constant number of pixels ([report 57](../reports/renderer/57-2026-10-11-mmd-outline.md)) | resolved 2026-10-12: a share of the target's height, `edgeSize` × `edgeScale` × (0.00108 + 0.0203 / the vertex's view depth in MMD units). On MMD's frames a 15° field of view leaves an edge as many pixels wide as 30° does, a 2,160-pixel frame doubles it, and from 9, 18 and 30 MMD units it falls as a constant share plus one over the depth; the constants make hdToon's edge MMD's width at those cameras ([report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md)) | v0.4.0 |
-| MAT-Q5 | What MMD's self-shadow map covers and how far behind its depth a point falls into shadow. `full.fx` compares in MMD's own map depth, 1,500 per unit and shadowed from 0.3, but MMD states neither that depth's range nor how its map follows its camera and its self-shadow distance, which the stage does not carry (§10) | resolved 2026-10-17: a 2,048-texel map fitted along the light to every MMD draw that casts or receives the self-shadow, and across it to what the camera sees of the receivers ([report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md)), and the comparison in MMD units, 2.5 per unit and shadowed from 0.3, so a point falls into shadow from 0.12 behind and wholly by 0.52. On MMD's frames of a contact and a grazing shadow, and of a face, a bust and a full body, 2.5 is nearest MMD's of 1 to 50 per unit, on five of seven frames and within 0.04 on the others; 15, report 60's, shadowed layers lying close over others that MMD leaves lit ([report 66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md)). MMD's answer moves with its self-shadow distance, which the stage does not carry; this is MMD's at its default | v0.4.0 |
-| MAT-Q6 | How MMD applies a material morph's texture, sphere and toon tints to a texel. PMX states a multiply and an add for each but not how they combine, and MikuMikuDance does not say (§11) | resolved 2026-10-17: MMD does not apply them. On MMD v9.32's frames of two local models, a morph that only tints (`spa消える`, `toon白くなる`, `toon深まる`, `spa消`) leaves the frame as it was at full and half weight, and `全灰モード` and `全黒モード` change only the colours and edge they also set ([report 62](../reports/renderer/62-2026-10-17-mat-q6-morph-tints.md)). So the MMD path leaves the tints out; a host may ask for MikuMikuEffect's `full.fx` reading, which [report 61](../reports/renderer/61-2026-10-12-mmd-material-morph.md) implements and no MikuMikuEffect frame has checked (§11) | v0.4.0 |
-| MAT-Q7 | How MMD's self-shadow map (§10) relates to the shared shadow resources (§14): whether MMD's receivers read the shared map, keep their own camera-following map beside it, or the shared pass draws MMD's map as one of its resources; and how a non-MMD caster reaches an MMD receiver | none yet; answered by the v0.6.0 shadow contract, with MMD's existing self-shadow checks as the regression bound | v0.6.0 |
+MAT-Q1–MAT-Q6 retain their identifiers for historical links. Their adopted
+contracts are summarized below; dated experiments stay in the linked reports,
+and implementation status stays in the capability matrix.
+
+| Id | Adopted contract / decision evidence |
+| --- | --- |
+| MAT-Q1 | Read canonical material containers from the terminal scene index (§2, §8); [report 53](../reports/renderer/53-2026-10-11-mmd-material-read.md). |
+| MAT-Q2 | Generate the renderer's own ten shared toon ramps under its licence; never copy or ship MMD's ramp images; [report 56](../reports/renderer/56-2026-10-11-mmd-surface.md). |
+| MAT-Q3 | Sample MMD textures without sRGB decoding, compute terms on stored values and authored factors, then convert the result to linear once. Blend in the linear target, accepting the difference from MMD's stored-value blending; [report 55](../reports/renderer/55-2026-10-11-mat-q3-mmd-colour.md). |
+| MAT-Q4 | Use §5's edge width in MMD units; [report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md). |
+| MAT-Q5 | Use §10's camera-following map and depth comparison at default self-shadow distance; [report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md) and [66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md). |
+| MAT-Q6 | Omit morph texture/sphere/toon tints by default; allow the explicit `full.fx` interpretation in §11; [report 62](../reports/renderer/62-2026-10-17-mat-q6-morph-tints.md). |
+
+The remaining design question is **MAT-Q7**: whether MMD receivers read a
+shared map, retain a separate camera-following map, or use an MMD map drawn
+by the shared pass, and how non-MMD casters reach them. Resolve it in the
+[v0.6.0 shadow RFC](../roadmap/later.md#v060--shared-shadow-and-lighting),
+preserving MMD self-shadow regression behaviour.
 
 ## 10. MMD's self-shadow
 
@@ -265,8 +270,7 @@ setting `toon:mmdSelfShadow`).
   camera-following map's texels wide does; this map follows the camera
   too, so its edge is a fixed number of its own texels: a receiver reads
   a disc six texels in radius, 32 taps each bilinear over four texels and
-  compared as above, which matched MMD's edges on a face, a bust and a
-  full body ([report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md)).
+  compared as above ([decision evidence](../reports/renderer/63-2026-10-17-self-shadow-quality.md)).
   So that a surface sloping from the light does not shadow itself, the
   point first moves along its normal by up to three texels, must lie
   further behind by two texels for each unit of its slope, up to four,
@@ -289,10 +293,7 @@ weighs no morph.
   value-only path reads (§8), or as an evaluated override
   (`RenderWorld::SetMaterialParametersOverride`). A morph that takes a
   diffuse alpha below 1 moves the material to the transparent draws, which
-  is structural (§6). Evaluated so and written as the canonical inputs'
-  opinions, `全灰モード`, `全黒モード` and `全白モード` change hdToon's frame
-  as they change MMD's
-  ([report 64](../reports/renderer/64-2026-10-17-mmd-material-morph-evidence.md)).
+  is structural (§6).
 - **Tints.** The texture, sphere and toon tints have no canonical input;
   they modulate a texture's contribution, which only an MMD-aware renderer
   draws. The MMD block carries each as the evaluated multiply and add, the
@@ -318,6 +319,13 @@ from this fallback. MToon and MMD retain
 selection priority (§3); extending generic coverage must preserve their
 reference fidelity. This renderer does not expand into a general lookdev
 renderer or an arbitrary material-graph compiler.
+
+Its quality target is practical USD interoperability: ordinary meshes and
+subsets must display without conspicuous colour, UV, normal, deformation or
+alpha defects alongside toon avatars. Pixel-identical Storm rendering is
+not a goal. Broad specular-workflow coverage, environment reflections/IBL,
+MaterialX/glTF PBR fidelity and special-case arbitrary graphs require a
+separate scope decision; they do not expand the RGBA milestone.
 
 For the metallic workflow, interpolate both Fresnel endpoints: at metalness
 zero, F0 is 0.04 (the fallback IOR of 1.5) and F90 is white;
@@ -354,8 +362,29 @@ unreadable. Repairing a graph restores ordinary material selection.
 
 Material opacity defines surface behaviour; it does not select the background
 mode. Final product alpha, compositing and boundary conversions belong to
-[RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md). Reference cases and the
-release condition belong to [v0.5.0](../roadmap/v0.5.0.md).
+[RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md).
+
+### 12.1 Reference comparison and stop rule
+
+Sufficient fidelity means a bounded representative redistributable fixture
+set has acceptable results and documented differences, with no conspicuous
+colour shifts, inverted normals, UV seams or alpha halos. Combine targeted
+metrics with visual character, outline and transparency/compositing checks;
+MAE alone is not a universal quality gate. Record a reference mismatch's
+reproduction, impact and acceptance reason once in a dated report, linked
+from the capability matrix. `reference_equivalent: false` does not prevent
+release when the adopted scope is met.
+
+Extend a passed comparison only for a user-visible defect, a shader semantic
+or input/output change, or recurrence of a known bug. Add the smallest
+fixture and an independent oracle that tests the affected behaviour. A
+harmless reference-only difference needs bounded characterization, not
+zero error. A new material standard requires a separate milestone proposal.
+
+**Stop rule:** if a comparison PR changes no renderer code and only
+remeasures known differences, identify a concrete product beneficiary and
+release blocker before adding another comparison. Growing the suite is not
+a milestone deliverable. Tangent comparisons follow the same rule.
 
 ## 13. Tangent-space normal mapping
 
@@ -366,10 +395,11 @@ skinning/morphing must leave a stable normal/tangent frame. A frame derived
 only from deformed positions and UVs is insufficient as the general asset
 fidelity contract.
 
-Validate authored-tangent assets against a reference renderer, generated
-tangents against a glTF reference, and mirrored seams and deformed assets
-under motion. This is a renderer geometry/shading responsibility, not a new
-format schema or avatar evaluator.
+Use bounded authored-asset/reference and generated-frame/glTF comparisons
+to investigate mirrored seams and deformation under §12.1. Unverified
+external cases may remain documented limitations when no visible defect
+blocks the adopted scope. This is a renderer geometry/shading responsibility,
+not a new format schema or avatar evaluator.
 
 PreviewSurface's `normal` consumes a signed tangent-space vector, with +Y
 along bottom-left `st`'s +V. Consume texture scale/bias before mapping;

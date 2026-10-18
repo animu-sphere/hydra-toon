@@ -25,25 +25,43 @@ so a reader moving between them finds the same shape.
 | `archive/` | Plans and documents that were once authoritative and no longer are | Anything a reader should act on |
 | `contributing/` | How to maintain this repository | End-user tasks |
 
-The same fact is not maintained independently in two categories.
+**One fact, one editing destination.** The
+[docs index](../README.md#source-of-truth) maps each subject to its owner.
+Use relative links elsewhere; a short entry-point summary may link to the
+owner but must not duplicate a status table, contract or measurement.
 
 ## Status
 
 Current status is stated in one place, the
 [capability matrix](../reference/CAPABILITY_MATRIX.md). Nothing else carries a
 status mark or a "done" or "in progress" claim about this repository's work —
-not the roadmap, a design document, the root README or the changelog.
+not the roadmap, a design document or the root README. Reports, changelog
+entries and release records describe dated changes, not live status.
 
 - When work is finished, its row in the capability matrix changes, its entry
   goes to the changelog, and its item is deleted from the roadmap in the same
-  change.
+  change, together with the implementation, targeted regression checks and
+  any necessary report. Do not leave completed comparison plans behind.
 - Planned work that no milestone carries yet is listed once, in the
-  roadmap's *not yet in a milestone* section, and moves to a milestone's
-  page when one takes it. A gap the tree has is also a ⬜ or ⚠️ row in the
-  capability matrix, which states the gap, not the plan; an idea nobody
-  has planned is an issue.
+  [later roadmap](../roadmap/later.md#not-yet-in-a-milestone), and moves to a
+  milestone's page when one takes it. A gap the tree has is also a ⬜ or ⚠️ row in the
+  capability matrix, which states the gap, not the plan. A candidate must
+  name its start trigger, owning repository and disposition (scheduled or
+  unassigned); do not accumulate speculative feature lists.
 - A milestone's roadmap page is deleted when that version is released; its
   release record says what it established.
+
+Design policies describe intended contracts (`must`/`should`); the capability
+matrix records implemented, partially implemented or unsupported behaviour.
+Do not move old prose into the matrix without checking its code/evidence.
+Measured values live in reports: the matrix links their date and scope
+without presenting historical measurements as a fresh run.
+
+`roadmap/README.md` is navigation and milestone order only. Milestone pages
+hold unfinished actions, non-goals and done-when conditions. Do not create a
+`current.md` progress ledger. If an existing branch needs one for link
+compatibility, move its unique content to the owners and retain only a
+30–60-line navigation stub; otherwise remove it and repair incoming links.
 
 ## Cross-repository contracts
 
@@ -79,8 +97,9 @@ contract definitions, or a sibling repository's contracts or status.
 
 A **report** is dated, append-only evidence: what was measured, where and
 when. It is never authoritative for current status. A later finding gets a
-new report and a one-line forward note on the old one; the only edit an
-existing report receives is a link repair.
+new report. Existing measurements are not overwritten; link repairs and a
+one-line forward reference to superseding evidence are the only maintenance
+edits to a report.
 
 The **archive** holds intent that has been done or replaced. Every archived
 document opens with a *Historical only* banner. A superseded **design**
@@ -125,10 +144,29 @@ canonical: X.md        # superseded only: the replacement, relative
 
 ## Change checklist
 
+Run the lightweight local documentation check from the repository root:
+
+```sh
+python scripts/check_docs.py
+```
+
+It checks local Markdown links and anchors, canonical owner paths, category
+index coverage and orphan pages. External URLs are not fetched. The
+[docs workflow](../../.github/workflows/docs.yml) runs the same check without
+rendering. Documentation-only changes need this lint, not GPU captures or
+full CTest. For code changes, choose state, GPU, reference and performance
+checks by the behaviour and risk affected; broad reference capture stays
+manual and follows the
+[material comparison stop rule](../design/MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule).
+
 1. Planned behaviour is not presented as implemented.
 2. Every new page appears in its category index.
-3. Relative links resolve.
-4. Implementation changes update `architecture/` and `reference/`.
+3. Relative links and anchors resolve; the documentation check passes.
+4. Structure changes update `architecture/`; capability changes update the
+   matrix, with evidence linked to reports.
 5. Completed work leaves `roadmap/`, and no status is written outside the
    capability matrix.
 6. A sibling's contract is linked, not restated.
+7. A reference-test addition has a concrete user-visible defect, semantic
+   change or recurrence to cover, and satisfies the stop rule.
+8. Unrelated docs and historical measurements are left alone.

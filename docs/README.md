@@ -26,15 +26,17 @@ and the document is a bug. When a summary disagrees with
 
 | Question | Owner |
 | --- | --- |
-| Purpose, principles, renderer architecture, shared scene services, how milestones are ordered | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
+| Purpose, principles, renderer architecture and shared scene services | [design/DESIGN_POLICY.md](design/DESIGN_POLICY.md) |
 | What this repository owns, what it consumes from which sibling, what it does not own | [design/INTEGRATION_SCOPE_POLICY.md](design/INTEGRATION_SCOPE_POLICY.md) |
 | Reading MToon, MMD and PreviewSurface materials; `ToonMaterial`; outline; draw order; pipelines; how each model receives shared shadows | [design/MATERIAL_POLICY.md](design/MATERIAL_POLICY.md) |
 | Reusable RGBA products, background modes, alpha/coverage, viewport compositing and GPU texture handoff | [design/RENDER_OUTPUT_POLICY.md](design/RENDER_OUTPUT_POLICY.md) |
 | Targets, names, directories, dependency directions, build intents, install tree | [architecture/PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | Implemented capabilities — the only statement of current status | [reference/CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) |
 | Measured platforms and runtimes | [reference/SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
-| What each milestone contains, and the order of work | [roadmap/](roadmap/) |
-| Versioning, the release gate, how a release is cut, and what each release established | [releases/](releases/); change by change, the [CHANGELOG](../CHANGELOG.md) |
+| Unfinished milestone actions and acceptance criteria; later work | [roadmap/v0.5.0.md](roadmap/v0.5.0.md) · [roadmap/later.md](roadmap/later.md); sequence/navigation in [roadmap/README.md](roadmap/README.md) |
+| Dated experiments, performance and reference evidence | [reports/renderer/](reports/renderer/) |
+| Versioning, release gate and released achievements | [releases/](releases/) |
+| Short dated change entries | [CHANGELOG.md](../CHANGELOG.md) |
 | How documents here are maintained, and how they cite sibling repositories | [contributing/documentation.md](contributing/documentation.md) |
 
 Where the design documents overlap, the narrower one wins:

@@ -10,6 +10,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Lightweight documentation link, anchor, owner and index validation through
+  `scripts/check_docs.py` and a dedicated docs CI workflow.
+
 - Lit display-colour fallback for meshes and subsets without an available
   material: an opaque, double-sided rough dielectric using the existing
   PreviewSurface pipeline, scene lights and camera fallback. Per-draw colours
@@ -81,6 +84,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
   ([renderer report 68](docs/reports/renderer/68-2026-10-17-preview-surface-constants.md)).
 
 ### Changed
+
+- Documentation ownership and the v0.5.0 release scope follow the 2026-10-18
+  [maintenance rules](docs/contributing/documentation.md) and
+  [bounded PreviewSurface comparison policy](docs/design/MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule).
 
 - A bound core material with `preview.enabled == false` draws its own
   `base_color` unlit and opaque; a default material is white. Mesh display

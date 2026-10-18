@@ -1,0 +1,30 @@
+name: docs
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'scripts/check_docs.py'
+      - 'scripts/tests/test_check_docs.py'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'scripts/check_docs.py'
+      - 'scripts/tests/test_check_docs.py'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Check the documentation checker
+        run: python3 -m unittest discover -s scripts/tests -p 'test_check_docs.py'
+      - name: Check documentation links and ownership
+        run: python3 scripts/check_docs.py
