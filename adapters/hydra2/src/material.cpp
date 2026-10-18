@@ -536,6 +536,10 @@ bool ReadPreviewTexture(const HdContainerDataSourceHandle& nodes,
 void ReadPreview(const HdContainerDataSourceHandle& prim,
     HdToonMaterialSource& source) {
   auto& result = source.values;
+  // A bound but unreadable material is explicit, opaque, unlit magenta.
+  // Only an unbound draw uses the mesh's display colour. Keep this on the
+  // existing unlit path; recognizing a surface below selects PBR instead.
+  result.base_color = {1.0F, 0.0F, 1.0F};
   const auto network = HdMaterialSchema::GetFromParent(prim).GetMaterialNetwork().GetContainer();
   const auto terminal = Group(Group(network, _tokens->terminals), _tokens->surface);
   TfToken path;

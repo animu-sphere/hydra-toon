@@ -225,8 +225,28 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   material.double_sided = true;
   Require(render() == opaque, "double-sided back face must draw");
   material.preview.enabled = false;
+  material.base_color = {1, 0, 1};
   const auto fallback = render();
-  Require(fallback != opaque, "unreadable network must retain mesh display colour");
+  Require(fallback == std::array<int, 4>{255, 0, 255, 255},
+      "bound fallback must draw its own opaque unlit colour, including back faces");
+  const auto fallback_resident = renderer->statistics();
+  material.base_color = {0.2F, 0.4F, 0.6F};
+  const auto edited_fallback = render();
+  Near(edited_fallback[0], 0.2F, "unlit material colour edit R");
+  Near(edited_fallback[1], 0.4F, "unlit material colour edit G");
+  Near(edited_fallback[2], 0.6F, "unlit material colour edit B");
+  const auto fallback_edited = renderer->statistics();
+  Require(fallback_edited.point_uploads == fallback_resident.point_uploads &&
+              fallback_edited.topology_uploads == fallback_resident.topology_uploads &&
+              fallback_edited.pipelines_created == fallback_resident.pipelines_created &&
+              fallback_edited.material_writes == fallback_resident.material_writes + 1,
+      "unlit material value edit must retain geometry and pipelines");
+  const auto mesh_color = world.Commit().meshes.front().color;
+  world.SetMeshMaterial(mesh, 0);
+  const auto unbound = render();
+  Near(unbound[0], mesh_color.x, "unbound draw must retain mesh display colour R");
+  Near(unbound[1], mesh_color.y, "unbound draw must retain mesh display colour G");
+  Near(unbound[2], mesh_color.z, "unbound draw must retain mesh display colour B");
   Require(renderer->statistics().validation_message_count == 0, "Vulkan validation error");
   std::cout << "preview_surface samples=" << samples << " constants, textures, UV transforms, GGX, Mask, Blend and slot edits passed\n";
   return true;

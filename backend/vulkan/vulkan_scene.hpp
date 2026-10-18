@@ -556,6 +556,7 @@ public:
     MaterialEntries entries;
     ToonShadingModel model = ToonShadingModel::PreviewSurface;
     bool preview_enabled = false;
+    Float3 unlit_color;
     bool double_sided = false;
     // Whether a draw with this material also draws an outline's hull: an
     // MToon material that asks for an outline of some width, through

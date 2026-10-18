@@ -334,9 +334,10 @@ struct ToonMaterial {
   float outline_width = 0.0F;
   Float3 outline_color;
 
-  // The basic metallic/roughness PreviewSurface realization. An unreadable
-  // network keeps the mesh's display colour fallback rather than treating
-  // the default slot as an authored white material.
+  // The basic metallic/roughness PreviewSurface realization. For this model,
+  // disabling the block draws a bound material's base_color unlit and opaque.
+  // Only an unbound draw uses the mesh's display colour; adapters can choose
+  // a diagnostic colour without adding a shading model or pipeline.
   struct PreviewSurface {
     bool enabled = false;
     float metallic = 0.0F;
@@ -582,7 +583,7 @@ public:
   // Unchanged or non-finite values change nothing. Directions are normalized.
   void SetLight(LightId light, ToonLight values);
 
-  // A new material is the default `ToonMaterial`: the fallback material.
+  // A new material is the default `ToonMaterial`: opaque, unlit white.
   [[nodiscard]] MaterialId CreateMaterial();
   void RemoveMaterial(MaterialId material);
   // Setting the values a material already has changes nothing.

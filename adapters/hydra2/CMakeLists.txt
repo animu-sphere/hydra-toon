@@ -92,7 +92,7 @@ if(TOON_BUILD_TESTS)
   add_executable(toon-hydra2-material-test tests/material_test.cpp)
   toon_configure_warnings(toon-hydra2-material-test)
   target_link_libraries(toon-hydra2-material-test
-    PRIVATE toon-hydra2-runtime usdImaging usd hio)
+    PRIVATE toon-hydra2-runtime usdImaging usd hio Toon::Vulkan)
   target_compile_features(toon-hydra2-material-test PRIVATE cxx_std_20)
   target_compile_definitions(toon-hydra2-material-test PRIVATE
     NOMINMAX
@@ -170,6 +170,11 @@ if(TOON_BUILD_TESTS)
     COMMAND toon-hydra2-render-buffer-test)
   add_test(NAME toon-renderer-hydra-material
     COMMAND toon-hydra2-material-test)
+  add_test(NAME toon-renderer-hydra-material-fallback-gpu
+    COMMAND toon-hydra2-material-test --fallback-gpu
+      "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-renderer-hydra-material-fallback-gpu PROPERTIES
+    LABELS "gpu" SKIP_RETURN_CODE 77)
   add_test(NAME toon-renderer-hydra-skinning
     COMMAND toon-hydra2-skinning-test
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda")
@@ -196,6 +201,7 @@ if(TOON_BUILD_TESTS)
     toon-renderer-delegate-creation
     toon-renderer-hydra-render-buffer
     toon-renderer-hydra-material
+    toon-renderer-hydra-material-fallback-gpu
     toon-renderer-hydra-skinning
     toon-renderer-hydra-geom-subsets
     toon-renderer-hydra-primvars
