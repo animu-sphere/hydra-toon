@@ -27,7 +27,7 @@ bool Finite(const ToonTextureRef& ref) {
 bool Finite(const ToonMaterial& material) {
   const auto& m = material.mtoon;
   const auto& p = material.preview;
-  if (!Finite(p.metallic_texture) || !Finite(p.roughness_texture) || !Finite(p.opacity_texture) ||
+  if (!Finite(p.normal) || !Finite(p.metallic_texture) || !Finite(p.roughness_texture) || !Finite(p.opacity_texture) ||
       !std::all_of(p.inputs.begin(), p.inputs.end(), [](const auto& input) {
         return input.channel < 4 && Finite(input.scale) && Finite(input.bias) && Finite(input.fallback) &&
             std::isfinite(input.uv_fallback.x) && std::isfinite(input.uv_fallback.y);

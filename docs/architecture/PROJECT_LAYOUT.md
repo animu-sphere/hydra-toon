@@ -178,14 +178,17 @@ CPU point-computation fallbacks, including dual quaternion skinning, retain
 the derivative path because they supply no matching deformed tangent frame.
 
 The Vulkan mesh cache uploads tangents by their own revision. MToon's three
-pipelines consume a fourth float4 vertex stream, bound at stride zero to a
-zero frame when absent; PreviewSurface retains three streams and MMD keeps
-its existing fourth stream. Shared skinning deforms tangent directions and
+pipelines and PreviewSurface consume a fourth float4 vertex stream, bound
+at stride zero to a zero frame when absent; MMD keeps its existing fourth
+stream. Shared skinning deforms tangent directions and
 preserves the sign through joint reflections; `surface_common.slang` applies
 the forward model-view transform and its reflection sign. Fragment shading
 orthogonalizes against the morphed/skinned normal and converts bottom-left
-st handedness to MToon's top-left normal sampling. Pose and morph weight
-updates retain the rest frames. Morph tangent deltas are not represented.
+st handedness to each model's normal convention: top-left for MToon,
+bottom-left for PreviewSurface. The shared `TangentMappedNormal` consumes
+already decoded vectors; only MToon decodes its texture and normal scale.
+Pose and morph weight updates retain the rest frames. Morph tangent deltas
+are not represented.
 `validation/tangent_test.cpp` supplies state and CPU-normal-reference GPU
 checks within the existing validation layout; no installed target is added.
 
@@ -200,17 +203,20 @@ through UsdImaging and compares textured and deformed Vulkan draws to
 independent explicit-vertex fixtures. No backend vertex contract changes.
 
 PreviewSurface's bounded USD shader-network reader stays in
-`adapters/hydra2/src/material.cpp`. It normalizes five `UsdUVTexture` inputs
-(diffuse, emissive, metallic, roughness, opacity), their channel and
+`adapters/hydra2/src/material.cpp`. It normalizes six `UsdUVTexture` inputs
+(diffuse, emissive, metallic, roughness, opacity, normal), their channel and
 scale/bias/fallback, and a primvar reader with at most one `UsdTransform2d`
 into the PreviewSurface block of `ToonMaterial`. Base and emissive reuse
 the common texture references; metallic, roughness and opacity add three
 references to the adapter's role table. USD transforms are converted into
 the existing top-left image-space texture-reference convention. The Vulkan
-`PreviewParameters` slot is 528 bytes: three common float4 values followed
-by five 96-byte texture-input records. Primvar fallback coordinates occupy
-the UV rows' padding. The texture cache and fixed pipelines are shared with
-the existing models; no new target or material compiler is introduced.
+`PreviewParameters` slot is 640 bytes: three common float4 values, a
+signed tangent-space normal float4, then six 96-byte texture-input records.
+The normal image reuses the common normal texture reference; USD scale/bias
+applies before mapping, without an implicit [0,1] decode. Primvar fallback
+coordinates occupy the UV rows' padding. The texture cache and fixed
+pipelines are shared with the existing models; no new target or material
+compiler is introduced.
 
 Unreadable Hydra materials normalize to unlit magenta in that same reader.
 For `ToonShadingModel::PreviewSurface`, `preview.enabled == false` means a

@@ -67,38 +67,6 @@ float2 AnimatedST(MToonParameters material, float2 st, float mask) {
   return float2(uv.x, 1.0 - uv.y);
 }
 
-// Prefer the authored rest frame, deformed with the mesh. Otherwise retain
-// the derivative frame from original UVs and deformed positions until the
-// MikkTSpace generator is added. Sampling transforms never move the frame.
-// Absent UVs or an unusable frame retain the vertex normal.
-float3 MappedNormal(float3 normal, float4 authored_tangent, float3 position, float2 st,
-    float3 texel, float scale, bool enabled) {
-  const float3 dx = ddx(position);
-  const float3 dy = ddy(position);
-  const float2 ux = ddx(float2(st.x, 1.0 - st.y));
-  const float2 uy = ddy(float2(st.x, 1.0 - st.y));
-  const float determinant = ux.x * uy.y - ux.y * uy.x;
-  if (!enabled) {
-    return normal;
-  }
-  const bool authored = abs(authored_tangent.w) > 0.5;
-  if (!authored && abs(determinant) < 1e-10) return normal;
-  float3 tangent = authored ? authored_tangent.xyz : (dx * uy.y - dy * ux.y) / determinant;
-  tangent -= normal * dot(normal, tangent);
-  // Authored w describes +V in bottom-left st. MToon's normal texel +Y
-  // points down, so its bitangent has the opposite sign.
-  const float3 bitangent = authored ?
-      -authored_tangent.w * cross(normal, tangent) : (dy * ux.x - dx * uy.x) / determinant;
-  if (dot(tangent, tangent) < 1e-12 || dot(bitangent, bitangent) < 1e-12) {
-    return normal;
-  }
-  tangent = normalize(tangent);
-  const float handedness = dot(cross(normal, tangent), bitangent) < 0.0 ? -1.0 : 1.0;
-  const float3 map = float3((texel.xy * 2.0 - 1.0) * scale, texel.z * 2.0 - 1.0);
-  const float3 mapped = tangent * map.x + cross(normal, tangent) * handedness * map.y + normal * map.z;
-  return dot(mapped, mapped) > 1e-12 ? normalize(mapped) : normal;
-}
-
 float LinearStep(float low, float high, float value) {
   return saturate((value - low) / max(high - low, 1e-5));
 }
@@ -134,8 +102,10 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   const float2 animated_st = AnimatedST(material, st, mask);
   const float3 normal_texel = SampleTexture(material.surface_textures.z,
       material.surface_textures.w, material.normal_uv, animated_st).rgb;
-  normal = MappedNormal(normal, view_tangent, view_position, st, normal_texel,
-      material.surface.x, TextureEntry(material.surface_textures.z) != 0);
+  const float3 map = float3((normal_texel.xy * 2.0 - 1.0) * material.surface.x,
+      normal_texel.z * 2.0 - 1.0);
+  normal = TangentMappedNormal(normal, view_tangent, view_position, st, map,
+      -1.0, TextureEntry(material.surface_textures.z) != 0);
   if (!front) {
     normal = -normal;
   }

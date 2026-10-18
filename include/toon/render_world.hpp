@@ -330,9 +330,11 @@ struct ToonMaterial {
   Float3 emissive;
   // Colour, multiplied into emission; absent images sample white.
   ToonTextureRef emissive_texture;
-  // Linear tangent-space normal, scaled in XY. Absent images keep the
-  // vertex normal. The tangent frame follows the original mesh UVs.
+  // Tangent-space normal image shared by MToon and PreviewSurface. Each
+  // model supplies its decoding and +Y convention; PreviewSurface describes
+  // scale/bias/fallback in preview.inputs[5]. The frame uses original mesh UVs.
   ToonTextureRef normal_texture;
+  // MToon's XY normal contribution scale; PreviewSurface uses texture scale/bias.
   float normal_scale = 1.0F;
   // Whether the source asks for an outline, its width in the unit the
   // model states (MToon: `outline_width_mode`), and its linear colour.
@@ -353,9 +355,9 @@ struct ToonMaterial {
     ToonTextureRef opacity_texture;
     // UsdUVTexture result = sampled RGBA * scale + bias. Connected values
     // replace the surface input, including when the image uses its fallback.
-    // Order: diffuse, emissive, metallic, roughness, opacity. Colour inputs
-    // use RGB; scalar inputs select channel 0-3. UV transforms are converted
-    // from USD's bottom-left space to ToonTextureRef's top-left space.
+    // Order: diffuse, emissive, metallic, roughness, opacity, normal. Colour
+    // and normal inputs use RGB; scalar inputs select channel 0-3. UV transforms
+    // are converted from USD's bottom-left space to ToonTextureRef's top-left space.
     struct TextureInput {
       bool connected = false;
       Float2 uv_fallback;
@@ -365,7 +367,10 @@ struct ToonMaterial {
       Float4 fallback{0, 0, 0, 1};
       friend bool operator==(const TextureInput&, const TextureInput&) = default;
     };
-    std::array<TextureInput, 5> inputs;
+    std::array<TextureInput, 6> inputs;
+    // Signed tangent-space vector, including for a texture after scale/bias.
+    // +Y follows bottom-left st's +V. The common normal_texture is its image.
+    Float3 normal{0, 0, 1};
 
     friend bool operator==(const PreviewSurface&, const PreviewSurface&) = default;
   } preview;

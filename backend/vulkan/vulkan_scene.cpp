@@ -118,7 +118,7 @@ struct PipelineDescription {
   const std::vector<std::uint32_t>* vertex_words = nullptr;
   const std::vector<std::uint32_t>* fragment_words = nullptr;
   std::uint32_t push_constant_size = 0;
-  // Position, normal and UV; a fourth stream carries MToon's tangent,
+  // Position, normal and UV; a fourth stream carries a shared tangent frame,
   // MMD's edge scale, or its sub-texture UV with `sub_texture_uvs`.
   std::uint32_t vertex_streams = 1;
   bool sub_texture_uvs = false;
@@ -783,8 +783,9 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   preview.vertex_words = &words.preview_vertex;
   preview.fragment_words = &words.preview_fragment;
   preview.blend = true;
-  // MToon consumes authored tangent frames; PreviewSurface will share this
-  // stream when its normal-map realization is added.
+  // Both normal-mapped models consume the shared tangent stream.
+  preview.vertex_streams = 4;
+  preview.tangents = true;
   mtoon.vertex_streams = 4;
   mtoon.tangents = true;
   // The same streams, constants and dynamic state; only the shaders,
@@ -1504,11 +1505,14 @@ bool MaterialCache::Update(const DrawList& draws,
         slot.surface[0] = values.preview.metallic;
         slot.surface[1] = values.preview.roughness;
         slot.surface[2] = values.alpha_mode == ToonAlphaMode::Mask ? values.alpha_cutoff : -1.0F;
+        slot.normal[0] = values.preview.normal.x;
+        slot.normal[1] = values.preview.normal.y;
+        slot.normal[2] = values.preview.normal.z;
         const ToonTextureRef* refs[] = {&values.base_texture, &values.emissive_texture,
             &values.preview.metallic_texture, &values.preview.roughness_texture,
-            &values.preview.opacity_texture};
+            &values.preview.opacity_texture, &values.normal_texture};
         const std::uint32_t images[] = {entries.base, entries.emissive,
-            entries.metallic, entries.roughness, entries.opacity};
+            entries.metallic, entries.roughness, entries.opacity, entries.normal};
         for (std::size_t i = 0; i < values.preview.inputs.size(); ++i) {
           const auto& input = values.preview.inputs[i];
           auto& target = slot.inputs[i];
@@ -2064,8 +2068,9 @@ void MeshCache::Record(VkCommandBuffer command,
     const bool mmd_surface = &pipeline == &pipelines.mmd ||
                              &pipeline == &pipelines.mmd_transparent;
     const bool tangent_surface = &pipeline == &pipelines.mtoon ||
-        &pipeline == &pipelines.mtoon_transparent || &pipeline == &pipelines.mtoon_outline;
-    // The fourth stream: MMD edge scale/sub-texture UV, or MToon's tangent.
+        &pipeline == &pipelines.mtoon_transparent || &pipeline == &pipelines.mtoon_outline ||
+        &pipeline == &pipelines.preview;
+    // The fourth stream: MMD edge scale/sub-texture UV, or a tangent frame.
     VkBuffer fourth = VK_NULL_HANDLE;
     VkDeviceSize fourth_stride = 0;
     if (edge) {

@@ -21,6 +21,114 @@ std::array<int, 4> Center(const Toon::ColorProduct& image) {
 void Near(int actual, float expected, const char* message) {
   Require(std::abs(static_cast<float>(actual) - expected * 255.0F) <= 2.0F, message);
 }
+bool Normals(const Toon::SceneShaders& shaders, std::uint32_t samples) {
+  Toon::FrameStatus status;
+  std::string error;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
+  if (status == Toon::FrameStatus::Skip) return false;
+  auto reference = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
+  Require(renderer && reference, error.c_str());
+  Toon::RenderWorld world, oracle;
+  world.SetBootstrapTriangle();
+  oracle.SetBootstrapTriangle();
+  const auto mesh = world.Commit().meshes.front().id;
+  const auto ref = oracle.Commit().meshes.front().id;
+  const auto id = world.CreateMaterial(), ref_id = oracle.CreateMaterial();
+  world.SetMeshMaterial(mesh, id);
+  oracle.SetMeshMaterial(ref, ref_id);
+  world.SetMeshNormals(mesh, std::vector<Toon::Float3>(3, {0, 0, 1}));
+  Toon::ToonMaterial material;
+  material.preview.enabled = true;
+  material.base_color = {0.7F, 0.4F, 0.2F};
+  const auto image = world.CreateTexture();
+  Toon::ToonTexture texture;
+  texture.width = texture.height = 2;
+  texture.encoding = Toon::ToonTextureEncoding::Linear;
+  // Four different directions make the sampling origin and transform visible.
+  texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{191,230,204,255, 50,190,220,255,
+          80,60,230,255, 200,80,180,255});
+  world.SetTexture(image, texture);
+  const auto compare = [&](Toon::Float3 normal) {
+    const float length = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    normal = length > 1e-6F ? Toon::Float3{normal.x / length, normal.y / length, normal.z / length}
+                           : Toon::Float3{0, 0, 1};
+    oracle.SetMeshNormals(ref, std::vector<Toon::Float3>(3, normal));
+    world.SetMaterial(id, material);
+    auto neutral = material;
+    neutral.preview.normal = {0, 0, 1};
+    neutral.preview.inputs[5].connected = false;
+    neutral.normal_texture.texture = 0;
+    oracle.SetMaterial(ref_id, neutral);
+    auto actual = Toon::ExtractDrawList(world.Commit());
+    auto expected = Toon::ExtractDrawList(oracle.Commit());
+    for (auto* draws : {&actual, &expected}) {
+      draws->lighting.direct_scale = 0.7F;
+      draws->lighting.ambient_scale = 0;
+      draws->lighting.key_direction = {0.3F, -0.4F, 1};
+    }
+    Toon::ColorProduct color, target;
+    Toon::DepthProduct depth, target_depth;
+    Require(renderer->Render(actual, 96, 96, color, depth, error), error.c_str());
+    Require(reference->Render(expected, 96, 96, target, target_depth, error), error.c_str());
+    for (std::size_t i = 0; i < color.payload.size(); ++i)
+      Require(std::abs(int(color.payload[i]) - int(target.payload[i])) <= 2,
+          "PreviewSurface normal differs from CPU-baked normal");
+    Require(depth.payload == target_depth.payload, "normal mapping changed depth or coverage");
+    Require(renderer->statistics().validation_message_count == 0, "normal map validation error");
+  };
+  // No texture: signed constants use the derivative frame, including a mirrored U seam.
+  // A third case rotates the UV basis by 90 degrees (T=+Y, B=-X).
+  for (int basis = 0; basis < 3; ++basis) {
+    const bool mirrored = basis == 1;
+    world.SetMeshUVs(mesh, basis == 2 ? std::vector<Toon::Float2>{{0.4F,0.6F},{0.4F,0.4F},{0.6F,0.5F}}
+        : std::vector<Toon::Float2>{{mirrored ? 0.6F : 0.4F,0.4F},
+              {mirrored ? 0.4F : 0.6F,0.4F},{0.5F,0.6F}});
+    material.preview.normal = {0.35F, -0.45F, 0.8F};
+    compare(basis == 2 ? Toon::Float3{0.45F, 0.35F, 0.8F}
+                      : Toon::Float3{mirrored ? -0.35F : 0.35F, -0.45F, 0.8F});
+  }
+  // Authored frames work with constant/absent UVs. +Y is bottom-left +V.
+  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(3, {0.25F, 0.25F}));
+  world.SetMeshTangents(mesh, std::vector<Toon::Float4>(3, {1, 0, 0, 1}));
+  material.preview.inputs[5].connected = true;
+  material.preview.inputs[5].scale = {2, 2, 2, 1};
+  material.preview.inputs[5].bias = {-1, -1, -1, 0};
+  material.normal_texture.texture = image;
+  const auto decode = [](float r, float g, float b) {
+    return Toon::Float3{2 * r / 255 - 1, 2 * g / 255 - 1, 2 * b / 255 - 1};
+  };
+  compare(decode(80, 60, 230)); // bottom-left, not top-left
+  const auto resident = renderer->statistics();
+  material.normal_texture.rotation = 1.57079632679F;
+  material.normal_texture.offset = {-0.5F, 0.5F};
+  compare(decode(191, 230, 204)); // sampling rotates; the tangent frame stays fixed
+  const auto edited = renderer->statistics();
+  Require(edited.material_writes == resident.material_writes + 1 &&
+              edited.point_uploads == resident.point_uploads && edited.texture_uploads == resident.texture_uploads &&
+              edited.pipelines_created == resident.pipelines_created, "normal UV edit rebuilt static resources");
+  material.preview.inputs[5].scale = {1.25F, 1.75F, 2, 1};
+  material.preview.inputs[5].bias = {-0.4F, -0.6F, -1, 0};
+  compare({191 / 255.0F * 1.25F - 0.4F, 230 / 255.0F * 1.75F - 0.6F, 204 / 255.0F * 2 - 1});
+  world.SetMeshUVs(mesh, {});
+  material.preview.inputs[5].uv_fallback = {0.25F, 0.25F};
+  compare({191 / 255.0F * 1.25F - 0.4F, 230 / 255.0F * 1.75F - 0.6F, 204 / 255.0F * 2 - 1});
+  // A missing image still consumes fallback*scale+bias; zero vectors and
+  // degenerate frames retain the vertex normal, never a NaN.
+  material.normal_texture.texture = 0;
+  material.preview.inputs[5].fallback = {0.4F, 0.8F, 0.9F, 1};
+  compare({0.1F, 0.8F, 0.8F});
+  material.preview.inputs[5].fallback = {};
+  material.preview.inputs[5].bias = {};
+  compare({0, 0, 1});
+  material.preview.inputs[5].connected = false;
+  world.SetMeshTangents(mesh, {});
+  compare({0, 0, 1});
+  world.SetMeshUVs(mesh, std::vector<Toon::Float2>(3, {0.5F, 0.5F}));
+  compare({0, 0, 1});
+  std::cout << "PreviewSurface normals: " << samples << "x constants, mirrored/rotated derivatives, transformed textures and fallback passed\n";
+  return true;
+}
 bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   Toon::FrameStatus status;
   std::string error;
@@ -257,7 +365,7 @@ int main(int argc, char** argv) {
     if (argc != 2)
       return 2;
     const auto shaders = Toon::SceneShadersIn(argv[1]);
-    return Run(shaders, 1) && Run(shaders, 4) ? 0 : 77;
+    return Run(shaders, 1) && Run(shaders, 4) && Normals(shaders, 1) && Normals(shaders, 4) ? 0 : 77;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;
