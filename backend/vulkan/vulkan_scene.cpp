@@ -118,11 +118,11 @@ struct PipelineDescription {
   const std::vector<std::uint32_t>* vertex_words = nullptr;
   const std::vector<std::uint32_t>* fragment_words = nullptr;
   std::uint32_t push_constant_size = 0;
-  // Position, then normal and UV when there are three, and MMD's edge
-  // scale when there are four, or its sub-texture UV with
-  // `sub_texture_uvs`.
+  // Position, normal and UV; a fourth stream carries MToon's tangent,
+  // MMD's edge scale, or its sub-texture UV with `sub_texture_uvs`.
   std::uint32_t vertex_streams = 1;
   bool sub_texture_uvs = false;
+  bool tangents = false;
   // Cull mode, front face, depth writes and vertex strides set per draw
   // rather than baked in.
   bool dynamic_draw_state = false;
@@ -186,10 +186,12 @@ bool CreateScenePipeline(VkDevice device,
   stages[1].pName = "main";
   const VkFormat stream_formats[4] = {VK_FORMAT_R32G32B32_SFLOAT,
       VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32_SFLOAT,
+      description.tangents ? VK_FORMAT_R32G32B32A32_SFLOAT :
       description.sub_texture_uvs ? VK_FORMAT_R32G32_SFLOAT
                                   : VK_FORMAT_R32_SFLOAT};
   const std::uint32_t stream_strides[4] = {sizeof(Float3), sizeof(Float3),
       sizeof(Float2),
+      description.tangents ? std::uint32_t{sizeof(Float4)} :
       description.sub_texture_uvs ? std::uint32_t{sizeof(Float2)}
                                   : std::uint32_t{sizeof(float)}};
   VkVertexInputBindingDescription bindings[4]{};
@@ -781,6 +783,10 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   preview.vertex_words = &words.preview_vertex;
   preview.fragment_words = &words.preview_fragment;
   preview.blend = true;
+  // MToon consumes authored tangent frames; PreviewSurface will share this
+  // stream when its normal-map realization is added.
+  mtoon.vertex_streams = 4;
+  mtoon.tangents = true;
   // The same streams, constants and dynamic state; only the shaders,
   // blending and coverage differ. The hull blends, so a transparent
   // material's outline takes its surface's alpha while an opaque one's
@@ -807,6 +813,7 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd.fragment_words = &words.mmd_fragment;
   mmd.vertex_streams = 4;
   mmd.sub_texture_uvs = true;
+  mmd.tangents = false;
   // A model layers decals, blush and expressions on its face's own
   // vertices, drawn after the face in material-table order; MMD's depth
   // test lets them over it.
@@ -822,6 +829,7 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd_outline.fragment_words = &words.mmd_outline_fragment;
   mmd_outline.vertex_streams = 4;
   mmd_outline.sub_texture_uvs = false;
+  mmd_outline.tangents = false;
   // mmd_shadow reads the points alone and draws depth alone, both faces,
   // pushed back by the slope, so a lit surface does not shadow itself.
   PipelineDescription mmd_shadow;
@@ -1643,11 +1651,14 @@ bool MeshCache::Initialize(VkPhysicalDevice physical_device, VkDevice device,
   device_ = device;
   skin_layout_ = skin_layout;
   const Float2 zero;
+  const Float4 zero_tangent;
   const float unit = 1.0F;
   const Matrix4 identity;
   std::size_t pool = 0;
   if (!Upload(zero_uv_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &zero,
           sizeof(zero), detail) ||
+      !Upload(zero_tangent_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &zero_tangent,
+          sizeof(zero_tangent), detail) ||
       !Upload(unit_edge_scale_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &unit,
           sizeof(unit), detail) ||
       !Upload(zero_skin_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &identity,
@@ -1705,6 +1716,14 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail, bool fast_val
     // Against this frame's topology, which can reach past UVs that were
     // long enough before, or come back within them.
     entry.has_uvs = uvs_present && mesh.uvs->size() >= mesh.index_bound;
+    const bool tangents_present = mesh.tangents && !mesh.tangents->empty();
+    if (entry.tangents_revision != mesh.tangents_revision) {
+      if (tangents_present &&
+          !Upload(entry.tangents, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+              mesh.tangents->data(), mesh.tangents->size() * sizeof(Float4), detail)) return false;
+      entry.tangents_revision = mesh.tangents_revision;
+    }
+    entry.has_tangents = tangents_present && mesh.tangents->size() >= mesh.index_bound;
     // Edge scales are counted with the points too.
     const bool edge_scales_present =
         mesh.edge_scales != nullptr && !mesh.edge_scales->empty();
@@ -1908,6 +1927,7 @@ void MeshCache::Release(Entry& entry) {
   DestroyHostBuffer(device_, entry.vertices);
   DestroyHostBuffer(device_, entry.normals);
   DestroyHostBuffer(device_, entry.uvs);
+  DestroyHostBuffer(device_, entry.tangents);
   DestroyHostBuffer(device_, entry.edge_scales);
   DestroyHostBuffer(device_, entry.sub_texture_uvs);
   DestroyHostBuffer(device_, entry.indices);
@@ -2043,8 +2063,9 @@ void MeshCache::Record(VkCommandBuffer command,
     const bool edge = &pipeline == &pipelines.mmd_outline;
     const bool mmd_surface = &pipeline == &pipelines.mmd ||
                              &pipeline == &pipelines.mmd_transparent;
-    // The fourth stream: an MMD edge's scale, or an MMD surface's
-    // sub-texture UV.
+    const bool tangent_surface = &pipeline == &pipelines.mtoon ||
+        &pipeline == &pipelines.mtoon_transparent || &pipeline == &pipelines.mtoon_outline;
+    // The fourth stream: MMD edge scale/sub-texture UV, or MToon's tangent.
     VkBuffer fourth = VK_NULL_HANDLE;
     VkDeviceSize fourth_stride = 0;
     if (edge) {
@@ -2055,13 +2076,16 @@ void MeshCache::Record(VkCommandBuffer command,
       fourth = entry.has_sub_texture_uvs ? entry.sub_texture_uvs.buffer
                                          : zero_uv_.buffer;
       fourth_stride = entry.has_sub_texture_uvs ? sizeof(Float2) : 0U;
+    } else if (tangent_surface) {
+      fourth = entry.has_tangents ? entry.tangents.buffer : zero_tangent_.buffer;
+      fourth_stride = entry.has_tangents ? sizeof(Float4) : 0U;
     }
     const VkBuffer streams[] = {entry.vertices.buffer, entry.normals.buffer,
         entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer, fourth};
     const VkDeviceSize offsets[] = {0, 0, 0, 0};
     const VkDeviceSize strides[] = {sizeof(Float3), sizeof(Float3),
         entry.has_uvs ? sizeof(Float2) : 0U, fourth_stride};
-    vkCmdBindVertexBuffers2(command, 0, edge || mmd_surface ? 4U : 3U,
+    vkCmdBindVertexBuffers2(command, 0, edge || mmd_surface || tangent_surface ? 4U : 3U,
         streams, offsets, nullptr, strides);
     vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
         VK_INDEX_TYPE_UINT32);
@@ -2454,6 +2478,7 @@ void MeshCache::Destroy() {
   }
   entries_.clear();
   DestroyHostBuffer(device_, zero_uv_);
+  DestroyHostBuffer(device_, zero_tangent_);
   DestroyHostBuffer(device_, unit_edge_scale_);
   DestroyHostBuffer(device_, zero_skin_);
   // Frees every set with its pool.

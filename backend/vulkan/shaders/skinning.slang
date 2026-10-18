@@ -38,7 +38,7 @@ static const uint kDrawMorphed = 128;
 // does: the weighted joints in skeleton space, then into the mesh's space.
 // A draw without either deformation leaves both as they are.
 void Skin(uint flags, uint vertex, inout float3 position,
-    inout float3 normal) {
+    inout float3 normal, inout float4 tangent) {
   if ((flags & kDrawMorphed) != 0) {
     uint weightCount, stride;
     morphWeights.GetDimensions(weightCount, stride);
@@ -67,4 +67,15 @@ void Skin(uint flags, uint vertex, inout float3 position,
   const float3 skeleton_normal = mul(blended, float4(normal, 0.0)).xyz;
   position = mul(joints[0], float4(skeleton_position, 1.0)).xyz;
   normal = mul(joints[0], float4(skeleton_normal, 0.0)).xyz;
+  const float4x4 deformation = mul(joints[0], blended);
+  tangent.xyz = mul(deformation, float4(tangent.xyz, 0.0)).xyz;
+  // A reflection changes the frame's orientation, independently of the
+  // mesh transform. Morph normal offsets are applied above; the fragment
+  // stage re-orthogonalizes the retained tangent against that normal.
+  tangent.w *= determinant((float3x3)deformation) < 0.0 ? -1.0 : 1.0;
+}
+
+void Skin(uint flags, uint vertex, inout float3 position, inout float3 normal) {
+  float4 tangent = float4(0.0);
+  Skin(flags, vertex, position, normal, tangent);
 }

@@ -164,6 +164,31 @@ vertex normals, skin influences, morph ranges, MMD edge scales and
 additional UVs. Constant primvars expand to the resulting vertex count;
 Hydra resolves indexed primvars before the adapter reads them.
 
+Authored tangent frames use `MeshSnapshot::tangents` (`Float4`, independent
+revision) and `RenderWorld::SetMeshTangents` in the existing public core
+header. The adapter reads float4 `primvars:tangents`, including Hydra-resolved
+indices and vertex, varying, face-varying, uniform or constant interpolation,
+through the same corner map. This adapter input uses xyz along +U and w
+equal to +/-1, with `w * cross(N,T)` along +V of bottom-left `st`; an adapter
+carrying a top-left source basis must convert its sign. Missing, short or
+invalid frames select the existing derivative fallback. No format schema
+is introduced. Tangent changes invalidate both late-snapshot and optional
+avatar-state structural bindings.
+CPU point-computation fallbacks, including dual quaternion skinning, retain
+the derivative path because they supply no matching deformed tangent frame.
+
+The Vulkan mesh cache uploads tangents by their own revision. MToon's three
+pipelines consume a fourth float4 vertex stream, bound at stride zero to a
+zero frame when absent; PreviewSurface retains three streams and MMD keeps
+its existing fourth stream. Shared skinning deforms tangent directions and
+preserves the sign through joint reflections; `surface_common.slang` applies
+the forward model-view transform and its reflection sign. Fragment shading
+orthogonalizes against the morphed/skinned normal and converts bottom-left
+st handedness to MToon's top-left normal sampling. Pose and morph weight
+updates retain the rest frames. Morph tangent deltas are not represented.
+`validation/tangent_test.cpp` supplies state and CPU-normal-reference GPU
+checks within the existing validation layout; no installed target is added.
+
 Smooth rest normals are derived on the source mesh before UV seams split
 its vertices. `RenderWorld::SetMeshNormals` accepts an optional `authored`
 flag, defaulting to true; false retains adapter-derived values while

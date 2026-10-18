@@ -88,6 +88,101 @@ bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
   return true;
 }
 
+bool Tangents(const std::string& shaders) {
+  const auto stage = UsdStage::CreateInMemory();
+  if (!stage->GetRootLayer()->ImportFromString(R"USD(#usda 1.0
+def Mesh "Body" {
+ uniform token subdivisionScheme = "none"
+ point3f[] points = [(-0.6,-0.6,0), (0.6,-0.6,0), (0.6,0.6,0), (-0.6,0.6,0)]
+ int[] faceVertexCounts = [3,3]
+ int[] faceVertexIndices = [0,1,2,0,2,3]
+ texCoord2f[] primvars:st = [(0,0), (1,0), (1,1), (0,1)] (interpolation = "vertex")
+ float4[] primvars:tangents = [(0,1,0,1), (1,0,0,-1)] (interpolation = "faceVarying")
+ int[] primvars:tangents:indices = [0,0,0,1,1,1]
+}
+)USD")) return false;
+  Host host(stage);
+  const auto first = host.Sync();
+  const auto mesh = first.meshes[0];
+  const std::vector<Toon::Float4> tangents{{0,1,0,1},{0,1,0,1},{0,1,0,1},
+      {1,0,0,-1},{1,0,0,-1},{1,0,0,-1}};
+  if (!Check(mesh.points->size() == 6 && *mesh.tangents == tangents &&
+                 *mesh.uvs == std::vector<Toon::Float2>{{0,0},{1,0},{1,1},{0,0},{1,1},{0,1}},
+          "indexed tangent seams must split points and UVs with their signs")) return false;
+  if (!shaders.empty()) {
+    Toon::RenderWorld reference;
+    reference.SetMeshPoints(reference.CreateMesh(),
+        {{-0.6F,-0.6F,0},{0.6F,-0.6F,0},{0.6F,0.6F,0},
+         {-0.6F,-0.6F,0},{0.6F,0.6F,0},{-0.6F,0.6F,0}});
+    reference.SetMeshTopology(1, {0,1,2,3,4,5});
+    reference.SetMeshUVs(1, *mesh.uvs);
+    reference.SetMeshTangents(1, tangents);
+    Toon::ToonTexture texture;
+    texture.width = texture.height = 1;
+    texture.encoding = Toon::ToonTextureEncoding::Linear;
+    texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+        std::vector<std::uint8_t>{191,230,204,255});
+    const auto tex = reference.CreateTexture(); reference.SetTexture(tex, texture);
+    Toon::ToonMaterial material;
+    material.model = Toon::ToonShadingModel::MToon;
+    material.normal_texture.texture = tex;
+    material.mtoon.shading_toony = 0;
+    material.mtoon.shade_color = {0.1F,0.2F,0.3F};
+    const auto mat = reference.CreateMaterial();
+    reference.SetMaterial(mat, material); reference.SetMeshMaterial(1, mat);
+    const auto expected = reference.Commit();
+    auto actual = first;
+    actual.materials = expected.materials; actual.textures = expected.textures;
+    actual.meshes[0].material = mat; actual.meshes[0].parts = expected.meshes[0].parts;
+    if (!Gpu(actual, expected, shaders)) return false;
+  }
+  auto prim = stage->GetPrimAtPath(SdfPath("/Body"));
+  auto pv = UsdGeomPrimvarsAPI(prim).GetPrimvar(TfToken("tangents"));
+  pv.SetIndices(VtIntArray{1,1,1,0,0,0});
+  const auto edit = host.Sync();
+  if (!Check(SameGeometry(mesh, edit.meshes[0]) && mesh.uvs == edit.meshes[0].uvs &&
+                 mesh.tangents_revision != edit.meshes[0].tangents_revision &&
+                 (*edit.meshes[0].tangents)[0].w == -1,
+          "tangent index edits must update only the tangent stream")) return false;
+  prim.RemoveProperty(TfToken("primvars:tangents:indices"));
+  pv.SetInterpolation(UsdGeomTokens->uniform);
+  pv.Set(VtVec4fArray{GfVec4f(1,0,0,1),GfVec4f(0,1,0,-1)});
+  const auto uniform = host.Sync();
+  if (!Check(SameGeometry(edit.meshes[0], uniform.meshes[0]) &&
+                 *uniform.meshes[0].tangents == std::vector<Toon::Float4>{
+                     {1,0,0,1},{1,0,0,1},{1,0,0,1},{0,1,0,-1},{0,1,0,-1},{0,1,0,-1}},
+          "uniform tangents must retain the existing corner layout")) return false;
+  // Constant tangents no longer require a split and expand on point edits.
+  pv.SetInterpolation(UsdGeomTokens->constant);
+  pv.Set(VtVec4fArray{GfVec4f(1,0,0,-1)});
+  const auto constant = host.Sync();
+  if (!Check(constant.meshes[0].points->size() == 4 &&
+                 *constant.meshes[0].tangents == std::vector<Toon::Float4>(4, {1,0,0,-1}),
+          "constant tangents must expand after removing a seam")) return false;
+  auto points = *constant.meshes[0].points;
+  VtVec3fArray expanded;
+  for (auto point : points) expanded.push_back(GfVec3f(point.x,point.y,point.z));
+  expanded.push_back(GfVec3f(0,0,0));
+  UsdGeomMesh(prim).GetPointsAttr().Set(expanded);
+  const auto grown = host.Sync();
+  if (!Check(grown.meshes[0].tangents->size() == 5,
+          "constant tangent expansion did not follow point count")) return false;
+  for (const auto interpolation : {UsdGeomTokens->vertex, UsdGeomTokens->varying}) {
+    pv.SetInterpolation(interpolation);
+    pv.Set(VtVec4fArray(5, GfVec4f(0,1,0,1)));
+    const auto vertex = host.Sync();
+    if (!Check(vertex.meshes[0].topology_revision == grown.meshes[0].topology_revision &&
+                   *vertex.meshes[0].tangents == std::vector<Toon::Float4>(5,{0,1,0,1}),
+            "vertex/varying tangent values must preserve topology")) return false;
+  }
+  pv.Set(VtVec4fArray(5, GfVec4f(1,0,0,0)));
+  if (!Check(host.Sync().meshes[0].tangents->empty(), "malformed signs retained stale tangents")) return false;
+  prim.RemoveProperty(TfToken("primvars:tangents"));
+  prim.RemoveProperty(TfToken("primvars:tangents:indices"));
+  if (!Check(host.Sync().meshes[0].tangents->empty(), "removed tangents remained resident")) return false;
+  return true;
+}
+
 bool Ordinary(const std::string& shaders) {
   const auto stage = UsdStage::CreateInMemory();
   if (!stage->GetRootLayer()->ImportFromString(R"USD(#usda 1.0
@@ -239,6 +334,13 @@ bool Skin(const char* path, const std::string& shaders) {
       UsdGeomTokens->faceVarying);
   st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(1,0),GfVec2f(1,1),
       GfVec2f(1,0),GfVec2f(0,1),GfVec2f(0,0)});
+  auto tangent = UsdGeomPrimvarsAPI(prim).CreatePrimvar(TfToken("tangents"),
+      SdfValueTypeNames->Float4Array, UsdGeomTokens->vertex);
+  tangent.Set(VtVec4fArray{GfVec4f(0,1,0,1), GfVec4f(0,1,0,-1),
+      GfVec4f(0,1,0,1), GfVec4f(0,1,0,-1)});
+  auto dq_tangent = UsdGeomPrimvarsAPI(stage->GetPrimAtPath(SdfPath("/Root/DualQuaternion")))
+      .CreatePrimvar(TfToken("tangents"), SdfValueTypeNames->Float4Array, UsdGeomTokens->constant);
+  dq_tangent.Set(VtVec4fArray{GfVec4f(0,1,0,1)});
   Host host(stage);
   const auto find = [](const Toon::FrameSnapshot& frame) -> const Toon::MeshSnapshot* {
     for (const auto& entry : frame.meshes) if (Toon::IsSkinned(entry)) return &entry;
@@ -246,6 +348,13 @@ bool Skin(const char* path, const std::string& shaders) {
   };
   const auto first = host.Sync(1);
   const auto* linear = find(first);
+  bool cpu_fallback = false;
+  for (const auto& entry : first.meshes) if (!Toon::IsSkinned(entry)) {
+    cpu_fallback = true;
+    if (!Check(entry.tangents->empty(),
+            "CPU-deformed points must not consume undeformed rest tangents")) return false;
+  }
+  if (!Check(cpu_fallback, "expected a dual quaternion CPU fallback mesh")) return false;
   if (!Check(linear && linear->points->size() == 6 && Toon::IsMorphed(*linear),
           "a UV seam must retain GPU skinning and morphs")) return false;
   const std::vector<unsigned> source{0,1,2,0,2,3};
@@ -253,7 +362,8 @@ bool Skin(const char* path, const std::string& shaders) {
   for (std::size_t i = 0; i < source.size(); ++i) {
     if (!Check((*linear->points)[i] == rest[source[i]] &&
                    (*linear->influences)[i].joint == (source[i] < 2 ? 1U : 0U) &&
-                   (*linear->normals)[i] == Toon::Float3{0.6F,0,0.8F},
+                   (*linear->normals)[i] == Toon::Float3{0.6F,0,0.8F} &&
+                   (*linear->tangents)[i] == Toon::Float4{0,1,0,source[i] % 2 ? -1.0F : 1.0F},
             "split points must retain their rest normals and source influences")) return false;
   }
   if (!Check((*linear->morph_ranges)[0] == (*linear->morph_ranges)[3] &&
@@ -264,6 +374,8 @@ bool Skin(const char* path, const std::string& shaders) {
   const auto* pose = find(posed);
   const auto* morph = find(morphed);
   if (!Check(pose && morph && SameGeometry(*linear, *pose) && SameGeometry(*pose, *morph) &&
+                 linear->tangents == pose->tangents && pose->tangents == morph->tangents &&
+                 linear->tangents_revision == morph->tangents_revision &&
                  linear->pose_revision != pose->pose_revision &&
                  pose->morph_weights_revision != morph->morph_weights_revision,
           "pose and morph weight edits must preserve all split geometry")) return false;
@@ -332,7 +444,7 @@ int main(int argc, char** argv) {
   TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   const std::string shaders = argc == 3 ? argv[2] : "";
   if (!shaders.empty() && !Toon::ProbeVulkanBackend().available) return 77;
-  if (!Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
+  if (!Tangents(shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
   return 0;
 }

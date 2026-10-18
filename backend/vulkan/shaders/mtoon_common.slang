@@ -67,22 +67,28 @@ float2 AnimatedST(MToonParameters material, float2 st, float mask) {
   return float2(uv.x, 1.0 - uv.y);
 }
 
-// A tangent frame from the mesh's original UVs and deformed positions.
-// Texture transforms/animation move the sample, not the tangent frame.
-// Degenerate or absent UVs retain the authored (or derived) vertex normal.
-float3 MappedNormal(float3 normal, float3 position, float2 st,
+// Prefer the authored rest frame, deformed with the mesh. Otherwise retain
+// the derivative frame from original UVs and deformed positions until the
+// MikkTSpace generator is added. Sampling transforms never move the frame.
+// Absent UVs or an unusable frame retain the vertex normal.
+float3 MappedNormal(float3 normal, float4 authored_tangent, float3 position, float2 st,
     float3 texel, float scale, bool enabled) {
   const float3 dx = ddx(position);
   const float3 dy = ddy(position);
   const float2 ux = ddx(float2(st.x, 1.0 - st.y));
   const float2 uy = ddy(float2(st.x, 1.0 - st.y));
   const float determinant = ux.x * uy.y - ux.y * uy.x;
-  if (!enabled || abs(determinant) < 1e-10) {
+  if (!enabled) {
     return normal;
   }
-  float3 tangent = (dx * uy.y - dy * ux.y) / determinant;
+  const bool authored = abs(authored_tangent.w) > 0.5;
+  if (!authored && abs(determinant) < 1e-10) return normal;
+  float3 tangent = authored ? authored_tangent.xyz : (dx * uy.y - dy * ux.y) / determinant;
   tangent -= normal * dot(normal, tangent);
-  const float3 bitangent = (dy * ux.x - dx * uy.x) / determinant;
+  // Authored w describes +V in bottom-left st. MToon's normal texel +Y
+  // points down, so its bitangent has the opposite sign.
+  const float3 bitangent = authored ?
+      -authored_tangent.w * cross(normal, tangent) : (dy * ux.x - dx * uy.x) / determinant;
   if (dot(tangent, tangent) < 1e-12 || dot(bitangent, bitangent) < 1e-12) {
     return normal;
   }
@@ -121,14 +127,14 @@ float2 MatcapST(float3 normal, float3 view) {
 // own side: the back of a double-sided surface, or the hull an outline
 // draws with front faces culled.
 MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
-    float3 view_position, float2 st, bool front) {
+    float4 view_tangent, float3 view_position, float2 st, bool front) {
   float3 normal = normalize(view_normal);
   const float mask = SampleTexture(material.animation_textures.z,
       material.animation_textures.w, material.mask_uv, st).b;
   const float2 animated_st = AnimatedST(material, st, mask);
   const float3 normal_texel = SampleTexture(material.surface_textures.z,
       material.surface_textures.w, material.normal_uv, animated_st).rgb;
-  normal = MappedNormal(normal, view_position, st, normal_texel,
+  normal = MappedNormal(normal, view_tangent, view_position, st, normal_texel,
       material.surface.x, TextureEntry(material.surface_textures.z) != 0);
   if (!front) {
     normal = -normal;

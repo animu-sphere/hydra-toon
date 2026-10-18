@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [72](72-2026-10-18-authored-tangents.md) | Authored float4 tangent frames: indexed seams and all supported interpolations, isolated edits/removal, resident skin/morph data, and MToon Vulkan shading against CPU-normal references at 1x/4x |
 | [71](71-2026-10-18-material-fallback.md) | Explicit unlit magenta for unreadable bound materials; mixed supported/unsupported/unbound subsets, graph repair, texture release/reacquisition and retained static resources, with Vulkan colour/depth checks at 1x/4x |
 | [70](70-2026-10-18-mesh-corner-primvars.md) | Generic USD corner primvars: indexed UV seams, uniform/face-varying normals, smooth normals before splitting, subsets, holes, left-handed winding and retained skin/morph data; explicit-vertex Vulkan comparisons at 1x/4x |
 | [69](69-2026-10-18-preview-surface-textures.md) | PreviewSurface texture inputs: real USD networks, channel selection, colour space, UV transforms and missing-image fallback; packed PBR, textured Mask/Blend and resource persistence on Vulkan at 1x/4x |

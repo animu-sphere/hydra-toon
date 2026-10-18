@@ -385,6 +385,12 @@ void State() {
   structural.meshes[0].morph_revision++;
   reject(changed.View(3), structural, 1);
   structural = base;
+  structural.meshes[0].tangents_revision++;
+  reject(changed.View(3), structural, 1);
+  structural = base;
+  structural.meshes[0].tangents = std::make_shared<const std::vector<Toon::Float4>>();
+  reject(changed.View(3), structural, 1);
+  structural = base;
   structural.meshes[0].points = std::make_shared<const std::vector<Toon::Float3>>(*base.meshes[0].points);
   reject(changed.View(3), structural, 1);
   structural = base;

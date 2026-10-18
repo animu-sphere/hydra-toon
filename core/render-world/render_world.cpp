@@ -103,6 +103,8 @@ MeshId RenderWorld::CreateMesh() {
   mesh.topology_revision = Stamp();
   mesh.uvs = std::make_shared<const std::vector<Float2>>();
   mesh.uvs_revision = Stamp();
+  mesh.tangents = std::make_shared<const std::vector<Float4>>();
+  mesh.tangents_revision = Stamp();
   mesh.edge_scales = std::make_shared<const std::vector<float>>();
   mesh.edge_scales_revision = Stamp();
   mesh.sub_texture_uvs = std::make_shared<const std::vector<Float2>>();
@@ -160,6 +162,20 @@ void RenderWorld::SetMeshUVs(MeshId mesh, std::vector<Float2> uvs) {
   record->snapshot.uvs =
       std::make_shared<const std::vector<Float2>>(std::move(uvs));
   record->snapshot.uvs_revision = Stamp();
+  dirty_ = true;
+}
+
+void RenderWorld::SetMeshTangents(MeshId mesh, std::vector<Float4> tangents) {
+  if (!std::all_of(tangents.begin(), tangents.end(), [](const Float4& t) {
+        const float length2 = t.x * t.x + t.y * t.y + t.z * t.z;
+        return std::isfinite(t.x) && std::isfinite(t.y) && std::isfinite(t.z) &&
+            std::isfinite(length2) && length2 > 1e-12F && (t.w == -1.0F || t.w == 1.0F);
+      })) tangents.clear();
+  MeshRecord* record = Find(mesh);
+  if (record == nullptr || *record->snapshot.tangents == tangents) return;
+  record->snapshot.tangents =
+      std::make_shared<const std::vector<Float4>>(std::move(tangents));
+  record->snapshot.tangents_revision = Stamp();
   dirty_ = true;
 }
 
