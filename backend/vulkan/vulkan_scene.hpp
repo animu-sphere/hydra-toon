@@ -184,9 +184,10 @@ struct PreviewParameters {
   float emissive[4];
   // metallic, roughness, Mask cutoff (negative for Opaque/Blend), unused.
   float surface[4];
-  PreviewTextureParameters inputs[5];
+  float normal[4];
+  PreviewTextureParameters inputs[6];
 };
-static_assert(sizeof(PreviewParameters) == 528);
+static_assert(sizeof(PreviewParameters) == 640);
 
 // An MMD slot's sphere mode, as shaders/mmd_common.slang reads it.
 constexpr std::uint32_t kSphereNone = 0U;

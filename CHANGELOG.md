@@ -10,13 +10,19 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- PreviewSurface normal constants and RGB normal maps through the shared
+  tangent frame, including explicit USD texture scale/bias, transformed UVs
+  and missing-image fallback. Deformed authored frames, mirrored/rotated
+  derivative frames and Opaque/Mask/Blend have CPU-normal comparisons at
+  1x/4x MSAA; MToon keeps its own normal decoding and handedness
+  ([renderer report 73](docs/reports/renderer/73-2026-10-18-preview-surface-normals.md)).
+
 - Authored tangent frames from Hydra float4 `primvars:tangents`, preserving
   indexed seams and handedness into MToon's surface, transparent and outline
   pipelines. Independent tangent revisions retain geometry through motion;
   skin/model reflections and morph normal offsets have 1x/4x Vulkan checks
-  against independently evaluated CPU normals. Generated MikkTSpace frames,
-  PreviewSurface normal maps and external reference comparisons remain
-  separate work
+  against independently evaluated CPU normals. Generated MikkTSpace frames
+  and external reference comparisons remain separate work
   ([renderer report 72](docs/reports/renderer/72-2026-10-18-authored-tangents.md)).
 
 - Explicit unsupported-material fallback: unreadable bound Hydra materials

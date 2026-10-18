@@ -13,6 +13,7 @@
 
 #include <toon/vulkan_backend.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -58,7 +59,7 @@ bool SameGeometry(const Toon::MeshSnapshot& a, const Toon::MeshSnapshot& b) {
 }
 
 bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
-    const std::string& shaders) {
+    const std::string& shaders, int tolerance = 0) {
   for (const unsigned samples : {1U, 4U}) {
     Toon::FrameStatus status;
     std::string error;
@@ -72,7 +73,10 @@ bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
     draws.lighting.key_direction = reference.lighting.key_direction = {0.5F, 0.2F, 1.0F};
     if (!Check(renderer->Render(draws, 128, 128, color, depth, error) &&
                    oracle->Render(reference, 128, 128, reference_color, reference_depth, error), error.c_str()) ||
-        !Check(color.payload == reference_color.payload && depth.payload == reference_depth.payload,
+        !Check(color.payload.size() == reference_color.payload.size() &&
+                   std::equal(color.payload.begin(), color.payload.end(), reference_color.payload.begin(),
+                       [tolerance](auto a, auto b) { return std::abs(int(a) - int(b)) <= tolerance; }) &&
+                   depth.payload == reference_depth.payload,
             "split geometry differs from the independent explicit-vertex GPU oracle")) return false;
     const auto before = renderer->statistics();
     if (!Check(renderer->Render(draws, 128, 128, color, depth, error), error.c_str())) return false;
@@ -85,6 +89,70 @@ bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
                    after.validation_message_count == 0,
             "a steady split mesh must reuse geometry and pipelines without validation messages")) return false;
   }
+  return true;
+}
+
+bool PreviewNormals(const std::string& shaders) {
+  if (shaders.empty()) return true;
+  const auto stage = UsdStage::CreateInMemory();
+  if (!stage->GetRootLayer()->ImportFromString(R"USD(#usda 1.0
+def Material "Normal" {
+ token outputs:surface.connect = </Normal/Pbr.outputs:surface>
+ def Shader "Pbr" {
+  uniform token info:id = "UsdPreviewSurface"
+  color3f inputs:diffuseColor = (0.7,0.4,0.2)
+  normal3f inputs:normal.connect = </Normal/Map.outputs:rgb>
+  token outputs:surface
+ }
+ def Shader "Map" {
+  uniform token info:id = "UsdUVTexture"
+  token inputs:sourceColorSpace = "raw"
+  float4 inputs:fallback = (0.65,0.8,0.9,1)
+  float4 inputs:scale.timeSamples = { 0: (2,2,2,1), 1: (1,1.5,2,1) }
+  float4 inputs:bias = (-1,-1,-1,0)
+  float2 inputs:st.connect = </Normal/Reader.outputs:result>
+  float3 outputs:rgb
+ }
+ def Shader "Reader" {
+  uniform token info:id = "UsdPrimvarReader_float2"
+  string inputs:varname = "st"
+  float2 outputs:result
+ }
+}
+def Mesh "Body" (prepend apiSchemas = ["MaterialBindingAPI"]) {
+ uniform token subdivisionScheme = "none"
+ rel material:binding = </Normal>
+ point3f[] points = [(-0.6,-0.6,0), (0.6,-0.6,0), (0.6,0.6,0), (-0.6,0.6,0)]
+ int[] faceVertexCounts = [3,3]
+ int[] faceVertexIndices = [0,1,2,0,2,3]
+ texCoord2f[] primvars:st = [(0,0), (1,0), (1,1), (0,1)] (interpolation = "vertex")
+ float4[] primvars:tangents = [(0,1,0,1), (1,0,0,-1)] (interpolation = "faceVarying")
+ int[] primvars:tangents:indices = [0,0,0,1,1,1]
+}
+)USD")) return false;
+  Host host(stage);
+  Toon::RenderWorld reference;
+  const auto mesh = reference.CreateMesh();
+  reference.SetMeshPoints(mesh, {{-0.6F,-0.6F,0},{0.6F,-0.6F,0},{0.6F,0.6F,0},
+      {-0.6F,-0.6F,0},{0.6F,0.6F,0},{-0.6F,0.6F,0}});
+  reference.SetMeshTopology(mesh, {0,1,2,3,4,5});
+  Toon::ToonMaterial material;
+  material.preview.enabled = true;
+  material.base_color = {0.7F,0.4F,0.2F};
+  const auto mat = reference.CreateMaterial();
+  reference.SetMaterial(mat, material);
+  reference.SetMeshMaterial(mesh, mat);
+  for (int time = 0; time < 2; ++time) {
+    const auto actual = host.Sync(time);
+    const float x = time == 0 ? 0.3F : -0.35F;
+    const float y = time == 0 ? 0.6F : 0.2F;
+    const float length = std::sqrt(x*x + y*y + 0.8F*0.8F);
+    const Toon::Float3 a{-y/length, x/length, 0.8F/length};
+    const Toon::Float3 b{x/length, -y/length, 0.8F/length};
+    reference.SetMeshNormals(mesh, {a,a,a,b,b,b});
+    if (!Gpu(actual, reference.Commit(), shaders, 2)) return false;
+  }
+  std::cout << "USD PreviewSurface normal graph, signed scale/bias and tangent seams passed\n";
   return true;
 }
 
@@ -444,7 +512,7 @@ int main(int argc, char** argv) {
   TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   const std::string shaders = argc == 3 ? argv[2] : "";
   if (!shaders.empty() && !Toon::ProbeVulkanBackend().available) return 77;
-  if (!Tangents(shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
+  if (!PreviewNormals(shaders) || !Tangents(shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
   return 0;
 }

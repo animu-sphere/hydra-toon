@@ -564,6 +564,7 @@ def Material "Preview" {
         color3f inputs:diffuseColor.timeSamples = { 0: (0.8, 0.2, 0.1), 1: (0.1, 0.2, 0.8) }
         float inputs:metallic = 0.7
         float inputs:roughness = 0.3
+        normal3f inputs:normal.timeSamples = { 0: (0.2, -0.3, 0.8), 1: (-0.4, 0.1, 0.6) }
         color3f inputs:emissiveColor = (0, 2, 0)
         float inputs:opacity = 0.4
         float inputs:opacityThreshold.timeSamples = { 0: 0, 1: 0.5 }
@@ -618,6 +619,7 @@ def Material "Specular" {
     const auto& value = material->GetToonMaterial();
     if (!Check(value.preview.enabled && value.preview.metallic == 0.7F &&
                    value.preview.roughness == 0.3F && value.emissive == Toon::Float3{0, 2, 0} &&
+                   value.preview.normal == (time == 0 ? Toon::Float3{0.2F, -0.3F, 0.8F} : Toon::Float3{-0.4F, 0.1F, 0.6F}) &&
                    value.alpha == 0.4F &&
                    value.base_color == (time == 0 ? Toon::Float3{0.8F, 0.2F, 0.1F} : Toon::Float3{0.1F, 0.2F, 0.8F}) &&
                    value.alpha_mode == (time == 0 ? Toon::ToonAlphaMode::Blend : Toon::ToonAlphaMode::Mask),
@@ -626,6 +628,7 @@ def Material "Specular" {
     if (!Check(defaults->GetToonMaterial().preview.enabled &&
                    defaults->GetToonMaterial().base_color == Toon::Float3{0.18F, 0.18F, 0.18F} &&
                    defaults->GetToonMaterial().preview.roughness == 0.5F &&
+                   defaults->GetToonMaterial().preview.normal == Toon::Float3{0, 0, 1} &&
                    defaults->GetToonMaterial().alpha_mode == Toon::ToonAlphaMode::Opaque &&
                    unsupported->GetToonMaterial() == Fallback() &&
                    specular->GetToonMaterial() == Fallback(),
@@ -791,6 +794,8 @@ def Material "Textured" {
         float inputs:metallic.connect = </Textured/Data.outputs:b>
         float inputs:roughness.connect = </Textured/Data.outputs:g>
         float inputs:opacity.connect = </Textured/Data.outputs:a>
+        normal3f inputs:normal = (0.2, 0.3, 0.9)
+        normal3f inputs:normal.connect = </Textured/Normal.outputs:rgb>
         float inputs:opacityThreshold.timeSamples = { 0: 0, 1: 0.5 }
         token outputs:surface
     }
@@ -814,6 +819,16 @@ def Material "Textured" {
         float outputs:g
         float outputs:b
         float outputs:a
+    }
+    def Shader "Normal" {
+        uniform token info:id = "UsdUVTexture"
+        asset inputs:file = @IMAGE@
+        token inputs:sourceColorSpace = "raw"
+        float4 inputs:scale.timeSamples = { 0: (2, 2, 2, 1), 1: (1.5, 2, 2, 1) }
+        float4 inputs:bias = (-1, -1, -1, 0)
+        float4 inputs:fallback = (0.5, 0.5, 1, 1)
+        float2 inputs:st.connect = </Textured/Transform.outputs:result>
+        float3 outputs:rgb
     }
     def Shader "Reader" {
         uniform token info:id = "UsdPrimvarReader_float2"
@@ -854,6 +869,12 @@ def Material "Textured" {
                    p.metallic_texture.texture && p.metallic_texture.texture != value.base_texture.texture &&
                    p.metallic_texture.texture == p.roughness_texture.texture &&
                    p.metallic_texture.texture == p.opacity_texture.texture &&
+                   value.normal_texture.texture == p.metallic_texture.texture &&
+                   p.normal == Toon::Float3{0, 0, 1} &&
+                   p.inputs[5].scale == (time == 0 ? Toon::Float4{2, 2, 2, 1} : Toon::Float4{1.5F, 2, 2, 1}) &&
+                   p.inputs[5].bias == Toon::Float4{-1, -1, -1, 0} &&
+                   p.inputs[5].fallback == Toon::Float4{0.5F, 0.5F, 1, 1} &&
+                   value.normal_texture.offset == value.base_texture.offset &&
                    p.inputs[2].channel == 2 && p.inputs[3].channel == 1 && p.inputs[4].channel == 3 &&
                    std::all_of(p.inputs.begin(), p.inputs.end(), [](const auto& input) { return input.connected; }) &&
                    p.inputs[0].scale == Toon::Float4{2, 3, 4, 1} &&
@@ -921,13 +942,30 @@ def Material "Textured" {
   const auto& missing = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
   if (!Check(missing.preview.inputs[0].connected && missing.base_texture.texture == 0,
           "unresolved PreviewSurface image must keep the texture fallback")) return false;
+  stage->GetAttributeAtPath(SdfPath("/Textured/Normal.inputs:file")).Set(SdfAssetPath("missing-preview-normal.png"));
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  const auto& missing_normal = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
+  if (!Check(missing_normal.preview.inputs[5].connected && missing_normal.normal_texture.texture == 0 &&
+                 missing_normal.preview.inputs[5].fallback == Toon::Float4{0.5F, 0.5F, 1, 1},
+          "missing normal image must retain signed scale/bias fallback")) return false;
   stage->GetAttributeAtPath(SdfPath("/Textured/Reader.inputs:varname")).Set(std::string("st1"));
   scene.stageSceneIndex->ApplyPendingUpdates();
   index->SyncAll(&tasks, &context);
   const auto& unsupported = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
   if (!Check(!unsupported.preview.inputs[0].connected && !unsupported.preview.inputs[4].connected &&
-                 unsupported.base_texture.texture == 0 && unsupported.preview.opacity_texture.texture == 0,
+                 unsupported.base_texture.texture == 0 && unsupported.preview.opacity_texture.texture == 0 &&
+                 !unsupported.preview.inputs[5].connected && unsupported.normal_texture.texture == 0 &&
+                 unsupported.preview.normal == Toon::Float3{0, 0, 1},
           "unsupported UV set must not silently sample st")) return false;
+  // UsdImaging publishes the surface constant once the connection is removed.
+  stage->GetAttributeAtPath(SdfPath("/Textured/Pbr.inputs:normal")).ClearConnections();
+  scene.stageSceneIndex->ApplyPendingUpdates();
+  index->SyncAll(&tasks, &context);
+  const auto& disconnected = FindMaterial(*index, SdfPath("/Textured"))->GetToonMaterial();
+  if (!Check(!disconnected.preview.inputs[5].connected &&
+                 disconnected.preview.normal == Toon::Float3{0.2F, 0.3F, 0.9F},
+          "disconnecting a normal graph must restore its surface constant")) return false;
   index.reset();
   std::error_code ignored;
   std::filesystem::remove(image_path, ignored);

@@ -564,6 +564,7 @@ void ReadPreview(const HdContainerDataSourceHandle& prim,
   parameter(_tokens->emissiveColor, result.emissive);
   parameter(_tokens->metallic, result.preview.metallic);
   parameter(_tokens->roughness, result.preview.roughness);
+  parameter(_tokens->normal, result.preview.normal);
   parameter(_tokens->opacity, result.alpha);
   float threshold = 0.0F;
   parameter(_tokens->opacityThreshold, threshold);
@@ -580,11 +581,11 @@ void ReadPreview(const HdContainerDataSourceHandle& prim,
   result.alpha_cutoff = threshold;
   const auto nodes = Group(network, _tokens->nodes);
   const TfToken names[] = {_tokens->diffuseColor, _tokens->emissiveColor,
-      _tokens->metallic, _tokens->roughness, _tokens->opacity};
-  const std::size_t roles[] = {0, 5, 11, 12, 13};
+      _tokens->metallic, _tokens->roughness, _tokens->opacity, _tokens->normal};
+  const std::size_t roles[] = {0, 5, 11, 12, 13, 6};
   auto refs = HdToonTextureRefs(result);
-  for (std::size_t i = 0; i < 5; ++i) {
-    ReadPreviewTexture(nodes, node, names[i], i < 2, source.textures[roles[i]],
+  for (std::size_t i = 0; i < result.preview.inputs.size(); ++i) {
+    ReadPreviewTexture(nodes, node, names[i], i < 2 || i == 5, source.textures[roles[i]],
         *refs[roles[i]], result.preview.inputs[i]);
   }
   // A connected opacity can be translucent at any texel even if the

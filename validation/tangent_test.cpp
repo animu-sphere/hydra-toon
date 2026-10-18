@@ -72,7 +72,7 @@ void State() {
   Require(*first.meshes[0].tangents == tangents, "old snapshot mutated");
 }
 
-bool Gpu(const Toon::SceneShaders& shaders, unsigned samples) {
+bool Gpu(const Toon::SceneShaders& shaders, unsigned samples, bool preview = false) {
   Toon::FrameStatus status;
   std::string error;
   auto renderer = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
@@ -106,7 +106,10 @@ bool Gpu(const Toon::SceneShaders& shaders, unsigned samples) {
   const auto tex = world.CreateTexture();
   world.SetTexture(tex, texture);
   Toon::ToonMaterial material;
-  material.model = Toon::ToonShadingModel::MToon;
+  material.model = preview ? Toon::ToonShadingModel::PreviewSurface : Toon::ToonShadingModel::MToon;
+  material.preview.enabled = preview;
+  material.preview.inputs[5].scale = {1.25F, 1.75F, 2, 1};
+  material.preview.inputs[5].bias = {-0.4F, -0.6F, -1, 0};
   material.base_color = {0.8F, 0.6F, 0.4F};
   material.mtoon.shade_color = {0.05F, 0.1F, 0.15F};
   material.mtoon.shading_toony = 0;
@@ -142,8 +145,8 @@ bool Gpu(const Toon::SceneShaders& shaders, unsigned samples) {
       auto t = Direction(model, Direction(blended, {0, 1, 0}));
       t = Unit(Add(t, Scale(n, -Dot(n, t))));
       const float sign = handedness * Sign(blended) * Sign(model);
-      auto mapped = Unit(Add(Add(Scale(t, (191 / 255.0F * 2 - 1) * material.normal_scale),
-                                 Scale(Cross(n, t), -sign * (230 / 255.0F * 2 - 1) * material.normal_scale)),
+      auto mapped = Unit(Add(Add(Scale(t, preview ? 191 / 255.0F * 1.25F - 0.4F : (191 / 255.0F * 2 - 1) * material.normal_scale),
+                                 Scale(Cross(n, t), sign * (preview ? 230 / 255.0F * 1.75F - 0.6F : -(230 / 255.0F * 2 - 1) * material.normal_scale))),
           Scale(n, 204 / 255.0F * 2 - 1)));
       auto points = rest;
       for (auto& point : points)
@@ -153,7 +156,9 @@ bool Gpu(const Toon::SceneShaders& shaders, unsigned samples) {
       oracle.SetMeshNormals(ref, std::vector<Toon::Float3>(3, mapped));
       material.double_sided = true;
       material.normal_texture.texture = tex;
+      material.preview.inputs[5].connected = preview;
       world.SetMaterial(mat, material);
+      material.preview.inputs[5].connected = false;
       material.normal_texture.texture = 0;
       oracle.SetMaterial(refmat, material);
       auto actual = Toon::ExtractDrawList(world.Commit());
@@ -190,8 +195,10 @@ bool Gpu(const Toon::SceneShaders& shaders, unsigned samples) {
         Require(reference->Render(expected, 96, 96, target, target_depth, error), error.c_str());
         for (int missing = 0; missing < 3; ++missing) {
           world.SetMeshTangents(mesh, missing == 0 ? std::vector<Toon::Float4>{} : std::vector<Toon::Float4>(missing == 1 ? 1 : 3, {0, 1, 0, 1}));
-          if (missing == 2)
+          if (missing == 2) {
             world.SetMeshUVs(mesh, {});
+            if (preview) world.SetMeshTangents(mesh, {});
+          }
           actual = Toon::ExtractDrawList(world.Commit());
           actual.lighting = expected.lighting;
           Require(renderer->Render(actual, 96, 96, color, depth, error), error.c_str());
@@ -201,6 +208,10 @@ bool Gpu(const Toon::SceneShaders& shaders, unsigned samples) {
         }
       }
     }
+  }
+  if (preview) {
+    std::cout << "PreviewSurface authored tangents: " << samples << "x, 24 CPU-reference comparisons passed\n";
+    return true;
   }
   // Draw only a back-facing hull. Normal debug gives an analytic colour
   // oracle without changing the rest normal that controls hull geometry.
@@ -247,7 +258,8 @@ int main(int argc, char** argv) {
     State();
     if (argc == 1)
       return 0;
-    return Gpu(Toon::SceneShadersIn(argv[1]), 1) && Gpu(Toon::SceneShadersIn(argv[1]), 4) ? 0 : 77;
+    const auto shaders = Toon::SceneShadersIn(argv[1]);
+    return Gpu(shaders, 1) && Gpu(shaders, 4) && Gpu(shaders, 1, true) && Gpu(shaders, 4, true) ? 0 : 77;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;

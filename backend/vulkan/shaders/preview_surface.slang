@@ -15,7 +15,8 @@ struct PreviewParameters {
   float4 base_color;
   float4 emissive;
   float4 surface;
-  PreviewTextureParameters inputs[5];
+  float4 normal;
+  PreviewTextureParameters inputs[6];
 };
 [[vk::binding(7, 0)]] StructuredBuffer<PreviewParameters> materials;
 
@@ -38,21 +39,28 @@ float3 PreviewColor(PreviewTextureParameters input, float2 st, float3 value) {
 }
 
 [shader("vertex")]
-VertexStageOutput vertex_main(VertexInput input) {
-  return SurfaceVertex(input);
+TangentVertexStageOutput vertex_main(TangentVertexInput input) {
+  return TangentSurfaceVertex(input);
 }
 
 [shader("fragment")]
 float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    float3 view_position : TEXCOORD1, bool front : SV_IsFrontFace) : SV_Target {
+    float3 view_position : TEXCOORD1, float4 view_tangent : TEXCOORD2,
+    bool front : SV_IsFrontFace) : SV_Target {
   const PreviewParameters material = materials[draw.material_slot];
   const float opacity = saturate(PreviewScalar(material.inputs[4], st, material.base_color.a));
-  if (material.surface.z >= 0.0 && opacity < material.surface.z) discard;
   const float alpha = (draw.flags & kDrawBlend) != 0 ? opacity : 1.0;
   const float3 base = max(PreviewColor(material.inputs[0], st, material.base_color.rgb), 0.0);
   const float metallic = saturate(PreviewScalar(material.inputs[2], st, material.surface.x));
   const float roughness = clamp(PreviewScalar(material.inputs[3], st, material.surface.y), 0.04, 1.0);
-  const float3 n = normalize(view_normal) * (front ? 1.0 : -1.0);
+  // UsdPreviewSurface consumes an already signed tangent-space vector.
+  // Texture scale/bias supplies any [0,1] to [-1,1] decoding; +Y is +st.V.
+  const float3 map = PreviewColor(material.inputs[5], st, material.normal.xyz);
+  const float3 n = TangentMappedNormal(normalize(view_normal), view_tangent,
+      view_position, st, map, 1.0, true) * (front ? 1.0 : -1.0);
+  const float3 emission = max(PreviewColor(material.inputs[1], st, material.emissive.rgb), 0.0);
+  // All implicit samples and frame derivatives precede divergent discard.
+  if (material.surface.z >= 0.0 && opacity < material.surface.z) discard;
   const float3 v = ViewDirection(view_position);
   const float nv = max(dot(n, v), 1e-5);
   const float3 f0 = lerp(float3(0.04), base, metallic);
@@ -77,5 +85,5 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     const float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base / pi;
     color += (diffuse + specular) * light * nl;
   }
-  return float4(color + max(PreviewColor(material.inputs[1], st, material.emissive.rgb), 0.0), alpha);
+  return float4(color + emission, alpha);
 }

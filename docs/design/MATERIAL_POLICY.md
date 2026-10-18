@@ -356,6 +356,18 @@ tangents against a glTF reference, and mirrored seams and deformed assets
 under motion. This is a renderer geometry/shading responsibility, not a new
 format schema or avatar evaluator.
 
+PreviewSurface's `normal` consumes a signed tangent-space vector, with +Y
+along bottom-left `st`'s +V. Consume texture scale/bias before mapping;
+do not implicitly decode a [0,1] image a second time. An 8-bit normal texture
+normally authors scale `(2,2,2,1)`, bias `(-1,-1,-1,0)` and `raw` colour space
+([OpenUSD PreviewSurface specification](https://openusd.org/release/spec_usdpreviewsurface.html)).
+MToon's normal texture instead decodes [0,1] itself, scales XY by its normal
+scale and uses the opposite bitangent for top-left sampling. Both models
+use the same frame construction, orthogonalization and deformation. Texture
+coordinate transforms affect sampling without rotating that frame. A zero
+mapped vector or unusable frame retains the vertex normal; an authored frame
+can map a PreviewSurface constant/fallback vector without mesh UVs.
+
 ## 14. Shadows across material families
 
 A shadow cast by one material family onto another — PreviewSurface onto

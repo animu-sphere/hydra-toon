@@ -691,6 +691,9 @@ int main() {
   auto preview_values = preview;
   preview_values.preview.metallic = 0.8F;
   preview_values.preview.roughness = 0.2F;
+  preview_values.preview.normal = {0.2F, -0.3F, 0.8F};
+  preview_values.preview.inputs[5].connected = true;
+  preview_values.preview.inputs[5].scale = {2, 2, 2, 1};
   preview_values.preview.inputs[0].scale.x = 2;
   preview_values.preview.inputs[1].bias.y = 0.1F;
   if (!Check(preview_values != preview && !Toon::IsStructuralChange(preview, preview_values),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// What every surface pipeline shares, MToon's and MMD's (material policy
+// What every surface pipeline shares, MToon's, MMD's and PreviewSurface's (material policy
 // §7): the draw constants, the texture table and samplers, scene lighting,
 // and the surface's vertex stage. Each model's own module declares its
 // parameter buffer. Included, not compiled on its own.
@@ -188,6 +188,37 @@ uint TextureEntry(uint entry) {
 float4 SampleTexture(uint entry, uint sampler, float4 uv_rows[2], float2 st) {
   return textures[TextureEntry(entry)].Sample(samplers[sampler],
       TransformUV(uv_rows, st));
+}
+
+// Prefer the authored rest frame, deformed with the mesh. Otherwise retain
+// the derivative frame from original UVs and deformed positions until the
+// MikkTSpace generator is added. Sampling transforms never move the frame.
+// An unusable frame retains the vertex normal. An authored frame can also
+// map a constant/fallback vector without mesh UVs, as PreviewSurface allows.
+float3 TangentMappedNormal(float3 normal, float4 authored_tangent, float3 position, float2 st,
+    float3 map, float v_sign, bool enabled) {
+  const float3 dx = ddx(position);
+  const float3 dy = ddy(position);
+  const float2 ux = ddx(float2(st.x, st.y * v_sign));
+  const float2 uy = ddy(float2(st.x, st.y * v_sign));
+  const float determinant = ux.x * uy.y - ux.y * uy.x;
+  if (!enabled) {
+    return normal;
+  }
+  const bool authored = abs(authored_tangent.w) > 0.5;
+  if (!authored && abs(determinant) < 1e-10) return normal;
+  float3 tangent = authored ? authored_tangent.xyz : (dx * uy.y - dy * ux.y) / determinant;
+  tangent -= normal * dot(normal, tangent);
+  // Authored w describes bottom-left st. Each model selects its +Y axis.
+  const float3 bitangent = authored ?
+      v_sign * authored_tangent.w * cross(normal, tangent) : (dy * ux.x - dx * uy.x) / determinant;
+  if (dot(tangent, tangent) < 1e-12 || dot(bitangent, bitangent) < 1e-12) {
+    return normal;
+  }
+  tangent = normalize(tangent);
+  const float handedness = dot(cross(normal, tangent), bitangent) < 0.0 ? -1.0 : 1.0;
+  const float3 mapped = tangent * map.x + cross(normal, tangent) * handedness * map.y + normal * map.z;
+  return dot(mapped, mapped) > 1e-12 ? normalize(mapped) : normal;
 }
 
 // Direct light `index` as a surface at `view_position` receives it: its
