@@ -319,6 +319,14 @@ selection priority (§3); extending generic coverage must preserve their
 reference fidelity. This renderer does not expand into a general lookdev
 renderer or an arbitrary material-graph compiler.
 
+For the metallic workflow, interpolate both Fresnel endpoints: at metalness
+zero, F0 is 0.04 (the fallback IOR of 1.5) and F90 is white;
+at metalness one, both endpoints are the albedo. Intermediate values
+interpolate between these endpoints, as the
+[PreviewSurface specification](https://openusd.org/release/spec_usdpreviewsurface.html)
+defines. Do not substitute another renderer's intermediate-metal formula
+when it differs from this contract.
+
 Consume base/diffuse colour, metallic, roughness, normal, emissive and opacity,
 their textures and basic texture transforms through the ordinary Hydra
 material network. Preserve Opaque, Mask and Blend behaviour, including mixed

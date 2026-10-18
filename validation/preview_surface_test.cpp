@@ -151,12 +151,13 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   Toon::ColorProduct color;
   Toon::DepthProduct depth;
   float direct = 0;
+  Toon::Float3 key_direction{0, 0, 1};
   const auto render = [&] {
     world.SetMaterial(id, material);
     auto draws = Toon::ExtractDrawList(world.Commit());
     draws.lighting.direct_scale = direct;
     draws.lighting.ambient_scale = 0;
-    draws.lighting.key_direction = {0, 0, 1};
+    draws.lighting.key_direction = key_direction;
     Require(renderer->Render(draws, 64, 64, color, depth, error), error.c_str());
     return Center(color);
   };
@@ -188,6 +189,24 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
               changed.point_uploads == first.point_uploads && changed.topology_uploads == first.topology_uploads &&
               changed.pipelines_created == first.pipelines_created,
       "value edit rebuilt static resources");
+
+  // At grazing incidence a pure metal keeps its albedo at both Fresnel
+  // endpoints. Set H=N, N.V=N.L=0.1 analytically: a white F90 would brighten
+  // and desaturate this copper-like colour even though F0 is correct.
+  constexpr float cosine = 0.1F;
+  const float sine = std::sqrt(1 - cosine * cosine);
+  world.SetMeshNormals(mesh, std::vector<Toon::Float3>(3, {sine, 0, cosine}));
+  key_direction = {2 * sine * cosine, 0, 2 * cosine * cosine - 1};
+  direct = 0.8F;
+  const auto grazing = render();
+  const float alpha2 = std::pow(material.preview.roughness, 4.0F);
+  const float smith = 2 * cosine / (cosine + std::sqrt(alpha2 + (1 - alpha2) * cosine * cosine));
+  const float response = direct * smith * smith / (4 * pi * alpha2 * cosine);
+  Near(grazing[0], 0.5F * response, "metal grazing F90 R");
+  Near(grazing[1], 0.25F * response, "metal grazing F90 G");
+  Near(grazing[2], 0.125F * response, "metal grazing F90 B");
+  world.SetMeshNormals(mesh, std::vector<Toon::Float3>(3, {0, 0, 1}));
+  key_direction = {0, 0, 1};
 
   direct = 0;
   material.emissive = {0.6F, 0.2F, 0.1F};

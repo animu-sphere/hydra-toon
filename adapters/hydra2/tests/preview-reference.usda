@@ -1,0 +1,50 @@
+#usda 1.0
+# SPDX-License-Identifier: Apache-2.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "World" {
+    # Separate corners retain a mirrored U seam. No authored tangent array.
+    def Mesh "Patch" (prepend apiSchemas = ["MaterialBindingAPI"]) {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [3, 3, 3, 3]
+        int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]
+        point3f[] points = [(-1,-1,0), (0,-1,0), (0,1,0), (-1,1,0),
+                            (0,-1,0), (1,-1,0), (1,1,0), (0,1,0)]
+        normal3f[] normals = [(0,0,1)] (interpolation = "constant")
+        texCoord2f[] primvars:st = [(0,0), (1,0), (1,1), (0,1),
+                                   (1,0), (0,0), (0,1), (1,1)] (
+            interpolation = "vertex"
+        )
+        rel material:binding = </Material>
+    }
+}
+def Material "Material" {
+    token outputs:surface.connect = </Material/Surface.outputs:surface>
+    def Shader "Surface" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:diffuseColor = (0.5,0.25,0.1)
+        float inputs:metallic = 0
+        float inputs:roughness = 0.6
+        token outputs:surface
+    }
+}
+def DistantLight "Key" {
+    color3f inputs:color = (1,1,1)
+    float inputs:intensity = 1
+    float inputs:angle = 0
+    bool inputs:normalize = true
+    float3 xformOp:rotateXYZ = (-25,35,0)
+    uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+}
+def Camera "Camera" {
+    float focalLength = 40
+    float horizontalAperture = 32
+    float verticalAperture = 32
+    float2 clippingRange = (0.1,100)
+    double3 xformOp:translate = (0,0,4)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+}

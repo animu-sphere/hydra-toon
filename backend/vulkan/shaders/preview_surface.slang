@@ -64,6 +64,7 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
   const float3 v = ViewDirection(view_position);
   const float nv = max(dot(n, v), 1e-5);
   const float3 f0 = lerp(float3(0.04), base, metallic);
+  const float3 f90 = lerp(float3(1.0), base, metallic);
   const float a2 = pow(roughness, 4.0);
   const float gv = 2.0 * nv / (nv + sqrt(a2 + (1.0 - a2) * nv * nv));
   const float pi = 3.14159265359;
@@ -80,7 +81,7 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     const float denominator = nh * nh * (a2 - 1.0) + 1.0;
     const float distribution = a2 / max(pi * denominator * denominator, 1e-8);
     const float gl = 2.0 * nl / (nl + sqrt(a2 + (1.0 - a2) * nl * nl));
-    const float3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+    const float3 fresnel = f0 + (f90 - f0) * pow(1.0 - vh, 5.0);
     const float3 specular = distribution * gv * gl * fresnel / max(4.0 * nv * nl, 1e-6);
     const float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base / pi;
     color += (diffuse + specular) * light * nl;

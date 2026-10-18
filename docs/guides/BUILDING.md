@@ -643,3 +643,22 @@ no USD authoring or Hydra sync. Model, alpha mode, sidedness and texture ids
 are display-only. PreviewSurface values remain read-only in the panel; readable networks
 draw through the basic PBR realization. Runtime expression names and source-owner mappings
 are not supplied by these renderer-id diagnostics.
+
+### PreviewSurface reference comparison
+
+With the lookdev runtime's `bin` and `lib` on `PATH`, `lib/python` on
+`PYTHONPATH` and the current `hdToon` resources registered in
+`PXR_PLUGINPATH_NAME`, run with the matching Python, Pillow and NumPy:
+
+```sh
+python scripts/evaluate_preview_surface.py --testusdview <lookdev>/bin/testusdview
+```
+
+The driver captures the same controlled USD fixture through Storm and
+hdToon, writes generated textures, PNGs, logs, hashes, `summary.json` and
+`comparison.png` under `build/preview-reference/` (or `--output`). It needs
+a desktop OpenGL context and Vulkan device. Its exit code checks matching
+cases, sensitivity to input changes and two bounded known differences;
+`reference_equivalent` remains false for the full set. The cases, measured
+errors and limitations are recorded in
+[renderer report 75](../reports/renderer/75-2026-10-18-preview-surface-reference.md).

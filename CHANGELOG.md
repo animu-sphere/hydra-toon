@@ -10,6 +10,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Controlled PreviewSurface comparisons through OpenUSD Storm and hdToon,
+  with a redistributable mirrored-UV fixture, generated colour/normal maps,
+  1x/4x captures, numerical summaries and sensitivity checks. Intermediate
+  metalness and transformed-normal reference differences are recorded
+  separately from matching cases
+  ([renderer report 75](docs/reports/renderer/75-2026-10-18-preview-surface-reference.md)).
+
 - MikkTSpace rest-tangent generation for USD meshes without authored
   tangents. Mirrored frame seams duplicate only conflicting vertices and
   preserve skin, morph and auxiliary data. UV/normal edits refresh frames;
@@ -87,6 +94,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
   defines the shared scene services and
   [material policy §14](docs/design/MATERIAL_POLICY.md#14-shadows-across-material-families)
   each model's shadow receive; the release gate states its evidence tiers.
+
+### Fixed
+
+- PreviewSurface metallic Fresnel keeps albedo at grazing incidence,
+  interpolating F90 from white to albedo with metalness; an analytic
+  1x/4x GPU regression rejects the previous white-metal endpoint
+  ([renderer report 75](docs/reports/renderer/75-2026-10-18-preview-surface-reference.md)).
 
 ## [0.4.0] - 2026-10-17
 
