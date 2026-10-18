@@ -240,6 +240,13 @@ coordinates occupy the UV rows' padding. The texture cache and fixed
 pipelines are shared with the existing models; no new target or material
 compiler is introduced.
 
+`scripts/evaluate_preview_surface.py` and its `testusdview` worker compare
+the committed `adapters/hydra2/tests/preview-reference.usda` through Storm
+and the installed or build-tree Hydra plugin. Generated images, logs and
+the measured comparison summary stay under the selected output directory.
+This uses the existing Hydra/validation layout and adds no target or
+dependency to renderer libraries.
+
 Unreadable Hydra materials normalize to unlit magenta in that same reader.
 For `ToonShadingModel::PreviewSurface`, `preview.enabled == false` means a
 bound material draws its common `base_color` unlit and opaque, without

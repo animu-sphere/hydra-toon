@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [75](75-2026-10-18-preview-surface-reference.md) | Controlled Storm/hdToon PBR and mirrored normal-map comparisons, explicit intermediate-metal/rotated-frame differences, and metallic grazing Fresnel correction with an analytic GPU regression |
 | [74](74-2026-10-18-generated-tangents.md) | MikkTSpace rest frames, minimal mirrored seam splits, edit routing and retained skin/morph data; MToon/PreviewSurface analytic CPU-normal comparisons at 1x/4x |
 | [73](73-2026-10-18-preview-surface-normals.md) | PreviewSurface signed normal constants/textures on shared authored and derivative frames; USD graph, seam, scale/bias, UV transforms, fallback and deformed CPU-normal comparisons at 1x/4x |
 | [72](72-2026-10-18-authored-tangents.md) | Authored float4 tangent frames: indexed seams and all supported interpolations, isolated edits/removal, resident skin/morph data, and MToon Vulkan shading against CPU-normal references at 1x/4x |
