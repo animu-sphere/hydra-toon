@@ -28,6 +28,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 // CPU-readable AOV storage is the portable Hydra presentation baseline. A
 // generated renderer may replace the copy with explicit Hgi/Vulkan interop,
 // but that is an optional project-owned capability rather than this seam.
+// Colour is linear-sRGB premultiplied RGBA8, bottom row first. A consumer
+// requiring straight alpha or display encoding converts at its own boundary.
 class HdToonRenderBuffer final : public HdRenderBuffer {
 public:
   explicit HdToonRenderBuffer(const SdfPath& id);

@@ -32,10 +32,13 @@ does not acquire responsibility for avatar evaluation or host orchestration.
 
 ## 2. Background and environment
 
-Support `opaque` and `transparent` modes. The conceptual settings are
-`toon:backgroundMode = opaque | transparent` and
-`toon:backgroundColor = float4`; these names describe the intended API, not
-available settings.
+Support `opaque` and `transparent` modes through
+`toon:backgroundMode = opaque | transparent` (string or token) and
+`toon:backgroundColor = float4`. Colour components must be finite and in
+[0,1], in linear sRGB; the fourth component is ignored when clearing.
+Defaults are `opaque` and `(0.05, 0.10, 0.15, 1)`. Invalid settings must
+retain the last accepted pair. Background settings own the scene clear,
+independently of host AOV clear hints.
 
 | Mode | Scene clear RGBA |
 | --- | --- |
@@ -100,7 +103,11 @@ Vulkan before reproducing them in WebGPU.
 Hydra's colour `HdRenderBuffer` must preserve RGBA through AOV representation
 and readback: transparent background alpha zero, foreground alpha from
 coverage and material opacity. If its representation differs from the
-internal product, convert at the adapter boundary.
+internal product, convert at the adapter boundary. The hdToon colour AOV
+uses linear sRGB, linear transfer and premultiplied RGBA8 UNORM, with the
+bottom row first. It preserves the internal product's channels without
+unpremultiplication or display encoding. A host requiring straight alpha
+or encoded colour must explicitly convert at its consuming boundary.
 
 The viewport composites the product over a selectable solid colour or a
 checkerboard transparent preview before presenting. Debug grids and future

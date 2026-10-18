@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Hydra opaque/transparent background settings and premultiplied linear
+  RGBA colour AOV preservation, with 1x/4x render-pass/readback checks for
+  Blend, silhouettes, settings rejection and source-over recomposition
+  ([renderer report 79](docs/reports/renderer/79-2026-10-18-hydra-rgba.md)).
+
 - Offscreen opaque/transparent background settings, explicit linear-transfer
   and premultiplied-alpha readback metadata, and MToon Mask sample-alpha
   correction. Controlled 1x/4x RGBA checks cover three material families,

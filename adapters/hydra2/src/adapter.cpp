@@ -242,10 +242,42 @@ TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
     ((msaaSamples, "toon:msaaSamples"))
     ((metersPerUnit, "toon:metersPerUnit"))
     ((timeSeconds, "toon:timeSeconds"))
+    ((backgroundMode, "toon:backgroundMode"))
+    ((backgroundColor, "toon:backgroundColor"))
     ((mmdSelfShadow, "toon:mmdSelfShadow"))
     ((mmdMorphTints, "toon:mmdMorphTints")));
 
 constexpr int kDefaultSamples = static_cast<int>(Toon::RenderOptions{}.samples);
+
+// Treat the two settings atomically. An invalid host value retains the last
+// accepted background, including across a renderer recreation for MSAA.
+std::optional<Toon::BackgroundSettings> RequestedBackground(
+    const HdRenderDelegate& delegate) {
+  const VtValue mode = delegate.GetRenderSetting(SettingTokens->backgroundMode);
+  const VtValue color = delegate.GetRenderSetting(SettingTokens->backgroundColor);
+  std::string name;
+  if (mode.IsHolding<TfToken>()) name = mode.UncheckedGet<TfToken>().GetString();
+  else if (mode.IsHolding<std::string>()) name = mode.UncheckedGet<std::string>();
+  if ((name != "opaque" && name != "transparent") ||
+      !color.IsHolding<GfVec4f>()) {
+    TF_WARN("Toon background requires opaque/transparent and a float4 colour; "
+            "retaining the previous background");
+    return std::nullopt;
+  }
+  const auto& rgba = color.UncheckedGet<GfVec4f>();
+  for (int component = 0; component < 4; ++component) {
+    if (!std::isfinite(rgba[component]) || rgba[component] < 0.0F ||
+        rgba[component] > 1.0F) {
+      TF_WARN("Toon background colour must be finite and in [0,1]; "
+              "retaining the previous background");
+      return std::nullopt;
+    }
+  }
+  return Toon::BackgroundSettings{
+      name == "opaque" ? Toon::BackgroundMode::Opaque
+                       : Toon::BackgroundMode::Transparent,
+      {rgba[0], rgba[1], rgba[2]}};
+}
 
 // The MSAA samples per pixel `toon:msaaSamples` asks for: any number a host
 // can set, at least 1.
@@ -588,7 +620,8 @@ public:
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
       std::uint32_t samples, float meters_per_unit, double time_seconds,
-      bool mmd_self_shadow, bool mmd_morph_tints) {
+      bool mmd_self_shadow, bool mmd_morph_tints,
+      const std::optional<Toon::BackgroundSettings>& background) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
         pass_state->GetAovBindings();
@@ -609,6 +642,14 @@ public:
       return;
     }
 
+    std::string error;
+    const auto requested_background = background.value_or(background_);
+    if (!renderer_->SetBackground(requested_background, error)) {
+      TF_RUNTIME_ERROR("Toon Hydra background failed: %s", error.c_str());
+      SetConvergedLocked(bindings, false);
+      return;
+    }
+    background_ = requested_background;
     world_.SetView({ToToon(pass_state->GetWorldToViewMatrix()),
         ToToon(pass_state->GetProjectionMatrix())});
     world_.SetMetersPerUnit(meters_per_unit);
@@ -617,7 +658,6 @@ public:
     Toon::ExtractDrawList(snapshot_, draws_);
     draws_.mmd_self_shadow = mmd_self_shadow;
     draws_.mmd_morph_tints = mmd_morph_tints;
-    std::string error;
     if (!renderer_->Render(draws_, width, height, color_, depth_, error)) {
       TF_RUNTIME_ERROR("Toon Hydra frame failed: %s", error.c_str());
       SetConvergedLocked(bindings, false);
@@ -758,6 +798,7 @@ private:
   Toon::DrawList draws_;
   Toon::ColorProduct color_;
   Toon::DepthProduct depth_;
+  Toon::BackgroundSettings background_;
   std::unique_ptr<Toon::OffscreenRenderer> renderer_;
   // What `renderer_` was, or failed to be, created for.
   std::uint32_t samples_{};
@@ -1946,7 +1987,8 @@ private:
     const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
     state_->Render(render_pass_state, RequestedSamples(delegate),
         RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate),
-        RequestedMmdSelfShadow(delegate), RequestedMmdMorphTints(delegate));
+        RequestedMmdSelfShadow(delegate), RequestedMmdMorphTints(delegate),
+        RequestedBackground(delegate));
   }
 
   std::shared_ptr<HdToonAdapterState> state_;
@@ -2301,6 +2343,10 @@ HdToonRenderDelegate::GetRenderSettingDescriptors() const {
           VtValue(1.0F)},
       {"Evaluation time in seconds", SettingTokens->timeSeconds,
           VtValue(0.0F)},
+      {"Background mode (opaque or transparent)", SettingTokens->backgroundMode,
+          VtValue(std::string("opaque"))},
+      {"Background colour (linear RGBA)", SettingTokens->backgroundColor,
+          VtValue(GfVec4f(0.05F, 0.10F, 0.15F, 1.0F))},
       {"MMD self-shadow", SettingTokens->mmdSelfShadow, VtValue(true)},
       {"MMD morph tints", SettingTokens->mmdMorphTints, VtValue(false)}};
 }
