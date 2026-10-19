@@ -66,9 +66,27 @@ placement rule; it does not say the component exists.
 | Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
 | Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
-| Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/` | `toon-viewport` |
-| The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
+| Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/src/` | `toon-viewport` |
+| The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
+
+The viewport keeps private implementation and headers in `adapters/viewport/src/`;
+fixtures, test executables and CMake/Python check drivers live in `tests/`,
+with their registration in `tests/CMakeLists.txt`. The adapter's root CMake
+file owns dependencies, executable composition and installation. Both viewport
+executables share one source list; provider-only sources and dependencies
+remain opt-in. Fixture paths stay under `adapters/viewport/tests/`.
+
+Within `src/`, `main.cpp` owns the frame loop, `arguments.*` owns CLI parsing
+and validation, and `capture.*` owns PPM, camera JSON and foreground PNG export.
+`capture.cpp` consumes the explicit `ColorProduct` metadata, unpremultiplies
+linear RGB, encodes sRGB and preserves linear alpha for PNG. The private wrapper
+compiles the unmodified encoder vendored under `third_party/stb/`; its license
+and attribution install with the viewport under `share/toon/licenses/stb`.
+Neither the encoder nor its consumer is linked into core or the Vulkan backend.
+The format/conversion checks also build in `validation/` without the viewport,
+Vulkan or OpenUSD; independent PNG decode checks use an available Python 3
+interpreter and its standard library.
 
 The evaluated-state consumer belongs in the optional `adapters/fast/` target,
 not in render-world, render-extraction or a backend. It may consume the minimal
@@ -123,7 +141,7 @@ oracle authors each result into the session layer for UsdImaging to compose;
 that authoring belongs to the check, not to a renderer path.
 
 `toon-viewport-avatar` is the viewport built from the same sources with
-`adapters/viewport/avatar_runtime.*`, an external host of the same
+`adapters/viewport/src/avatar_runtime.*`, an external host of the same
 providers. It is built only with `TOON_AVATAR_RUNTIME_PROVIDERS` and the
 Hydra adapter, and is never installed; `toon-viewport` links no provider.
 `avatar_runtime.hpp` carries no runtime or OpenUSD type, and the overlay
@@ -264,7 +282,7 @@ Offscreen and presentation statistics expose
 upload panel. Rest/joint outline envelopes cannot certify a morphed hull,
 and morphed triangles cannot certify occlusion, so both conservatively keep
 the affected hulls. `validation/morph_test.cpp` compares all scene pipelines
-against CPU-deformed rest geometry; `adapters/viewport/check_morph.cmake`
+against CPU-deformed rest geometry; `adapters/viewport/tests/check_morph.cmake`
 checks a Hydra-fed captured morph sequence and its upload counters.
 
 Evaluated expression overrides also live in `RenderWorld`, in the existing
@@ -286,7 +304,7 @@ source expression semantics and inbetween evaluation remain outside core.
 state isolation and persistent Vulkan draws; the Hydra material and skinning
 checks verify the direct host route and restoration after scene sync.
 
-The viewport's USD playback transport lives in `adapters/viewport/playback.*`
+The viewport's USD playback transport lives in `adapters/viewport/src/playback.*`
 within `toon-viewport`. It converts elapsed seconds using the stage's time
 codes per second, and owns play/pause, range seeking, speed and loop state.
 It evaluates no motion or expression semantics. `hydra_scene.cpp` observes
@@ -387,10 +405,11 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    headers it lists; **a new public core header is added to that list in the
    same change.**
 3. A backend depends on `core/`, never on an adapter or on another backend.
-4. OpenUSD appears only under `adapters/hydra2/` and in
-   `adapters/viewport/hydra_scene.cpp`, which is compiled only when the
-   Hydra adapter is built too; no other viewport source includes an OpenUSD
-   header. GLFW, Dear ImGui and Native File Dialog Extended appear only under
+4. OpenUSD appears only under `adapters/hydra2/` and in the viewport's optional
+   `src/hydra_scene.cpp` and provider-only `src/avatar_runtime.cpp`, with their
+   private `src/hydra_scene_parts.hpp` bridge. They compile only with the Hydra
+   adapter; the latter also requires runtime providers. Other viewport sources
+   include no OpenUSD header. GLFW, Dear ImGui and Native File Dialog Extended appear only under
    `adapters/viewport/`; the file dialog is linked only in Hydra builds, with
    its zlib licence installed under `share/toon/licenses/nativefiledialog-extended`.
    The window returns a UTF-8 path to the frame loop, which prepares a new

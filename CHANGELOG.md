@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Viewport foreground PNG export as straight sRGB RGBA, with alpha preserved,
+  explicit colour metadata and independent decode/1x/4x CLI checks. Viewport
+  sources and test drivers now live in separate directories; argument parsing
+  and capture/export are split from the frame loop
+  ([renderer report 81](docs/reports/renderer/81-2026-10-19-foreground-png.md)).
+
 - Viewport consumption of an independent premultiplied linear RGBA target,
   GPU solid/checkerboard compositing, background UI/CLI controls and explicit
   foreground readback; controlled 1x/4x source-over, offscreen equality,

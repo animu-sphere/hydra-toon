@@ -16,19 +16,35 @@ toon_configure_warnings(toon-render-world-test)
 target_link_libraries(toon-render-world-test PRIVATE Toon::RenderExtraction)
 add_test(NAME toon-render-world COMMAND toon-render-world-test)
 
+# Export conversion needs no GPU, window system or OpenUSD runtime.
+add_executable(toon-foreground-png-test
+  ../adapters/viewport/tests/capture_test.cpp
+  ../adapters/viewport/src/capture.cpp)
+toon_configure_warnings(toon-foreground-png-test)
+target_link_libraries(toon-foreground-png-test PRIVATE Toon::Vulkan)
+add_test(NAME toon-foreground-png-state COMMAND toon-foreground-png-test
+  "${CMAKE_CURRENT_BINARY_DIR}/foreground.png")
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME toon-foreground-png-decode COMMAND "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/adapters/viewport/tests/check_png.py"
+    --writer "$<TARGET_FILE:toon-foreground-png-test>"
+    --output "${CMAKE_CURRENT_BINARY_DIR}/png-decode")
+endif()
+
 add_executable(toon-playback-test playback_test.cpp
-  ../adapters/viewport/playback.cpp)
+  ../adapters/viewport/src/playback.cpp)
 toon_configure_warnings(toon-playback-test)
 target_compile_features(toon-playback-test PRIVATE cxx_std_20)
 add_test(NAME toon-playback-state COMMAND toon-playback-test)
 
 add_executable(toon-skeleton-projection-test skeleton_projection_test.cpp
-  ../adapters/viewport/skeleton_debug.cpp ../adapters/viewport/camera.cpp)
+  ../adapters/viewport/src/skeleton_debug.cpp ../adapters/viewport/src/camera.cpp)
 toon_configure_warnings(toon-skeleton-projection-test)
 target_link_libraries(toon-skeleton-projection-test PRIVATE Toon::RenderWorld)
 add_test(NAME toon-skeleton-projection COMMAND toon-skeleton-projection-test)
 
-add_executable(toon-late-frame-test late_frame_test.cpp ../adapters/viewport/telemetry.cpp)
+add_executable(toon-late-frame-test late_frame_test.cpp ../adapters/viewport/src/telemetry.cpp)
 toon_configure_warnings(toon-late-frame-test)
 target_link_libraries(toon-late-frame-test PRIVATE Toon::Vulkan)
 add_test(NAME toon-late-frame-state COMMAND toon-late-frame-test)

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <toon/vulkan_backend.hpp>
-#include "../adapters/viewport/telemetry.hpp"
+#include "../adapters/viewport/src/telemetry.hpp"
 
 #include <cmath>
 #include <iostream>

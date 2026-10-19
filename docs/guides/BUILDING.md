@@ -515,6 +515,25 @@ viewport among every executable of that name, and the `usdview` host test
 installs a copy under `adapters/hydra2/usdview-install/`, which it may
 launch instead; after a change, run `ost test` there before looking.
 
+## Foreground PNG export
+
+For a reusable foreground PNG from the final frame of a bounded viewport run:
+
+```sh
+toon-viewport --hidden --frames 4 --vsync off --samples 4 \
+    --foreground-output foreground.png
+```
+
+Add `--usd <stage>` in a Hydra-enabled viewport to export that stage instead.
+The PNG contains straight-alpha sRGB RGBA8 with an sRGB chunk. Conversion
+unpremultiplies in linear space before encoding RGB, preserves alpha and
+zeros RGB where alpha is zero. Preview backgrounds and UI are excluded.
+`--screenshot presented.ppm` may be requested in the same run for the opaque
+presented image; this reads back two independent products. Without either
+capture request, ordinary frames stay on the GPU. `--foreground-output`
+requires `--frames N`; PNG sequences and interactive foreground export are
+not provided.
+
 ## Local VRM reproduction comparison
 
 With the `viewport-usd` build, Pillow/NumPy and the runtime/VRM plugin
