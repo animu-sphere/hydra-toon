@@ -87,7 +87,7 @@ was an implementation check, not a milestone release or package publication.
 
 Normal maps and the shared authored/generated tangent foundation,
 face-varying mesh data and reference-renderer comparisons remain in
-[v0.5.0](../../roadmap/v0.5.0.md). The reader does not evaluate arbitrary
+[v0.5.0](../../releases/v0.5.0.md). The reader does not evaluate arbitrary
 graphs, other UV sets, chained transforms or black-border wrapping. Such
 unsupported texture connections retain the surface constant. The existing
 loader stores RGBA8, including downconversion of 16-bit integer images;

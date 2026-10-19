@@ -22,7 +22,6 @@ OWNERS = (
     "docs/reference/CAPABILITY_MATRIX.md",
     "docs/reference/SUPPORTED_CONFIGURATIONS.md",
     "docs/roadmap/README.md",
-    "docs/roadmap/v0.5.0.md",
     "docs/roadmap/later.md",
     "docs/reports/renderer/README.md",
     "docs/releases/README.md",

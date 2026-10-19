@@ -77,6 +77,6 @@ unknown shader, implement specular workflow or compile arbitrary graphs.
 A binding whose material prim is unavailable has no renderer material and
 continues to use display colour. Fallback pixels use the consumer's existing
 colour encoding and output conventions; reusable RGBA output remains in
-[v0.5.0](../../roadmap/v0.5.0.md), alongside tangent fidelity and normal
+[v0.5.0](../../releases/v0.5.0.md), alongside tangent fidelity and normal
 mapping. These controlled checks require no external reference renderer or
 restricted asset, and no package or milestone release was published.

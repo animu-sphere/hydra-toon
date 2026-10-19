@@ -88,5 +88,5 @@ of the Hydra AOV. PNG conversion starts from quantized linear RGBA8;
 unpremultiplication cannot recover colour precision lost at low alpha.
 The full textured hair/normal-map/MMD-shadow fixture set, image-background
 compositing, external host display/export conventions and tangent comparisons
-remain in the [milestone](../../roadmap/v0.5.0.md). Documentation and whitespace
+remain in the [milestone](../../releases/v0.5.0.md). Documentation and whitespace
 checks passed. The bootstrap PNG was visually inspected. No release was published.

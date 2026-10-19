@@ -7,6 +7,7 @@ link resolving. What comes next is the [roadmap](../roadmap/).
 
 | Version | Record | Milestone |
 | --- | --- | --- |
+| v0.5.0 | [v0.5.0.md](v0.5.0.md) | Reusable premultiplied RGBA, Hydra AOV preservation, viewport compositing/PNG export, PreviewSurface interoperability and shared tangent frames; bounded acceptance with explicit host/reference limitations |
 | v0.4.0 | [v0.4.0.md](v0.4.0.md) | MMD realization: MMD materials, edges, self-shadow and morphs from the canonical stage, each settled against MikuMikuDance's own frames, MAT-Q1 to MAT-Q6 resolved |
 | v0.3.0 | [v0.3.0.md](v0.3.0.md) | Avatar animation fast path: GPU morphs, late input, the evaluated-state consumer, real runtime providers with oracle parity, and the viewport as the runtime host with latency to present API return |
 | v0.2.0 | [v0.2.0.md](v0.2.0.md) | MToon quality, the Hydra-fed viewport, measured 4x AA and VRM reproduction; published package GPU-verified in [report 33](../reports/renderer/33-2026-10-04-published-v020.md) |

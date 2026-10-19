@@ -82,4 +82,4 @@ unchanged native transparent sRGB display/export, arbitrary hosts, textured
 hair/normal-map/MMD-shadow acceptance, or external tangent comparisons. PNG
 conversion starts from quantized linear RGBA8; low-alpha precision remains
 limited. The bounded all-material fixture work and native host boundary remain
-in the [milestone](../../roadmap/v0.5.0.md). No release was published.
+in the [milestone](../../releases/v0.5.0.md). No release was published.

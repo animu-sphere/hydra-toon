@@ -94,4 +94,4 @@ Non-sRGB surfaces and devices without `alphaToOne` remain unverified. This
 does not establish host display/export or PNG conversion, an image-background
 consumer, the full textured hair/normal-map/MMD-shadow bounded fixture set,
 or external tangent comparisons. Those remain in the
-[milestone](../../roadmap/v0.5.0.md). No release was published.
+[milestone](../../releases/v0.5.0.md). No release was published.
