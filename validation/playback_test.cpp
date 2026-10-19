@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "../adapters/viewport/playback.hpp"
+#include "../adapters/viewport/src/playback.hpp"
 
 #include <cmath>
 #include <iostream>

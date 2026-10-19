@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "../adapters/viewport/skeleton_debug.hpp"
-#include "../adapters/viewport/camera.hpp"
+#include "../adapters/viewport/src/skeleton_debug.hpp"
+#include "../adapters/viewport/src/camera.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
