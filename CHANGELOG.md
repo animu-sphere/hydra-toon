@@ -155,6 +155,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Fixed
 
+- Hydra primvar GPU validation probes actual renderer creation before running
+  its image oracles. A usable Vulkan loader without an instance/device now
+  reports SKIP (77), matching the other GPU checks; shader initialization
+  errors still fail. This fixes GPU-less release CI without changing renderer
+  behavior ([renderer report 84](docs/reports/renderer/84-2026-10-19-ci-primvar-device-skip.md)).
+
 - PreviewSurface metallic Fresnel keeps albedo at grazing incidence,
   interpolating F90 from white to albedo with metalness; an analytic
   1x/4x GPU regression rejects the previous white-metal endpoint
