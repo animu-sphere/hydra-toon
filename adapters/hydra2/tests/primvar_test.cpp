@@ -750,7 +750,17 @@ int main(int argc, char** argv) {
   if (argc < 2 || argc > 3) return 2;
   TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   const std::string shaders = argc == 3 ? argv[2] : "";
-  if (!shaders.empty() && !Toon::ProbeVulkanBackend().available) return 77;
+  if (!shaders.empty()) {
+    // A usable loader does not imply an instance/device (e.g. hosted CI).
+    Toon::FrameStatus status;
+    std::string error;
+    const auto probe = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error, {1});
+    if (status == Toon::FrameStatus::Skip) {
+      std::cout << error << '\n';
+      return 77;
+    }
+    if (!Check(probe != nullptr, error.c_str())) return 1;
+  }
   if (!PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
       !GeneratedSkin(argv[1], shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
