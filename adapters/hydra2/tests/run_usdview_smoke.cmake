@@ -56,7 +56,15 @@ if(evidence_count LESS 2)
   message(FATAL_ERROR
     "usdview did not complete first-frame and stable-update rendering")
 endif()
-foreach(phase IN ITEMS first-frame stable-update)
+if(RENDERER_RGBA_CONSUMER)
+  set(image_phases
+    rgba-1-0.25-straight rgba-4-0.25-straight
+    rgba-1-0.25-black rgba-1-0.25-white rgba-1-0.25-checker rgba-1-0.25-image
+    rgba-4-0.25-black rgba-4-0.25-white rgba-4-0.25-checker rgba-4-0.25-image)
+else()
+  set(image_phases first-frame stable-update)
+endif()
+foreach(phase IN LISTS image_phases)
   set(image "${image_root}-${phase}.png")
   if(NOT EXISTS "${image}")
     message(FATAL_ERROR "usdview did not produce ${phase} image")
@@ -66,6 +74,14 @@ foreach(phase IN ITEMS first-frame stable-update)
     message(FATAL_ERROR "usdview ${phase} image is unexpectedly small")
   endif()
 endforeach()
+
+if(RENDERER_RGBA_CONSUMER)
+  if(NOT EXISTS "${image_root}-rgba-consumer.json")
+    message(FATAL_ERROR "usdview did not produce RGBA consumer evidence")
+  endif()
+  message(STATUS "${usdview_output}")
+  return()
+endif()
 
 # Merge the independently exercised host checks into the normal renderer
 # report. Before this install-tree test runs they remain honest SKIPs, so a
