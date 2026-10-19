@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Controlled usdview RGBA consumer checks for linear-to-straight sRGB PNG
+  conversion and four-background composition at 1x/4x, with an independent
+  opaque host display comparison and diagnostics for the native transparent
+  sRGB screenshot limitation
+  ([renderer report 82](docs/reports/renderer/82-2026-10-19-usdview-rgba-consumer.md)).
+
 - Viewport foreground PNG export as straight sRGB RGBA, with alpha preserved,
   explicit colour metadata and independent decode/1x/4x CLI checks. Viewport
   sources and test drivers now live in separate directories; argument parsing

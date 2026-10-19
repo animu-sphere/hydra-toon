@@ -334,10 +334,23 @@ if(TOON_BUILD_TESTS)
         "-DRENDERER_TESTUSDVIEW=${TOON_TESTUSDVIEW}"
         "-DRENDERER_TEST_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/tests/usdview_smoke_test.py"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_usdview_smoke.cmake")
+    add_test(NAME toon-renderer-usdview-rgba-consumer
+      COMMAND "${CMAKE_COMMAND}"
+        "-DRENDERER_BUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DRENDERER_CONFIG=$<CONFIG>"
+        "-DRENDERER_STAGE_DIR=${CMAKE_CURRENT_BINARY_DIR}/usdview-rgba-install"
+        "-DRENDERER_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
+        "-DRENDERER_INSTALL_DATADIR=${CMAKE_INSTALL_DATADIR}"
+        "-DRENDERER_PXR_ROOT=${TOON_PXR_ROOT}"
+        "-DRENDERER_PYTHON=${Python3_EXECUTABLE}"
+        "-DRENDERER_TESTUSDVIEW=${TOON_TESTUSDVIEW}"
+        "-DRENDERER_TEST_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/tests/usdview_rgba_test.py"
+        "-DRENDERER_RGBA_CONSUMER=ON"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_usdview_smoke.cmake")
     # usdview needs OpenGL 4.5 whatever the renderer. A host without it, such
     # as a hosted CI runner, cannot run the smoke at all, so HgiGL's refusal
     # is a SKIP, as a missing display is above; any other failure fails.
-    set_tests_properties(toon-renderer-usdview-host PROPERTIES
+    set_tests_properties(toon-renderer-usdview-host toon-renderer-usdview-rgba-consumer PROPERTIES
       LABELS "host-smoke;gpu"
       TIMEOUT 60
       RUN_SERIAL TRUE
