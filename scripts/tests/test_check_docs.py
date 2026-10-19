@@ -42,6 +42,7 @@ class RepositoryTests(unittest.TestCase):
             f'[owner]({Path(name).relative_to("docs").as_posix() if name.startswith("docs/") else "../" + name})\n'
             for name in docs.OWNERS))
         self.write('docs/roadmap/README.md', '# Roadmap\n[v](v0.5.0.md)\n[later](later.md)\n')
+        self.write('docs/roadmap/v0.5.0.md', '# Fixture milestone\n')
         self.write('docs/reports/README.md', '# Reports\n[Renderer](renderer/)\n')
         with (self.root / 'docs/README.md').open('a', encoding='utf-8') as stream:
             stream.write('[Reports](reports/)\n')

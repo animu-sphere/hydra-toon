@@ -125,6 +125,8 @@ Project infrastructure, independent of renderer milestones:
 
 | Work | Start when / owner prerequisite |
 | --- | --- |
+| External authored/deformed tangent and glTF-engine comparisons | a visible normal/seam defect, tangent semantic change or reproducible recurrence needs an external oracle; owned here and unassigned under the [material stop rule](../design/MATERIAL_POLICY.md#121-reference-comparison-and-stop-rule); [bounded disposition](../reports/renderer/83-2026-10-19-v050-acceptance.md#bounded-tangent-comparison-and-stop) |
+| Native usdview transparent sRGB consumer repair | a native-host consumer needs transparent display/export and can fix/validate the host boundary; host-owned conversion, with renderer-side input unchanged; [measured limitation](../reports/renderer/82-2026-10-19-usdview-rgba-consumer.md) |
 | Actual display latency evidence | a host can instrument scanout/photon timing and map source clocks; trace the displayed sample under [performance policy §23](../design/DESIGN_POLICY.md#23-performance-kpis) |
 | Runtime Hydra-publication parity | the [runtime's output path](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md) is available for comparing with the fast adapter |
 | Material binds on a real avatar | a redistributable or local avatar exercises colour/texture-transform binds exposed by the [format owner's expression contract](https://github.com/animu-sphere/usd-vrm-plugins/blob/main/plugins/vrmSchema/docs/SCHEMA_CONTRACT.md) and upstream runtime |

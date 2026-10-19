@@ -118,9 +118,13 @@ consumed foreground product.
 ## 6. Evidence boundary and additional outputs
 
 Acceptance must test background independence and foreground alpha together.
-The bounded fixture work and done-when criteria belong to the
-[output milestone](../roadmap/v0.5.0.md#bounded-validation); measurements and
-accepted differences belong to reports.
+Use a bounded redistributable fixture set spanning MToon, MMD and
+PreviewSurface: silhouettes, outlines, Mask, Blend, transparent hair,
+emission, normal maps and MMD self-shadow on receiving surfaces. Check the
+same foreground over black, white, checkerboard and an arbitrary image,
+visually and against independent linear source-over controls, at supported
+sample counts. Background selection must not change the product. Record
+measurements, accepted differences and unverified host conventions in reports.
 
 Ground/contact/drop shadows and shadow catchers are separate future work,
 after host / compositor integration, reusing the shared shadow pass.

@@ -91,7 +91,7 @@ The corner path expands emitted polygon corners rather than welding equal
 attribute tuples, and retains source geometry in addition to normalized
 arrays. It does not refine subdivision surfaces, add more UV sets or shade
 per-vertex display colours. Authored/generated tangents and PreviewSurface
-normal mapping remain in [v0.5.0](../../roadmap/v0.5.0.md).
+normal mapping remain in [v0.5.0](../../releases/v0.5.0.md).
 
 OpenUSD 26.08 retains the normals computation's `hasFaceVaryingNormals`
 flag after changing the input interpolation in an already formed scene.

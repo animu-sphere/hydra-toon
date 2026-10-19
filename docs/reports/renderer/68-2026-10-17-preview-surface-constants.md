@@ -6,7 +6,7 @@
 - Runtime: canonical CY2026 OpenUSD 26.08 `lookdev` for Hydra and the
   viewport; plain CMake needs no OpenUSD
 - Scope: the first material-interoperability increment of
-  [v0.5.0](../../roadmap/v0.5.0.md)
+  [v0.5.0](../../releases/v0.5.0.md)
 
 ## Material input
 

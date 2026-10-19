@@ -534,6 +534,18 @@ capture request, ordinary frames stay on the GPU. `--foreground-output`
 requires `--frames N`; PNG sequences and interactive foreground export are
 not provided.
 
+The bounded original RGBA fixture check runs without OpenUSD or a window:
+
+```sh
+ctest --test-dir build/plain-cmake -R toon-rgba-fixtures-gpu --output-on-failure
+```
+
+It needs Vulkan, compiled shaders and Python 3. The test writes linear RGBA,
+production straight-sRGB PNGs, four-background PPM composites, a capture log
+and `summary.json` under `<build>/validation/rgba-fixtures/`. A missing GPU is
+an explicit skip. The fixtures, independent controls and accepted limits are
+[renderer report 83](../reports/renderer/83-2026-10-19-v050-acceptance.md).
+
 ## Local VRM reproduction comparison
 
 With the `viewport-usd` build, Pillow/NumPy and the runtime/VRM plugin

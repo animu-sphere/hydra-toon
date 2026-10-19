@@ -8,7 +8,17 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-19
+
 ### Added
+
+- Bounded release acceptance with two original redistributable RGBA fixtures
+  spanning MToon, PreviewSurface and MMD self-shadow at 1x/4x over four
+  backgrounds. Independent PNG/source-over controls and one time-boxed
+  existing tangent/reference run complete the adopted validation scope;
+  native usdview transparent sRGB export and external authored/deformed
+  tangent equivalence remain explicit limitations
+  ([renderer report 83](docs/reports/renderer/83-2026-10-19-v050-acceptance.md)).
 
 - Controlled usdview RGBA consumer checks for linear-to-straight sRGB PNG
   conversion and four-background composition at 1x/4x, with an independent

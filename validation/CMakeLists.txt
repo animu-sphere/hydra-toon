@@ -97,6 +97,20 @@ if(TOON_WITH_VULKAN)
   add_test(NAME toon-rgba-output-gpu COMMAND toon-rgba-output-test
     "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-rgba-output-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+  add_executable(toon-rgba-fixture-test rgba_fixture_test.cpp
+    ../adapters/viewport/src/capture.cpp)
+  toon_configure_warnings(toon-rgba-fixture-test)
+  target_link_libraries(toon-rgba-fixture-test PRIVATE Toon::Vulkan)
+  add_dependencies(toon-rgba-fixture-test toon-renderer-shaders)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME toon-rgba-fixtures-gpu COMMAND "${Python3_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/scripts/check_rgba_fixtures.py"
+      --capture "$<TARGET_FILE:toon-rgba-fixture-test>"
+      --shaders "${CMAKE_BINARY_DIR}/backend/vulkan/shaders"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/rgba-fixtures")
+    set_tests_properties(toon-rgba-fixtures-gpu PROPERTIES
+      SKIP_RETURN_CODE 77 LABELS "gpu;rgba" TIMEOUT 90)
+  endif()
 endif()
 
 add_executable(toon-expression-test expression_test.cpp)

@@ -10,7 +10,6 @@ This page is the navigation entry point; no `current.md` is needed.
 
 | Milestone | Focus | Work |
 | --- | --- | --- |
-| v0.5.0 | Reusable RGBA, alpha/coverage, Hydra AOV and viewport compositing | [v0.5.0.md](v0.5.0.md) |
 | v0.6.0 | Shared light and shadow resources across MToon, MMD and PreviewSurface | [later.md](later.md#v060--shared-shadow-and-lighting) |
 | v0.7.0 | WebGPU parity with the Vulkan contracts | [later.md](later.md#v070--webgpu) |
 | v0.8.0-scale (provisional) | Host/compositor integration and GPU texture handoff | [later.md](later.md#host-and-compositor-integration-v080-scale) |

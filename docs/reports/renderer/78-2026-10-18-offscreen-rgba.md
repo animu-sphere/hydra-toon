@@ -86,5 +86,5 @@ directly into the swapchain; it does not consume a reusable foreground
 product. PNG straight-alpha conversion, checkerboard/image compositing,
 textured hair, normal-map and MMD self-shadow RGBA fixtures and bounded
 tangent comparison remain outside this run. The
-[remaining milestone](../../roadmap/v0.5.0.md) retains those acceptance gates.
+[remaining milestone](../../releases/v0.5.0.md) retains those acceptance gates.
 No release was published.
