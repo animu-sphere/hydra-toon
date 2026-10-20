@@ -8,7 +8,7 @@
 // kInfluenceCountShift.
 static const uint kDrawSkinned = 2;
 static const uint kDrawConstantInfluences = 4;
-static const uint kInfluenceCountShift = 8;
+static const uint kInfluenceCountShift = 16;
 
 // Must match Toon::ToonJointInfluence.
 struct JointInfluence {

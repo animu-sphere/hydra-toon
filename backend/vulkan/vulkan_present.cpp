@@ -809,8 +809,9 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
   if (!meshes_.Update(draws, error) ||
-      !materials_.Update(draws, textures_, error) ||
-      !shadow_.Update(draws, meshes_, materials_, error)) {
+      !shadow_.Update(draws, error, statistics_.latency.shadow_fit_ms) ||
+      !materials_.Update(draws, textures_, error, true,
+          &shadow_.fit().views())) {
     return false;
   }
   statistics_.latency.buffers_written = SteadyNanoseconds();
@@ -1063,7 +1064,7 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   statistics_.draws = {record.unlit, record.outline, record.opaque,
       record.transparent, record.triangles, record.pipeline_binds,
       overlay_draws, static_cast<std::uint32_t>(overlay.vertices.size()),
-      record.hulls};
+      record.hulls, shadow_.caster_draws()};
   if (capture_foreground) {
     foreground_capture_requested_ = false;
     foreground_capture_frame_ = submitted_;

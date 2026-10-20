@@ -46,6 +46,9 @@ struct Matrix4 {
 };
 
 [[nodiscard]] Matrix4 Multiply(const Matrix4& left, const Matrix4& right);
+// The inverse of an affine matrix: its 3x3 inverted, the translation moved
+// back through it. The identity when the 3x3 is singular.
+[[nodiscard]] Matrix4 AffineInverse(const Matrix4& matrix);
 
 // The camera. `projection` follows the OpenGL / USD clip convention (y up,
 // z in [-1, 1]); each backend maps it onto its own.
@@ -76,6 +79,9 @@ struct ToonLight {
   float cone_angle = 45.0F;
   float cone_softness = 0.0F;
   bool visible = true;
+  // Whether it casts shadows, as UsdLux's shadow:enable states it: true
+  // unless authored false (shadow policy §2).
+  bool shadow = true;
 
   friend bool operator==(const ToonLight&, const ToonLight&) = default;
 };

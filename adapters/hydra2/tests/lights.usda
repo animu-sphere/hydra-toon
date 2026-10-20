@@ -25,9 +25,10 @@ def SphereLight "Point"
     uniform token[] xformOpOrder = ["xformOp:translate"]
 }
 def SphereLight "Spot" (
-    prepend apiSchemas = ["ShapingAPI"]
+    prepend apiSchemas = ["ShapingAPI", "ShadowAPI"]
 )
 {
+    bool inputs:shadow:enable = false
     float inputs:intensity = 4
     float inputs:shaping:cone:angle = 30
     float inputs:shaping:cone:softness = 0.5

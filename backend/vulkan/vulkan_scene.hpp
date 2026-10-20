@@ -95,7 +95,11 @@ constexpr std::uint32_t kDrawBlend = 32U;
 // coverage of the cutoff rather than being kept or cut away whole.
 constexpr std::uint32_t kDrawAlphaToCoverage = 64U;
 constexpr std::uint32_t kDrawMorphed = 128U;
-constexpr std::uint32_t kInfluenceCountShift = 8U;
+// The shadow pipeline cuts a Mask caster at its cutoff, by its MToon or
+// PreviewSurface slot's alpha.
+constexpr std::uint32_t kDrawCutMToon = 256U;
+constexpr std::uint32_t kDrawCutPreview = 512U;
+constexpr std::uint32_t kInfluenceCountShift = 16U;
 static_assert(sizeof(ToonMorphOffset) == 32);
 static_assert(sizeof(ToonMorphRange) == 8);
 
@@ -242,25 +246,21 @@ struct MmdShadowParameters {
 };
 static_assert(sizeof(MmdShadowParameters) == 96);
 
-// Where MMD's self-shadow map must look, in the light's frame, with z
-// toward the light (MeshCache::SelfShadowBounds).
-struct SelfShadowExtent {
-  // Around every MMD draw that casts or receives it, as
-  // OutlineBounds::SceneBounds bounds each.
-  std::array<double, 3> low{};
-  std::array<double, 3> high{};
-  // Whether any of them receives it.
-  bool receivers = false;
-  // Around the parts of those that receive it that the camera's frustum
-  // reaches (OutlineBounds::ScenePieces), each cut to the frustum; `seen`
-  // is false when it reaches none.
-  std::array<double, 3> seen_low{};
-  std::array<double, 3> seen_high{};
-  bool seen = false;
+// Where a shared shadow view was drawn from this frame, for the receivers
+// of every family but MMD. Must match ShadowViewParameters in
+// shaders/surface_common.slang.
+struct ShadowViewParameters {
+  // The view's clip space from view space, column-major.
+  float clip_from_view[16];
+  // x its size in texels, y its depth range and z a texel's width, both in
+  // view-space units; w unused.
+  float extent[4];
 };
+static_assert(sizeof(ShadowViewParameters) == 80);
 
-// MMD's self-shadow map: one square depth image. Its texels go where the
-// camera sees a receiver, and a receiver reads them filtered.
+// A shared shadow view's depth image, square: its texels go where the
+// camera sees a receiver, and a receiver reads them filtered (shadow
+// policy §5).
 constexpr std::uint32_t kShadowMapSize = 2048;
 constexpr VkFormat kShadowFormat = VK_FORMAT_D32_SFLOAT;
 
@@ -307,9 +307,8 @@ struct ScenePipeline {
 // The scene pipelines for one colour/depth format pair and sample count:
 // the unlit mesh pipeline, mtoon_opaque, mtoon_transparent, mtoon_outline,
 // mmd_opaque, mmd_transparent, mmd_outline and preview_surface; and
-// mmd_shadow, which draws
-// depth alone into MMD's self-shadow map, single-sampled, whatever the
-// scene's count. The transparent ones and the
+// shadow, the shared caster pass, which draws depth alone into a shadow
+// view, single-sampled, whatever the scene's count. The transparent ones and the
 // outlines blend their source's alpha over the target; mmd_outline also
 // reads the mesh's edge scale as a fourth stream, and mmd_opaque and
 // mmd_transparent its sub-texture UV. Multisampled, mtoon_opaque
@@ -334,7 +333,7 @@ struct ScenePipelines {
   ScenePipeline mmd;
   ScenePipeline mmd_transparent;
   ScenePipeline mmd_outline;
-  ScenePipeline mmd_shadow;
+  ScenePipeline shadow;
   VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout skin_layout = VK_NULL_HANDLE;
   // Immutable in `material_layout`.
@@ -364,8 +363,8 @@ struct SceneShaderWords {
   std::vector<std::uint32_t> mmd_transparent_fragment;
   std::vector<std::uint32_t> mmd_outline_vertex;
   std::vector<std::uint32_t> mmd_outline_fragment;
-  std::vector<std::uint32_t> mmd_shadow_vertex;
-  std::vector<std::uint32_t> mmd_shadow_fragment;
+  std::vector<std::uint32_t> shadow_vertex;
+  std::vector<std::uint32_t> shadow_fragment;
 };
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -587,10 +586,6 @@ public:
     std::int32_t draw_order = 0;
     // An MMD material's diffuse alpha is below 1.
     bool mmd_translucent = false;
-    // An MMD material draws into MMD's self-shadow map, and is shaded by
-    // it.
-    bool cast_self_shadow = false;
-    bool receive_self_shadow = false;
     std::uint64_t generation = 0;
   };
 
@@ -598,9 +593,12 @@ public:
       VkDescriptorSetLayout layout, std::string& detail);
   // Write whatever `draws.materials` changed and free the slots of
   // materials it no longer has. No frame that reads the buffer may be in
-  // flight, and `textures` has been updated for the same draws.
+  // flight, and `textures` has been updated for the same draws. A light's
+  // entry names the view of `views` it casts into, while `draws.shadows`
+  // has every family but MMD receive.
   bool Update(const DrawList& draws, const TextureCache& textures,
-      std::string& detail, bool fast_values = true);
+      std::string& detail, bool fast_values = true,
+      const std::vector<ShadowView>* views = nullptr);
   [[nodiscard]] const Entry* Find(MaterialId material) const;
   [[nodiscard]] VkDescriptorSet descriptor_set() const {
     return set_;
@@ -701,16 +699,14 @@ public:
     return pose_writes_;
   }
 
-  // Where MMD's self-shadow map must look, in `light_from_world`'s space,
-  // as the draws' poses place them; false when no MMD draw casts or
-  // receives it.
-  bool SelfShadowBounds(const DrawList& draws, const MaterialCache& materials,
-      const Matrix4& light_from_world, SelfShadowExtent& extent) const;
-  // Draw every MMD draw whose material casts MMD's self-shadow through
-  // mmd_shadow, inside rendering into the map, and return how many.
-  std::uint32_t RecordSelfShadow(VkCommandBuffer command,
+  // Draw every part that casts into a shadow view (ShadowFit::Casts)
+  // through the shadow pipeline, inside rendering into the view, as the
+  // draws' poses and morphs place them, and count them in `casters` and,
+  // MMD's, in `mmd_casters`.
+  void RecordShadowCasters(VkCommandBuffer command,
       const ScenePipelines& pipelines, const MaterialCache& materials,
-      const DrawList& draws, const Matrix4& clip_from_world) const;
+      const DrawList& draws, const Matrix4& clip_from_world,
+      std::uint32_t& casters, std::uint32_t& mmd_casters) const;
 
   [[nodiscard]] std::uint64_t morph_uploads() const { return morph_uploads_; }
   [[nodiscard]] std::uint64_t morph_weight_writes() const { return morph_weight_writes_; }
@@ -804,39 +800,40 @@ private:
   std::uint64_t morph_weight_writes_ = 0;
 };
 
-// MMD's self-shadow (material policy §10): a depth map of every MMD draw
-// whose material casts it, drawn each frame from the scene's first direct
-// light when that light is directional, before the scene, and read by the
-// MMD surfaces whose materials receive it. Along the light it covers every
-// MMD draw that casts or receives it; across the light, the parts of the
-// receivers the camera sees, so it follows the camera as MMD's own does.
-// Its parameters, and the map, sit in the material descriptor set, at
-// bindings 6 and 5.
+// The shared shadow views (shadow policy §5): each frame the core's
+// ShadowFit decides which views are drawn and from where, and each is
+// drawn before the scene by the shared caster pass into one depth image.
+// MMD's receivers read the view of the scene's first direct light as MMD's
+// self-shadow map (material policy §10). The image, MMD's parameters and
+// every view's sit in the material descriptor set, at bindings 5, 6 and 8.
 class ShadowMap {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,
       VkDescriptorSet set, std::string& detail);
-  // Decide whether this frame draws the map, and from where. No frame that
-  // reads the parameters may be in flight, and `meshes` and `materials`
-  // have been updated for the same draws.
-  bool Update(const DrawList& draws, const MeshCache& meshes,
-      const MaterialCache& materials, std::string& detail);
-  // Record the map's pass, outside any other rendering, and return its
-  // draws. A frame that draws no map records nothing, once the map has
-  // been readable since a first, empty pass.
-  std::uint32_t Record(VkCommandBuffer command,
-      const ScenePipelines& pipelines, const MaterialCache& materials,
-      const MeshCache& meshes, const DrawList& draws);
+  // Fit this frame's views, timing the fit. No frame that reads the
+  // parameters may be in flight.
+  bool Update(const DrawList& draws, std::string& detail, double& fit_ms);
+  // Record the views' passes, outside any other rendering. A frame that
+  // draws no view records nothing, once the image has been readable since
+  // a first, empty pass.
+  void Record(VkCommandBuffer command, const ScenePipelines& pipelines,
+      const MaterialCache& materials, const MeshCache& meshes,
+      const DrawList& draws);
   void Destroy();
 
-  [[nodiscard]] bool active() const { return active_; }
+  [[nodiscard]] const ShadowFit& fit() const { return fit_; }
+  // The last recorded frame's caster draws, every family's and MMD's.
+  [[nodiscard]] std::uint32_t caster_draws() const { return caster_draws_; }
+  [[nodiscard]] std::uint32_t mmd_draws() const { return mmd_draws_; }
 
 private:
   VkDevice device_ = VK_NULL_HANDLE;
+  ShadowFit fit_;
   DeviceImage image_;
   HostBuffer buffer_;
-  Matrix4 clip_from_world_;
-  bool active_ = false;
+  HostBuffer views_buffer_;
+  std::uint32_t caster_draws_ = 0;
+  std::uint32_t mmd_draws_ = 0;
   // Whether the image has been laid out for reading.
   bool ready_ = false;
 };

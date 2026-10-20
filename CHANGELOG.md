@@ -8,6 +8,28 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- Shared shadows, stage 1 of the shadow policy: the core's `ShadowFit`
+  chooses one directional view (the first shadowing directional light, or
+  the camera key) and fits it as MMD's self-shadow map was fitted, and one
+  `shadow` caster pass draws MToon, PreviewSurface, unbound, unlit and MMD
+  casters, Mask cut, at their skinned or morphed positions. MToon scales a
+  light's ramped shading term by its visibility, leaving the rim's light
+  unshadowed as three-vrm does; PreviewSurface scales the direct response.
+  `toon:shadows`/`--shadows` (on by default) and UsdLux `shadow:enable`
+  control it; statistics, Hydra evidence and viewport telemetry count views,
+  caster draws and the fit's CPU time
+  ([renderer report 85](docs/reports/renderer/85-2026-10-21-shared-shadow-stage-1.md)).
+
+### Changed
+
+- MMD's self-shadow map is the shared view of the first direct light, drawn
+  by the shared caster pass; an MMD-only scene draws byte-for-byte as before,
+  while other families' casters now shadow MMD receivers. The `mmd_shadow`
+  shader and `SceneShaders::mmd_shadow_*` are now `shadow` and
+  `SceneShaders::shadow_*`.
+
 ## [0.5.0] - 2026-10-19
 
 ### Added

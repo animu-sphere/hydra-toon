@@ -103,6 +103,7 @@ void FrameTelemetry::PushLatency(const FrameLatency& sample) {
   pose_write_.Push(sample.pose_write_ms);
   morph_write_.Push(sample.morph_write_ms);
   material_write_.Push(sample.material_write_ms);
+  shadow_fit_.Push(sample.shadow_fit_ms);
   if (latency_frames_.size() < kWindow) latency_frames_.push_back(sample);
   else {
     latency_frames_[latency_next_] = sample;
@@ -119,7 +120,8 @@ std::vector<FrameTelemetry::Named> FrameTelemetry::Latency() const {
       {"look_at_latch", &look_at_latch_}, {"look_at_buffer", &look_at_buffer_},
       {"look_at_submit", &look_at_submit_}, {"look_at_present_api", &look_at_present_},
       {"camera_present_api", &camera_present_},
-      {"pose_write", &pose_write_}, {"morph_write", &morph_write_}, {"material_write", &material_write_}};
+      {"pose_write", &pose_write_}, {"morph_write", &morph_write_}, {"material_write", &material_write_},
+      {"shadow_fit", &shadow_fit_}};
 }
 
 void FrameTelemetry::PushCpu(const CpuSample& sample) {
@@ -215,6 +217,7 @@ std::string FrameTelemetry::Json() const {
         << ",\"present_returned_ns\":" << f.present_returned
         << ",\"pose_write_ms\":" << f.pose_write_ms << ",\"morph_write_ms\":" << f.morph_write_ms
         << ",\"material_write_ms\":" << f.material_write_ms
+        << ",\"shadow_fit_ms\":" << f.shadow_fit_ms
         << ",\"late_sample_applied\":" << (f.late_sample_applied ? "true" : "false") << '}';
   }
   out << "]}\n";

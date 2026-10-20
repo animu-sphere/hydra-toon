@@ -71,6 +71,7 @@ struct OverlayFrame {
   bool vsync = true;
   CompositeBackground background;
   bool outlines = true;
+  bool shadows = true;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints = false;
   LightingDebug lighting;
@@ -114,6 +115,8 @@ struct OverlayControls {
   CompositeBackground background;
   bool outlines_changed = false;
   bool outlines = true;
+  bool shadows_changed = false;
+  bool shadows = true;
   bool mmd_self_shadow_changed = false;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints_changed = false;

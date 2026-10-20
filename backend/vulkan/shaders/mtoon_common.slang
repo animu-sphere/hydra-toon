@@ -97,6 +97,9 @@ float2 MatcapST(float3 normal, float3 view) {
 MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
     float4 view_tangent, float3 view_position, float2 st, bool front) {
   float3 normal = normalize(view_normal);
+  // For the shared shadow views' receiver plane, in uniform control flow.
+  const float3 position_dx = ddx(view_position);
+  const float3 position_dy = ddy(view_position);
   const float mask = SampleTexture(material.animation_textures.z,
       material.animation_textures.w, material.mask_uv, st).b;
   const float2 animated_st = AnimatedST(material, st, mask);
@@ -135,8 +138,11 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   for (uint index = 0; index < uint(frame[0].y); ++index) {
     float3 light;
     const float3 incident = DirectLight(index, view_position, light);
+    const float lambert = dot(normal, light);
     const float shading = LinearStep(-1.0 + toony, 1.0 - toony,
-        dot(normal, light) + material.shading.x + shift);
+        lambert + material.shading.x + shift) *
+        ShadowVisibility(index, view_position, position_dx, position_dy,
+            normal, lambert);
     color += lerp(shade, lit, shading) * incident;
     lighting += incident;
   }
@@ -152,7 +158,8 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   // The rim: MatCap and the parametric rim, masked by the rim multiply
   // texture, then lit as far as rimLightingMixFactor asks. The light it
   // mixes in is what reaches the surface, the direct light's colour and the
-  // GI, as three-vrm sums them.
+  // GI, as three-vrm sums them, unshadowed: three-vrm's shadow scales the
+  // shading term alone.
   float3 rim = material.rim_textures.x == 0
                    ? float3(0.0)
                    : material.matcap.rgb * matcap_texel;
@@ -173,6 +180,17 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   surface.color = color;
   surface.alpha = material.base_color.a * base_texel.a;
   return surface;
+}
+
+// The alpha MToon's surface has at st, as ShadeSurface takes it, for a
+// shadow caster's cut: the base colour's and its texel's at the animated
+// UVs.
+float SurfaceAlpha(MToonParameters material, float2 st) {
+  const float mask = SampleTexture(material.animation_textures.z,
+      material.animation_textures.w, material.mask_uv, st).b;
+  const float2 animated_st = AnimatedST(material, st, mask);
+  return material.base_color.a * SampleTexture(material.textures.x,
+      material.textures.y, material.base_uv, animated_st).a;
 }
 
 // Whether a Mask material cuts this fragment away.

@@ -144,6 +144,12 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--outlines must be on or off");
       }
       result.outlines = value == "on";
+    } else if (option == "--shadows") {
+      const auto value = next();
+      if (value != "on" && value != "off") {
+        throw std::invalid_argument("--shadows must be on or off");
+      }
+      result.shadows = value == "on";
     } else if (option == "--mmd-self-shadow") {
       const auto value = next();
       if (value != "on" && value != "off") {
@@ -201,6 +207,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --overlay on|off         the measurements over the\n"
                    "                           scene (default on)\n"
                    "  --outlines on|off        draw hulls (default on)\n"
+                   "  --shadows on|off         shared shadows across material\n"
+                   "                           families (default on)\n"
                    "  --mmd-self-shadow on|off MMD's self-shadow (default on)\n"
                    "  --mmd-morph-tints on|off full.fx's material morph tints,\n"
                    "                           which MMD does not draw\n"

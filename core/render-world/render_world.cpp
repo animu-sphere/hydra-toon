@@ -93,6 +93,33 @@ Matrix4 Multiply(const Matrix4& left, const Matrix4& right) {
   return result;
 }
 
+Matrix4 AffineInverse(const Matrix4& matrix) {
+  const auto& m = matrix.m;
+  const float c00 = m[5] * m[10] - m[9] * m[6];
+  const float c01 = m[8] * m[6] - m[4] * m[10];
+  const float c02 = m[4] * m[9] - m[8] * m[5];
+  const float determinant = m[0] * c00 + m[1] * c01 + m[2] * c02;
+  Matrix4 inverse;
+  if (determinant == 0.0F || !std::isfinite(determinant)) {
+    return inverse;
+  }
+  const float scale = 1.0F / determinant;
+  auto& r = inverse.m;
+  r[0] = c00 * scale;
+  r[4] = c01 * scale;
+  r[8] = c02 * scale;
+  r[1] = (m[9] * m[2] - m[1] * m[10]) * scale;
+  r[5] = (m[0] * m[10] - m[8] * m[2]) * scale;
+  r[9] = (m[8] * m[1] - m[0] * m[9]) * scale;
+  r[2] = (m[1] * m[6] - m[5] * m[2]) * scale;
+  r[6] = (m[4] * m[2] - m[0] * m[6]) * scale;
+  r[10] = (m[0] * m[5] - m[4] * m[1]) * scale;
+  for (int row = 0; row < 3; ++row) {
+    r[12 + row] = -(r[row] * m[12] + r[4 + row] * m[13] + r[8 + row] * m[14]);
+  }
+  return inverse;
+}
+
 MeshId RenderWorld::CreateMesh() {
   const MeshId id = next_mesh_++;
   MeshSnapshot& mesh = meshes_[id].snapshot;

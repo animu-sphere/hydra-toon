@@ -159,9 +159,9 @@ mmd_opaque    mmd_transparent    mmd_outline
 preview_surface
 ```
 
-Beside them, `mmd_shadow` draws MMD's self-shadow map, depth alone, before
-the scene (§10); it shades nothing. The shared shadow caster pass (§14)
-joins it as another depth-only pass, not a shading pipeline.
+Beside them, `shadow`, the shared caster pass (§14), draws the shadow
+views, MMD's self-shadow map among them (§10), depth alone, before the
+scene; it shades nothing.
 
 MToon and MMD are separate shaders, not one shader with a model switch. They
 share what is truly common — skinning, morph evaluation, the texture table,
@@ -229,14 +229,18 @@ MikuMikuEffect's `full.fx` does, while it is on: on unless the host turns
 it off, as MMD's own switch is (`DrawList::mmd_self_shadow`, the render
 setting `toon:mmdSelfShadow`).
 
-- **The map.** Each frame, before the scene, a depth map is drawn from the
-  light MMD's shading reads, the scene's first direct light, when it is
-  directional; from a point or spot light, or with no direct light, there
-  is no map and nothing is shadowed. Every MMD draw whose material casts
-  draws into it, both faces, no texel's alpha cutting it away, as `full.fx`
-  draws its map.
+- **The map.** The map is the shared shadow view of the light MMD's
+  shading reads, the scene's first direct light, when it is directional
+  and casts ([shadow policy §6](SHADOW_POLICY.md#6-mat-q7-and-mmds-migration)):
+  drawn each frame before the scene; from a point or spot light, from a
+  light whose shadow is off, or with no direct light, there is no map and
+  nothing is shadowed. Every MMD draw whose material casts draws into it,
+  both faces, no texel's alpha cutting it away, as `full.fx` draws its
+  map, and so do other families' casters while shared shadows are on
+  (§14).
 - **What it covers.** Along the light, the map spans the box around every
-  MMD draw that casts or receives. Across it, the map follows the camera,
+  draw that casts into it or receives it, as MMD's alone did in an MMD
+  scene. Across it, the map follows the camera,
   as MMD's own does: it spans what the camera sees of the receivers, their
   joints' posed boxes (`OutlineBounds::ScenePieces`) that the frustum
   reaches, each cut to the frustum, and no more of the box, so a close-up

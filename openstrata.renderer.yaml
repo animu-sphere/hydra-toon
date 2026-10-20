@@ -36,6 +36,8 @@ validation:
     - renderer.material.mmd
     - renderer.material.mmd_outline
     - renderer.material.mmd_self_shadow
+    - renderer.shadow.shared_casters
+    - renderer.shadow.receivers
     - renderer.antialiasing.msaa
     - renderer.skinning.gpu
     - renderer.install_tree
