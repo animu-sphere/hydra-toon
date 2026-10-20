@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [85](85-2026-10-21-shared-shadow-stage-1.md) | Shared shadows, stage 1: the core fits one directional view, one caster pass draws every family, MToon and PreviewSurface receive; MMD frames and fixtures byte-identical to `main`, pass ≈0.25 ms GPU and fit ≈0.15 ms CPU on AliciaSolid |
 | [84](84-2026-10-19-ci-primvar-device-skip.md) | Release dry-run failure on GPU-less CI: primvar GPU validation now probes actual renderer creation; forced missing-driver 1→77, shader failure retained, CPU/real-GPU checks passed |
 | [83](83-2026-10-19-v050-acceptance.md) | Bounded v0.5.0 acceptance: two original RGBA fixtures at 1x/4x over four backgrounds, MMD receiver coverage, one time-boxed existing tangent/reference run and explicit native usdview limitations |
 | [82](82-2026-10-19-usdview-rgba-consumer.md) | Controlled usdview linear-framebuffer PNG/compositor consumer at 1x/4x, opaque host display agreement and native transparent sRGB screenshot limitation |

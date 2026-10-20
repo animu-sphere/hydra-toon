@@ -2411,8 +2411,11 @@ bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
          FlushIfNeeded(device_, views_buffer_, detail);
 }
 
-bool ShadowMap::Update(const DrawList& draws, std::string& detail) {
+bool ShadowMap::Update(const DrawList& draws, std::string& detail,
+    double& fit_ms) {
+  const std::int64_t fit_start = SteadyNanoseconds();
   fit_.Update(draws, kShadowMapSize);
+  fit_ms = static_cast<double>(SteadyNanoseconds() - fit_start) / 1e6;
   MmdShadowParameters parameters{};
   auto* views = static_cast<ShadowViewParameters*>(views_buffer_.mapped);
   const Matrix4 world_from_view = AffineInverse(draws.view.view);

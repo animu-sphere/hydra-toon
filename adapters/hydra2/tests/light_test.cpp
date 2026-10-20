@@ -70,6 +70,9 @@ int main(int argc, char** argv) {
                  ambient->light.color == Toon::Float3{0.05F, 0.1F, 0.15F},
           "colour, exposure, transform and shaping must normalize"))
     return 1;
+  if (!Check(key->light.shadow && point->light.shadow && !spot->light.shadow,
+          "shadow:enable must be read, true when unauthored"))
+    return 1;
   const auto warm = UsdLuxBlackbodyTemperatureAsRgb(3000);
   if (!Check(point->light.color == Toon::Float3{warm[0] * 1.5F, warm[1] * 1.5F, warm[2] * 1.5F},
           "temperature and diffuse multiplier must reach the light colour"))

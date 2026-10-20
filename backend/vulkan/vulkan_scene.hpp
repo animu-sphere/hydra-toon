@@ -810,9 +810,9 @@ class ShadowMap {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,
       VkDescriptorSet set, std::string& detail);
-  // Fit this frame's views. No frame that reads the parameters may be in
-  // flight.
-  bool Update(const DrawList& draws, std::string& detail);
+  // Fit this frame's views, timing the fit. No frame that reads the
+  // parameters may be in flight.
+  bool Update(const DrawList& draws, std::string& detail, double& fit_ms);
   // Record the views' passes, outside any other rendering. A frame that
   // draws no view records nothing, once the image has been readable since
   // a first, empty pass.

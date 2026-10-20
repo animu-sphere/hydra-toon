@@ -116,6 +116,7 @@ private:
       look_at_present_{kWindow};
   Series camera_present_{kWindow};
   Series pose_write_{kWindow}, morph_write_{kWindow}, material_write_{kWindow};
+  Series shadow_fit_{kWindow};
   std::vector<FrameLatency> latency_frames_;
   std::size_t latency_next_ = 0;
   // Response latency uses the first completed frame for each input update.

@@ -54,7 +54,8 @@ count, provisionally four; the rest light without shadows. The count is a
 backend capacity, settled by measurement in the second stage (§9), and
 the overflow is reported, not silent. MMD keeps reading only the scene's
 first direct light and casts only when that light is directional, as
-material policy §10 says.
+material policy §10 says; when that light's shadow is off, MMD's receivers
+are not shadowed either.
 
 ## 3. Settings
 
@@ -99,18 +100,22 @@ never disagree with what the camera sees of it.
 
 Ownership follows design policy §35: the core decides, the backend draws.
 
-- **Core** (`render-extraction`). Shadow settings, the selection of
-  shadowing lights and the fit of each light's view are backend-neutral
-  values in the draw list (`DrawList::shadows`), computed from the posed
-  bounds extraction already keeps (`OutlineBounds::SceneBounds`,
-  `ScenePieces`), so WebGPU (v0.7.0) reuses them unchanged. Each view
-  carries its light, its clip-from-world transform, its depth range in
-  scene units and its texel size in scene units.
-- **Backend**. One D32 two-dimensional array image, one layer per view at
-  the set resolution; the caster pipelines; the caster pass, recorded once
-  per frame before the scene for every view that has a receiver; the view
-  parameter buffer; barriers. Each light entry in the frame's light buffer
-  names its view or none. A resolution change rebuilds the image alone.
+- **Core** (`render-extraction`). Shadow settings are per-frame values in
+  the draw list (`DrawList::shadows`, `DrawList::mmd_self_shadow`). Which
+  materials cast and receive (`ShadowRoleOf`), the selection of shadowing
+  lights and the fit of each light's view are the core's `ShadowFit`,
+  which keeps each mesh's posed bounds (`OutlineBounds::SceneBounds`,
+  `ScenePieces`) and fits backend-neutral `ShadowView`s from the draw list
+  each frame, so WebGPU (v0.7.0) reuses them unchanged. Each view carries
+  its light, its clip-from-world transform (depth in [0, 1] from the
+  light, y up), its depth range in scene units and its texel size in
+  scene units.
+- **Backend**. A D32 image at the set resolution, a two-dimensional array
+  of one layer per view once more than one view is drawn; the caster
+  pipeline; the caster pass, recorded once per frame before the scene for
+  every view that has a receiver; the view parameter buffer; barriers.
+  Each light entry in the frame's light buffer names its view or none. A
+  resolution change rebuilds the image alone.
 - **Adapters**. The Hydra and fast adapters supply lights, their shadow
   enable and the settings as scene data and own no shadow resource or pass.
 
@@ -136,7 +141,7 @@ there is no second MMD map. Consequences:
 
 - **An MMD-only scene is unchanged.** Its casters, receivers and fit are
   exactly today's, so the map and frame match the current self-shadow
-  output; the existing `mmd_shadow` GPU tests and the evidence of reports
+  output; the existing `mmd_self_shadow` GPU check and the evidence of reports
   [60](../reports/renderer/60-2026-10-12-mmd-self-shadow.md),
   [63](../reports/renderer/63-2026-10-17-self-shadow-quality.md) and
   [66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md) remain the
@@ -158,8 +163,10 @@ in terms of their current shading:
 
 - **MToon**: a light's visibility scales its ramped shading term before the
   shade/lit mix, so shadowed light gives the shade colour, as the shift and
-  toony ramp would where the surface turns away. Whether the rim's incident
-  sum is shadowed is settled against three-vrm in stage 1 (§9).
+  toony ramp would where the surface turns away. The rim's incident sum
+  is not shadowed: three-vrm's shadow scales the shading term alone,
+  `getShading`'s `shading *= shadow`, and its rim sums the light unshadowed
+  (settled in stage 1, [report 85](../reports/renderer/85-2026-10-21-shared-shadow-stage-1.md)).
 - **PreviewSurface**: visibility scales the light's direct diffuse and
   specular response.
 - **MMD**: material policy §10, from the first direct light's view only.

@@ -36,6 +36,8 @@ struct FrameLatency {
   double pose_write_ms = 0;
   double morph_write_ms = 0;
   double material_write_ms = 0;
+  // The core's fit of the shared shadow views (ShadowFit), on the CPU.
+  double shadow_fit_ms = 0;
 };
 
 // The host and renderer use the same monotonic clock. A producer clock is
