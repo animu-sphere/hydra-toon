@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <toon/render_world.hpp>
@@ -47,6 +49,12 @@ struct DrawList {
   // it shade by it (material policy §10). A per-frame value, like
   // `outlines`.
   bool mmd_self_shadow = true;
+  // Shared shadows, the render setting `toon:shadows` (shadow policy §3):
+  // whether the casters of every family but MMD draw into the shared
+  // views and every family but MMD receives them. MMD's casters draw
+  // whenever a view is drawn, and its receivers follow `mmd_self_shadow`.
+  // A per-frame value, like `outlines`.
+  bool shadows = true;
   // Whether MMD materials' texture, sphere and toon tints, which material
   // morphs set, draw as MikuMikuEffect's full.fx draws them. Off, as MMD
   // itself draws none (material policy MAT-Q6); the tints stay in the
@@ -120,6 +128,84 @@ private:
   std::uint64_t points_revision_ = 0;
   std::uint64_t topology_revision_ = 0;
   std::uint64_t skin_revision_ = 0;
+};
+
+// How a material takes part in shared shadows (shadow policy §4), before
+// a frame's settings decide. A null material is an unbound draw's display
+// colour, an opaque, double-sided dielectric.
+struct ShadowRole {
+  // MMD's: it casts by its castSelfShadow and receives by its
+  // receiveSelfShadow, as MMD's self-shadow reads them.
+  bool mmd = false;
+  bool casts = false;
+  // Whether it casts both faces, or only those its surface draws.
+  bool both_faces = false;
+  // Whether its texels' alpha cuts it at its Mask cutoff as it casts.
+  bool cut = false;
+  bool receives = false;
+};
+[[nodiscard]] ShadowRole ShadowRoleOf(const ToonMaterial* material);
+
+// The material `id` names among `draws.materials`; null for 0 or an id
+// the list does not have.
+[[nodiscard]] const ToonMaterial* FindMaterial(const DrawList& draws,
+    MaterialId id);
+
+// The views a frame draws shared shadows into (shadow policy §5): one,
+// the first shadowing directional light's or the fallback key's, until
+// more are measured.
+constexpr std::uint32_t kShadowViewCapacity = 1;
+
+// One view of a shadowing light, backend-neutral.
+struct ShadowView {
+  // The light's id; 0 for the fallback key.
+  LightId light = 0;
+  // From the scene's space to the view's clip space: x and y in [-1, 1]
+  // across it, y up, and z, the depth a caster writes and a receiver
+  // compares, in [0, 1] from its side nearest the light.
+  Matrix4 clip_from_world;
+  // Its depth range and the width of one of its texels, in scene units.
+  double depth = 0.0;
+  double texel = 0.0;
+  // Whether MMD's receivers read it: it is the view of the scene's first
+  // direct light and MMD's self-shadow is on (shadow policy §6).
+  bool mmd = false;
+};
+
+// Decides each frame which views are drawn and fits each to what it must
+// cover, from posed bounds it keeps per mesh as OutlineBounds, so a pose
+// moves a view without touching geometry. A directional view is fitted as
+// material policy §10 fits MMD's map, over every family's casters and
+// receivers: along the light, the box around them; across it, what the
+// camera sees of the receivers, in steps of an eighth of an octave and
+// whole texels. A light with nothing to receive its shadow has no view.
+class ShadowFit {
+public:
+  void Update(const DrawList& draws, std::uint32_t resolution);
+  [[nodiscard]] const std::vector<ShadowView>& views() const { return views_; }
+  // Shadowing lights given no view this frame: past the capacity, or spot
+  // lights, which no view draws yet. Reported, not silent.
+  [[nodiscard]] std::uint32_t unviewed() const { return unviewed_; }
+
+  // Whether a draw of `role` draws into the frame's views, and whether it
+  // receives `view`, under the draw list's settings.
+  [[nodiscard]] static bool Casts(const ShadowRole& role, const DrawList& draws);
+  [[nodiscard]] static bool Receives(const ShadowRole& role,
+      const DrawList& draws, const ShadowView& view);
+
+private:
+  struct Bounds {
+    OutlineBounds bounds;
+    std::uint64_t generation = 0;
+  };
+  bool Fit(const DrawList& draws, const Float3& travel, double size,
+      ShadowView& view);
+
+  std::unordered_map<MeshId, Bounds> bounds_;
+  std::vector<OutlineBounds::SceneBox> pieces_;
+  std::vector<ShadowView> views_;
+  std::uint64_t generation_ = 0;
+  std::uint32_t unviewed_ = 0;
 };
 
 // A bounded set of small, rigid opaque occluders. Mask, Blend, skinned and

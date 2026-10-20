@@ -175,6 +175,17 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   return surface;
 }
 
+// The alpha MToon's surface has at st, as ShadeSurface takes it, for a
+// shadow caster's cut: the base colour's and its texel's at the animated
+// UVs.
+float SurfaceAlpha(MToonParameters material, float2 st) {
+  const float mask = SampleTexture(material.animation_textures.z,
+      material.animation_textures.w, material.mask_uv, st).b;
+  const float2 animated_st = AnimatedST(material, st, mask);
+  return material.base_color.a * SampleTexture(material.textures.x,
+      material.textures.y, material.base_uv, animated_st).a;
+}
+
 // Whether a Mask material cuts this fragment away.
 bool CutAway(MToonParameters material, float alpha) {
   return material.shade_color.a >= 0.0 && alpha < material.shade_color.a;

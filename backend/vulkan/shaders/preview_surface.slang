@@ -3,40 +3,7 @@
 // irradiance; environment reflections and arbitrary graph evaluation are
 // outside this realization. All shading takes place in linear colour.
 #include "surface_common.slang"
-
-struct PreviewTextureParameters {
-  float4 uv_rows[2];
-  float4 scale;
-  float4 bias;
-  float4 fallback;
-  uint4 info;
-};
-struct PreviewParameters {
-  float4 base_color;
-  float4 emissive;
-  float4 surface;
-  float4 normal;
-  PreviewTextureParameters inputs[6];
-};
-[[vk::binding(7, 0)]] StructuredBuffer<PreviewParameters> materials;
-
-float4 PreviewSample(PreviewTextureParameters input, float2 st) {
-  float4 texel = input.fallback;
-  if (input.info.x != 0) {
-    const float2 uv = (draw.flags & kDrawHasUVs) != 0 ? st
-        : float2(input.uv_rows[0].w, input.uv_rows[1].w);
-    texel = textures[input.info.x].Sample(samplers[input.info.y], TransformUV(input.uv_rows, uv));
-  }
-  return texel * input.scale + input.bias;
-}
-
-float PreviewScalar(PreviewTextureParameters input, float2 st, float value) {
-  return (input.info.w & 1) != 0 ? PreviewSample(input, st)[min(input.info.z, 3)] : value;
-}
-
-float3 PreviewColor(PreviewTextureParameters input, float2 st, float3 value) {
-  return (input.info.w & 1) != 0 ? PreviewSample(input, st).rgb : value;
-}
+#include "preview_common.slang"
 
 [shader("vertex")]
 TangentVertexStageOutput vertex_main(TangentVertexInput input) {
@@ -55,7 +22,7 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     material.surface = float4(0, 1, -1, 0);
     material.normal = float4(0, 0, 1, 0);
   } else {
-    material = materials[draw.material_slot];
+    material = preview_materials[draw.material_slot];
   }
   const float opacity = saturate(PreviewScalar(material.inputs[4], st, material.base_color.a));
   const float alpha = (draw.flags & kDrawBlend) != 0 ? opacity : 1.0;

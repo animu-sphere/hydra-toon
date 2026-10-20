@@ -37,8 +37,8 @@ SceneShaders SceneShadersIn(const std::string& directory) {
       (root / "mmd_transparent.frag.spv").string(),
       (root / "mmd_outline.vert.spv").string(),
       (root / "mmd_outline.frag.spv").string(),
-      (root / "mmd_shadow.vert.spv").string(),
-      (root / "mmd_shadow.frag.spv").string(),
+      (root / "shadow.vert.spv").string(),
+      (root / "shadow.frag.spv").string(),
       (root / "overlay.vert.spv").string(),
       (root / "overlay.frag.spv").string(),
       (root / "preview_surface.vert.spv").string(),
@@ -357,7 +357,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   const DrawList& draws = *frame;
   if (!meshes_.Update(draws, error) ||
       !materials_.Update(draws, textures_, error) ||
-      !shadow_.Update(draws, meshes_, materials_, error)) {
+      !shadow_.Update(draws, error)) {
     return false;
   }
   statistics_.latency.buffers_written = SteadyNanoseconds();
@@ -376,8 +376,12 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
     return false;
   }
   textures_.RecordUploads(command_);
-  statistics_.shadow_draws =
-      shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
+  shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
+  statistics_.shadow_draws = shadow_.mmd_draws();
+  statistics_.shadow_caster_draws = shadow_.caster_draws();
+  statistics_.shadow_views =
+      static_cast<std::uint32_t>(shadow_.fit().views().size());
+  statistics_.shadow_unviewed = shadow_.fit().unviewed();
 
   // Every attachment is cleared, so none keeps its contents. Multisampled,
   // the depth product is written by the resolve, at the colour output stage

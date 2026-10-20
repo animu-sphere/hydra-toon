@@ -46,8 +46,8 @@ enum class PresentSetupStatus {
 struct PresentGpuTimes {
   // Textures copied and mipmapped before the scene.
   double uploads = 0.0;
-  // MMD's self-shadow map drawn, before the scene; 0 in a frame without one
-  // (material policy §10).
+  // The shared shadow views drawn, MMD's self-shadow map among them,
+  // before the scene; 0 in a frame without one (shadow policy §5).
   double shadow = 0.0;
   // Waiting for the swapchain image the frame draws into to be released by
   // the presentation engine: long under vsync, not the renderer's work.
@@ -84,6 +84,8 @@ struct PresentDrawCounts {
   std::uint32_t overlay_vertices = 0;
   // All hulls, including those counted in transparent above.
   std::uint32_t hulls = 0;
+  // Caster draws into the shared shadow views, before the scene pass.
+  std::uint32_t shadow = 0;
 };
 
 struct PresentStatistics {

@@ -116,7 +116,9 @@ void AppendHostEvidence(std::uint64_t frame_index,
   // subsets divide it into; how many of those selected MToon, went through
   // mtoon_transparent, added mtoon_outline's hull, selected MMD, added
   // mmd_outline's edge, were skinned on the GPU and drew authored normals;
-  // and, from the renderer, how many draws went into MMD's self-shadow map.
+  // and, from the renderer, how many MMD draws went into MMD's self-shadow
+  // map, how many shared shadow views were drawn and how many caster draws
+  // went into them.
   std::size_t part_draws{};
   std::size_t mtoon_draws{};
   std::size_t transparent_draws{};
@@ -187,6 +189,8 @@ void AppendHostEvidence(std::uint64_t frame_index,
          << " draws_mmd=" << mmd_draws
          << " draws_mmd_outline=" << mmd_outline_draws
          << " draws_mmd_shadow=" << statistics.shadow_draws
+         << " shadow_views=" << statistics.shadow_views
+         << " draws_shadow=" << statistics.shadow_caster_draws
          << " draws_skinned=" << skinned_draws
          << " draws_authored_normals=" << authored_normal_draws << '\n';
 }
@@ -244,6 +248,7 @@ TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
     ((timeSeconds, "toon:timeSeconds"))
     ((backgroundMode, "toon:backgroundMode"))
     ((backgroundColor, "toon:backgroundColor"))
+    ((shadows, "toon:shadows"))
     ((mmdSelfShadow, "toon:mmdSelfShadow"))
     ((mmdMorphTints, "toon:mmdMorphTints")));
 
@@ -300,6 +305,14 @@ float RequestedMetersPerUnit(const HdRenderDelegate& delegate) {
   return value.IsHolding<double>()
              ? static_cast<float>(value.UncheckedGet<double>())
              : 1.0F;
+}
+
+// Whether `toon:shadows` turns shared shadows on: on unless a host sets it
+// false (shadow policy §3).
+bool RequestedShadows(const HdRenderDelegate& delegate) {
+  const VtValue value =
+      VtValue::Cast<bool>(delegate.GetRenderSetting(SettingTokens->shadows));
+  return !value.IsHolding<bool>() || value.UncheckedGet<bool>();
 }
 
 // Whether `toon:mmdSelfShadow` turns MMD's self-shadow on, as MMD's own
@@ -620,7 +633,7 @@ public:
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
       std::uint32_t samples, float meters_per_unit, double time_seconds,
-      bool mmd_self_shadow, bool mmd_morph_tints,
+      bool shadows, bool mmd_self_shadow, bool mmd_morph_tints,
       const std::optional<Toon::BackgroundSettings>& background) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
@@ -656,6 +669,7 @@ public:
     world_.SetTimeSeconds(time_seconds);
     world_.Commit(snapshot_);
     Toon::ExtractDrawList(snapshot_, draws_);
+    draws_.shadows = shadows;
     draws_.mmd_self_shadow = mmd_self_shadow;
     draws_.mmd_morph_tints = mmd_morph_tints;
     if (!renderer_->Render(draws_, width, height, color_, depth_, error)) {
@@ -1874,7 +1888,9 @@ private:
 };
 
 // UsdLux distant, sphere (point or shaped spot), and uniform dome ambient.
-// No area integration, shadows, IES, light linking or environment textures.
+// Each reads UsdLux's shadow:enable, true unless authored false. No area
+// integration, IES, light or shadow linking, shadow colour or falloff, or
+// environment textures.
 class HdToonLight final : public HdLight {
 public:
   HdToonLight(const SdfPath& path, const TfToken& type,
@@ -1915,6 +1931,9 @@ public:
     };
     Toon::ToonLight light;
     light.visible = delegate->GetVisible(GetId());
+    const VtValue shadow = VtValue::Cast<bool>(
+        delegate->GetLightParamValue(GetId(), HdLightTokens->shadowEnable));
+    light.shadow = !shadow.IsHolding<bool>() || shadow.UncheckedGet<bool>();
     GfVec3f color(1.0F);
     const VtValue color_value = delegate->GetLightParamValue(GetId(), HdLightTokens->color);
     if (color_value.IsHolding<GfVec3f>()) {
@@ -1987,7 +2006,8 @@ private:
     const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
     state_->Render(render_pass_state, RequestedSamples(delegate),
         RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate),
-        RequestedMmdSelfShadow(delegate), RequestedMmdMorphTints(delegate),
+        RequestedShadows(delegate), RequestedMmdSelfShadow(delegate),
+        RequestedMmdMorphTints(delegate),
         RequestedBackground(delegate));
   }
 
@@ -2347,6 +2367,7 @@ HdToonRenderDelegate::GetRenderSettingDescriptors() const {
           VtValue(std::string("opaque"))},
       {"Background colour (linear RGBA)", SettingTokens->backgroundColor,
           VtValue(GfVec4f(0.05F, 0.10F, 0.15F, 1.0F))},
+      {"Shared shadows", SettingTokens->shadows, VtValue(true)},
       {"MMD self-shadow", SettingTokens->mmdSelfShadow, VtValue(true)},
       {"MMD morph tints", SettingTokens->mmdMorphTints, VtValue(false)}};
 }

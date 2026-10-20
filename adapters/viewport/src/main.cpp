@@ -355,6 +355,7 @@ int RunViewport(int argc, char** argv) {
     if (!session->SetCompositeBackground(background, error))
       throw std::runtime_error(error);
     bool outlines = arguments.outlines;
+    bool shadows = arguments.shadows;
     bool mmd_self_shadow = arguments.mmd_self_shadow;
     bool mmd_morph_tints = arguments.mmd_morph_tints;
     Toon::LightingDebug lighting = arguments.lighting;
@@ -594,6 +595,7 @@ int RunViewport(int argc, char** argv) {
       }
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
+      draws.shadows = shadows;
       draws.mmd_self_shadow = mmd_self_shadow;
       draws.mmd_morph_tints = mmd_morph_tints;
       draws.outline_frustum_culling = arguments.outline_culling;
@@ -635,6 +637,7 @@ int RunViewport(int argc, char** argv) {
         shown.vsync = arguments.vsync;
         shown.outlines = outlines;
         shown.background = background;
+        shown.shadows = shadows;
         shown.mmd_self_shadow = mmd_self_shadow;
         shown.mmd_morph_tints = mmd_morph_tints;
         shown.lighting = lighting;
@@ -716,6 +719,11 @@ int RunViewport(int argc, char** argv) {
         if (controls.outlines_changed) {
           outlines = controls.outlines;
           draws.outlines = outlines;
+          telemetry = {};
+        }
+        if (controls.shadows_changed) {
+          shadows = controls.shadows;
+          draws.shadows = shadows;
           telemetry = {};
         }
         if (controls.mmd_self_shadow_changed) {

@@ -127,6 +127,8 @@ struct PipelineDescription {
   std::uint32_t vertex_streams = 1;
   bool sub_texture_uvs = false;
   bool tangents = false;
+  // Position and UV alone, the UV the second stream: the shadow pipeline.
+  bool uvs_second = false;
   // Cull mode, front face, depth writes and vertex strides set per draw
   // rather than baked in.
   bool dynamic_draw_state = false;
@@ -188,16 +190,20 @@ bool CreateScenePipeline(VkDevice device,
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = fragment_module;
   stages[1].pName = "main";
-  const VkFormat stream_formats[4] = {VK_FORMAT_R32G32B32_SFLOAT,
+  VkFormat stream_formats[4] = {VK_FORMAT_R32G32B32_SFLOAT,
       VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32_SFLOAT,
       description.tangents ? VK_FORMAT_R32G32B32A32_SFLOAT :
       description.sub_texture_uvs ? VK_FORMAT_R32G32_SFLOAT
                                   : VK_FORMAT_R32_SFLOAT};
-  const std::uint32_t stream_strides[4] = {sizeof(Float3), sizeof(Float3),
+  std::uint32_t stream_strides[4] = {sizeof(Float3), sizeof(Float3),
       sizeof(Float2),
       description.tangents ? std::uint32_t{sizeof(Float4)} :
       description.sub_texture_uvs ? std::uint32_t{sizeof(Float2)}
                                   : std::uint32_t{sizeof(float)}};
+  if (description.uvs_second) {
+    stream_formats[1] = VK_FORMAT_R32G32_SFLOAT;
+    stream_strides[1] = sizeof(Float2);
+  }
   VkVertexInputBindingDescription bindings[4]{};
   VkVertexInputAttributeDescription attributes[4]{};
   for (std::uint32_t stream = 0; stream < description.vertex_streams;
@@ -596,62 +602,6 @@ bool Fits(const MeshPart& part, std::uint32_t index_count) {
 // shaders/mmd_outline.slang states it.
 constexpr double kMetersPerMmdUnit = 0.08;
 
-// The inverse of an affine matrix: its 3x3 inverted, the translation
-// moved back through it. The identity when the 3x3 is singular.
-Matrix4 AffineInverse(const Matrix4& matrix) {
-  const auto& m = matrix.m;
-  const float c00 = m[5] * m[10] - m[9] * m[6];
-  const float c01 = m[8] * m[6] - m[4] * m[10];
-  const float c02 = m[4] * m[9] - m[8] * m[5];
-  const float determinant = m[0] * c00 + m[1] * c01 + m[2] * c02;
-  Matrix4 inverse;
-  if (determinant == 0.0F || !std::isfinite(determinant)) {
-    return inverse;
-  }
-  const float scale = 1.0F / determinant;
-  auto& r = inverse.m;
-  r[0] = c00 * scale;
-  r[4] = c01 * scale;
-  r[8] = c02 * scale;
-  r[1] = (m[9] * m[2] - m[1] * m[10]) * scale;
-  r[5] = (m[0] * m[10] - m[8] * m[2]) * scale;
-  r[9] = (m[8] * m[1] - m[0] * m[9]) * scale;
-  r[2] = (m[1] * m[6] - m[5] * m[2]) * scale;
-  r[6] = (m[4] * m[2] - m[0] * m[6]) * scale;
-  r[10] = (m[0] * m[5] - m[4] * m[1]) * scale;
-  for (int row = 0; row < 3; ++row) {
-    r[12 + row] = -(r[row] * m[12] + r[4 + row] * m[13] + r[8 + row] * m[14]);
-  }
-  return inverse;
-}
-
-// The direction, in the scene's space, that the light MMD's shading reads
-// travels along: the first visible direct light, as MaterialCache writes
-// the frame buffer, or the fallback key, which is in view space. False
-// when that light is not directional, or there is none.
-bool SelfShadowLightDirection(const DrawList& draws, Float3& direction) {
-  if (!draws.lighting.scene_lights || draws.lights.empty()) {
-    Float3 key{-draws.lighting.key_direction.x,
-        -draws.lighting.key_direction.y, -draws.lighting.key_direction.z};
-    if (key == Float3{}) {
-      key = {-0.25F, -0.5F, -1.0F};
-    }
-    const auto& w = AffineInverse(draws.view.view).m;
-    direction = {w[0] * key.x + w[4] * key.y + w[8] * key.z,
-        w[1] * key.x + w[5] * key.y + w[9] * key.z,
-        w[2] * key.x + w[6] * key.y + w[10] * key.z};
-    return true;
-  }
-  for (const LightSnapshot& light : draws.lights) {
-    if (!light.light.visible || light.light.type == ToonLightType::Ambient) {
-      continue;
-    }
-    direction = light.light.direction;
-    return light.light.type == ToonLightType::Directional;
-  }
-  return false;
-}
-
 } // namespace
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -680,10 +630,8 @@ bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
              detail) &&
          LoadSpirv(shaders.mmd_outline_fragment, words.mmd_outline_fragment,
              detail) &&
-         LoadSpirv(shaders.mmd_shadow_vertex, words.mmd_shadow_vertex,
-             detail) &&
-         LoadSpirv(shaders.mmd_shadow_fragment, words.mmd_shadow_fragment,
-             detail);
+         LoadSpirv(shaders.shadow_vertex, words.shadow_vertex, detail) &&
+         LoadSpirv(shaders.shadow_fragment, words.shadow_fragment, detail);
 }
 
 bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
@@ -710,8 +658,9 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
 
   // mtoon_outline's vertex stage reads the width, its mode and its texture
   // from the same slot and table the fragment stages do. Binding 0 is the
-  // MToon parameter buffer and 4 the MMD one; 5 is MMD's self-shadow map
-  // and 6 its parameters; 7 is the PreviewSurface parameter buffer.
+  // MToon parameter buffer and 4 the MMD one; 5 is the shared shadow
+  // views' image and 6 MMD's reading of it; 7 is the PreviewSurface
+  // parameter buffer.
   const VkShaderStageFlags material_stages =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   VkDescriptorSetLayoutBinding material_bindings[8]{};
@@ -844,14 +793,18 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
   mmd_outline.vertex_streams = 4;
   mmd_outline.sub_texture_uvs = false;
   mmd_outline.tangents = false;
-  // mmd_shadow reads the points alone and draws depth alone, both faces,
-  // pushed back by the slope, so a lit surface does not shadow itself.
-  PipelineDescription mmd_shadow;
-  mmd_shadow.vertex_words = &words.mmd_shadow_vertex;
-  mmd_shadow.fragment_words = &words.mmd_shadow_fragment;
-  mmd_shadow.push_constant_size = sizeof(SurfaceDrawConstants);
-  mmd_shadow.depth_bias = true;
-  mmd_shadow.depth_only = true;
+  // shadow reads the points and, for a Mask cut, the UVs, and draws depth
+  // alone, the faces each caster's role names, pushed back by the slope,
+  // so a lit surface does not shadow itself.
+  PipelineDescription shadow;
+  shadow.vertex_words = &words.shadow_vertex;
+  shadow.fragment_words = &words.shadow_fragment;
+  shadow.push_constant_size = sizeof(SurfaceDrawConstants);
+  shadow.vertex_streams = 2;
+  shadow.uvs_second = true;
+  shadow.dynamic_draw_state = true;
+  shadow.depth_bias = true;
+  shadow.depth_only = true;
   mtoon.alpha_to_coverage = true;
   return CreateScenePipeline(device, mesh, pipelines, color_format,
              depth_format, pipelines.mesh, detail) &&
@@ -869,13 +822,12 @@ bool CreateScenePipelineObjects(VkDevice device, const SceneShaderWords& words,
              depth_format, pipelines.mmd_transparent, detail) &&
          CreateScenePipeline(device, mmd_outline, pipelines, color_format,
              depth_format, pipelines.mmd_outline, detail) &&
-         CreateScenePipeline(device, mmd_shadow, pipelines,
-             VK_FORMAT_UNDEFINED, kShadowFormat, pipelines.mmd_shadow,
-             detail);
+         CreateScenePipeline(device, shadow, pipelines,
+             VK_FORMAT_UNDEFINED, kShadowFormat, pipelines.shadow, detail);
 }
 
 void DestroyScenePipelineObjects(VkDevice device, ScenePipelines& pipelines) {
-  DestroyScenePipeline(device, pipelines.mmd_shadow);
+  DestroyScenePipeline(device, pipelines.shadow);
   DestroyScenePipeline(device, pipelines.mmd_outline);
   DestroyScenePipeline(device, pipelines.mmd_transparent);
   DestroyScenePipeline(device, pipelines.mmd);
@@ -1565,12 +1517,6 @@ bool MaterialCache::Update(const DrawList& draws,
       entry.depth_write = WritesDepth(material.material);
       entry.draw_order = material.material.mmd.draw_order;
       entry.mmd_translucent = material.material.alpha < 1.0F;
-      entry.cast_self_shadow =
-          material.material.model == ToonShadingModel::MMD &&
-          material.material.mmd.cast_self_shadow;
-      entry.receive_self_shadow =
-          material.material.model == ToonShadingModel::MMD &&
-          material.material.mmd.receive_self_shadow;
       ++writes_;
       written = true;
       parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
@@ -2305,165 +2251,17 @@ void MeshCache::Record(VkCommandBuffer command,
   }
 }
 
-bool MeshCache::SelfShadowBounds(const DrawList& draws,
-    const MaterialCache& materials, const Matrix4& light_from_world,
-    SelfShadowExtent& extent) const {
-  extent = {};
-  bool bounded = false;
-  MeshPart whole;
-  std::vector<OutlineBounds::SceneBox> pieces;
-  // OpenGL's clip space: a point is in the frustum where -w <= x, y, z <= w.
-  const Matrix4 clip_from_world = Multiply(draws.view.projection, draws.view.view);
-  const auto& c = clip_from_world.m;
-  const auto& v = draws.view.view.m;
-  const Matrix4 world_from_view = AffineInverse(draws.view.view);
-  const auto& w = world_from_view.m;
-  // An unskewed projection, perspective or orthographic, whose frustum a
-  // part's box is cut to.
-  const auto& p = draws.view.projection.m;
-  const bool unskewed = p[0] != 0.0F && p[5] != 0.0F && p[1] == 0.0F &&
-                        p[4] == 0.0F;
-  const bool perspective = unskewed && p[11] == -1.0F && p[15] == 0.0F;
-  const bool orthographic = unskewed && p[11] == 0.0F && p[15] == 1.0F;
-  const auto& m = light_from_world.m;
-  const auto light = [&](const std::array<double, 3>& point, std::size_t row) {
-    return m[12 + row] + m[row] * point[0] + m[4 + row] * point[1] +
-           m[8 + row] * point[2];
-  };
-  const auto corner_of = [](const std::array<double, 3>& low,
-                             const std::array<double, 3>& high,
-                             unsigned corner) {
-    std::array<double, 3> point{};
-    for (std::size_t axis = 0; axis < 3; ++axis) {
-      point[axis] = (corner & (1U << axis)) ? high[axis] : low[axis];
-    }
-    return point;
-  };
-  for (const MeshSnapshot& mesh : draws.draws) {
-    const auto found = entries_.find(mesh.id);
-    if (found == entries_.end()) {
-      continue;
-    }
-    const Entry& entry = found->second;
-    bool casts = false;
-    bool receives = false;
-    for (const MeshPart& part : PartsOf(mesh, entry.index_count, whole)) {
-      const MaterialCache::Entry* material = materials.Find(part.material);
-      if (material == nullptr || material->model != ToonShadingModel::MMD ||
-          !Fits(part, entry.index_count)) {
-        continue;
-      }
-      casts = casts || material->cast_self_shadow;
-      receives = receives || material->receive_self_shadow;
-    }
-    std::array<double, 3> mesh_low{};
-    std::array<double, 3> mesh_high{};
-    if ((!casts && !receives) ||
-        !entry.outline_bounds.SceneBounds(mesh, mesh_low, mesh_high)) {
-      continue;
-    }
-    extent.receivers = extent.receivers || receives;
-    for (unsigned corner = 0; corner < 8U; ++corner) {
-      const std::array<double, 3> point = corner_of(mesh_low, mesh_high, corner);
-      for (std::size_t row = 0; row < 3; ++row) {
-        const double value = light(point, row);
-        extent.low[row] = bounded ? std::min(extent.low[row], value) : value;
-        extent.high[row] = bounded ? std::max(extent.high[row], value) : value;
-      }
-      bounded = true;
-    }
-    if (!receives) {
-      continue;
-    }
-    // The receiver's parts the frustum reaches: a part is left out only
-    // when every corner of its box lies beyond one of the frustum's planes.
-    if (!entry.outline_bounds.ScenePieces(mesh, pieces)) {
-      pieces.assign(1, {mesh_low, mesh_high});
-    }
-    for (const OutlineBounds::SceneBox& piece : pieces) {
-      std::array<std::array<double, 4>, 8> clip{};
-      for (unsigned corner = 0; corner < 8U; ++corner) {
-        const std::array<double, 3> point = corner_of(piece.low, piece.high, corner);
-        for (std::size_t row = 0; row < 4; ++row) {
-          clip[corner][row] = c[12 + row] + c[row] * point[0] +
-                              c[4 + row] * point[1] + c[8 + row] * point[2];
-        }
-      }
-      bool outside = false;
-      for (std::size_t row = 0; row < 3 && !outside; ++row) {
-        for (const double sign : {-1.0, 1.0}) {
-          bool beyond = true;
-          for (const auto& point : clip) {
-            beyond = beyond && sign * point[row] > point[3];
-          }
-          outside = outside || beyond;
-        }
-      }
-      if (outside) {
-        continue;
-      }
-      // The part's box in view space, cut to the frustum's cross-section
-      // at the part's far side, which holds every nearer one, so the parts
-      // the camera sees only the edge of add only that edge.
-      std::array<double, 3> view_low{};
-      std::array<double, 3> view_high{};
-      for (unsigned corner = 0; corner < 8U; ++corner) {
-        const std::array<double, 3> point = corner_of(piece.low, piece.high, corner);
-        for (std::size_t row = 0; row < 3; ++row) {
-          const double value = v[12 + row] + v[row] * point[0] +
-                               v[4 + row] * point[1] + v[8 + row] * point[2];
-          view_low[row] = corner ? std::min(view_low[row], value) : value;
-          view_high[row] = corner ? std::max(view_high[row], value) : value;
-        }
-      }
-      if (perspective || orthographic) {
-        const double ahead = std::max(-view_low[2], 0.0);
-        for (std::size_t row = 0; row < 2; ++row) {
-          const double scale = p[5 * row];
-          const double shift = p[8 + row];
-          const double offset = p[12 + row];
-          const double from = perspective ? ahead * (-1.0 + shift) / scale
-                                          : (-1.0 - offset) / scale;
-          const double to = perspective ? ahead * (1.0 + shift) / scale
-                                        : (1.0 - offset) / scale;
-          view_low[row] = std::max(view_low[row], std::min(from, to));
-          view_high[row] = std::min(view_high[row], std::max(from, to));
-        }
-        if (!(view_low[0] <= view_high[0]) || !(view_low[1] <= view_high[1])) {
-          continue;
-        }
-      }
-      for (unsigned corner = 0; corner < 8U; ++corner) {
-        const std::array<double, 3> view = corner_of(view_low, view_high, corner);
-        std::array<double, 3> point{};
-        for (std::size_t row = 0; row < 3; ++row) {
-          point[row] = w[12 + row] + w[row] * view[0] + w[4 + row] * view[1] +
-                       w[8 + row] * view[2];
-        }
-        for (std::size_t row = 0; row < 3; ++row) {
-          const double value = light(point, row);
-          extent.seen_low[row] =
-              extent.seen ? std::min(extent.seen_low[row], value) : value;
-          extent.seen_high[row] =
-              extent.seen ? std::max(extent.seen_high[row], value) : value;
-        }
-        extent.seen = true;
-      }
-    }
-  }
-  return bounded;
-}
-
-std::uint32_t MeshCache::RecordSelfShadow(VkCommandBuffer command,
+void MeshCache::RecordShadowCasters(VkCommandBuffer command,
     const ScenePipelines& pipelines, const MaterialCache& materials,
-    const DrawList& draws, const Matrix4& clip_from_world) const {
-  std::uint32_t recorded = 0;
+    const DrawList& draws, const Matrix4& clip_from_world,
+    std::uint32_t& casters, std::uint32_t& mmd_casters) const {
   MeshPart whole;
   vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      pipelines.mmd_shadow.pipeline);
+      pipelines.shadow.pipeline);
   const VkDescriptorSet material_set = materials.descriptor_set();
   vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      pipelines.mmd_shadow.layout, 0, 1, &material_set, 0, nullptr);
+      pipelines.shadow.layout, 0, 1, &material_set, 0, nullptr);
+  vkCmdSetDepthWriteEnable(command, VK_TRUE);
   for (const MeshSnapshot& mesh : draws.draws) {
     const auto found = entries_.find(mesh.id);
     if (found == entries_.end()) {
@@ -2471,36 +2269,55 @@ std::uint32_t MeshCache::RecordSelfShadow(VkCommandBuffer command,
     }
     const Entry& entry = found->second;
     bool bound = false;
+    SurfaceDrawConstants constants{};
     for (const MeshPart& part : PartsOf(mesh, entry.index_count, whole)) {
-      const MaterialCache::Entry* material = materials.Find(part.material);
-      if (material == nullptr || !material->cast_self_shadow ||
-          !Fits(part, entry.index_count)) {
+      const ShadowRole role = ShadowRoleOf(FindMaterial(draws, part.material));
+      if (!ShadowFit::Casts(role, draws) || !Fits(part, entry.index_count)) {
         continue;
       }
       if (!bound) {
-        const VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command, 0, 1, &entry.vertices.buffer, &offset);
+        const VkBuffer streams[] = {entry.vertices.buffer,
+            entry.has_uvs ? entry.uvs.buffer : zero_uv_.buffer};
+        const VkDeviceSize offsets[] = {0, 0};
+        const VkDeviceSize strides[] = {sizeof(Float3),
+            entry.has_uvs ? sizeof(Float2) : 0U};
+        vkCmdBindVertexBuffers2(command, 0, 2, streams, offsets, nullptr,
+            strides);
         vkCmdBindIndexBuffer(command, entry.indices.buffer, 0,
             VK_INDEX_TYPE_UINT32);
         const VkDescriptorSet skin_set =
             (entry.skinned || entry.morphed) ? entry.skin_set : unskinned_set_;
         vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            pipelines.mmd_shadow.layout, 1, 1, &skin_set, 0, nullptr);
-        SurfaceDrawConstants constants{};
+            pipelines.shadow.layout, 1, 1, &skin_set, 0, nullptr);
         const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
         std::memcpy(constants.clip_from_object, clip_from_object.m.data(),
             sizeof(constants.clip_from_object));
-        constants.flags = entry.skin_flags;
-        vkCmdPushConstants(command, pipelines.mmd_shadow.layout,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-            sizeof(constants), &constants);
+        // The view's clip space keeps y up, unlike the camera's, so a face
+        // counter-clockwise in the scene is clockwise in the view's image.
+        float rows[12];
+        const bool mirrored = ViewRows(mesh.transform, rows);
+        vkCmdSetFrontFace(command, mirrored ? VK_FRONT_FACE_COUNTER_CLOCKWISE
+                                            : VK_FRONT_FACE_CLOCKWISE);
         bound = true;
       }
+      const MaterialCache::Entry* material = materials.Find(part.material);
+      const bool cut = role.cut && material != nullptr;
+      constants.material_slot = cut ? material->slot : 0U;
+      constants.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | entry.skin_flags |
+                        (cut ? (material->model == ToonShadingModel::MToon
+                                       ? kDrawCutMToon
+                                       : kDrawCutPreview)
+                             : 0U);
+      vkCmdPushConstants(command, pipelines.shadow.layout,
+          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+          sizeof(constants), &constants);
+      vkCmdSetCullMode(command,
+          role.both_faces ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       vkCmdDrawIndexed(command, part.index_count, 1, part.first_index, 0, 0);
-      ++recorded;
+      ++casters;
+      mmd_casters += role.mmd ? 1U : 0U;
     }
   }
-  return recorded;
 }
 
 void MeshCache::Destroy() {
@@ -2570,122 +2387,41 @@ bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
   return FlushIfNeeded(device_, buffer_, detail);
 }
 
-// The map looks along the light with an orthographic projection. Along the
-// light it spans the box around every MMD draw that casts or receives the
-// self-shadow, its depth running from the box's face nearest the light.
-// Across the light it spans what of that box the camera can see of a
-// receiver: the receivers' parts the frustum reaches, each cut to it. Only
-// a receiver reads the map, and along the light a caster outside that span
-// cannot shadow one inside it. So that a moving camera does not make the
-// shadow's edges crawl, each axis's span changes in steps of an eighth of
-// an octave and its centre in whole texels, and it is padded so the
-// filtered edge and a point moved along its normal stay inside.
-bool ShadowMap::Update(const DrawList& draws, const MeshCache& meshes,
-    const MaterialCache& materials, std::string& detail) {
-  active_ = false;
+bool ShadowMap::Update(const DrawList& draws, std::string& detail) {
+  fit_.Update(draws, kShadowMapSize);
   MmdShadowParameters parameters{};
-  Float3 travel;
-  SelfShadowExtent extent;
-  const double size = kShadowMapSize;
-  const auto length = [](Float3 value) {
-    return std::sqrt(double(value.x) * value.x + double(value.y) * value.y +
-                     double(value.z) * value.z);
-  };
-  if (draws.mmd_self_shadow && SelfShadowLightDirection(draws, travel) &&
-      length(travel) > 0.0 && std::isfinite(length(travel))) {
-    const double travel_length = length(travel);
-    // The light's frame: it looks down its -z, along the travel.
-    const std::array<double, 3> z{-travel.x / travel_length,
-        -travel.y / travel_length, -travel.z / travel_length};
-    const std::array<double, 3> up = std::abs(z[1]) < 0.99
-                                         ? std::array<double, 3>{0.0, 1.0, 0.0}
-                                         : std::array<double, 3>{1.0, 0.0, 0.0};
-    std::array<double, 3> x{up[1] * z[2] - up[2] * z[1],
-        up[2] * z[0] - up[0] * z[2], up[0] * z[1] - up[1] * z[0]};
-    const double x_length = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
-    for (double& value : x) {
-      value /= x_length;
+  for (const ShadowView& view : fit_.views()) {
+    if (!view.mmd) {
+      continue;
     }
-    const std::array<double, 3> y{z[1] * x[2] - z[2] * x[1],
-        z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
-    Matrix4 light_from_world;
-    for (std::size_t column = 0; column < 3; ++column) {
-      light_from_world.m[column * 4 + 0] = static_cast<float>(x[column]);
-      light_from_world.m[column * 4 + 1] = static_cast<float>(y[column]);
-      light_from_world.m[column * 4 + 2] = static_cast<float>(z[column]);
-    }
-    if (meshes.SelfShadowBounds(draws, materials, light_from_world, extent) &&
-        extent.receivers) {
-      const std::array<double, 3>& low = extent.low;
-      const std::array<double, 3>& high = extent.high;
-      // What of the box across the light the camera sees of a receiver.
-      std::array<double, 2> seen_low{low[0], low[1]};
-      std::array<double, 2> seen_high{high[0], high[1]};
-      if (extent.seen) {
-        for (std::size_t axis = 0; axis < 2; ++axis) {
-          seen_low[axis] = std::max(seen_low[axis], extent.seen_low[axis]);
-          seen_high[axis] = std::min(seen_high[axis], extent.seen_high[axis]);
-        }
-      }
-      // A span the camera does not see, or one that leaves nothing, falls
-      // back to the whole box.
-      std::array<double, 2> center{};
-      std::array<double, 2> across{};
-      for (std::size_t axis = 0; axis < 2; ++axis) {
-        const double whole = std::max(high[axis] - low[axis], 1e-4) * 1.02;
-        center[axis] = 0.5 * (low[axis] + high[axis]);
-        across[axis] = whole;
-        if (!extent.seen || !(seen_high[axis] > seen_low[axis])) {
-          continue;
-        }
-        const double span = std::exp2(std::ceil(std::log2(
-            (seen_high[axis] - seen_low[axis]) * 1.02 *
-            (1.0 + 16.0 / size)) * 8.0) / 8.0);
-        if (span < whole) {
-          const double texel = span / size;
-          across[axis] = span;
-          center[axis] =
-              std::round(0.5 * (seen_low[axis] + seen_high[axis]) / texel) *
-              texel;
-        }
-      }
-      const double depth = std::max(high[2] - low[2], 1e-4) * 1.04;
-      const double nearest = high[2] + 0.02 * depth;
-      Matrix4 clip;
-      clip.m[0] = static_cast<float>(2.0 / across[0]);
-      clip.m[12] = static_cast<float>(-2.0 * center[0] / across[0]);
-      clip.m[5] = static_cast<float>(2.0 / across[1]);
-      clip.m[13] = static_cast<float>(-2.0 * center[1] / across[1]);
-      clip.m[10] = static_cast<float>(-1.0 / depth);
-      clip.m[14] = static_cast<float>(nearest / depth);
-      clip_from_world_ = Multiply(clip, light_from_world);
-      const Matrix4 clip_from_view =
-          Multiply(clip_from_world_, AffineInverse(draws.view.view));
-      std::memcpy(parameters.clip_from_view, clip_from_view.m.data(),
-          sizeof(parameters.clip_from_view));
-      parameters.parameters[0] = 1.0F;
-      parameters.parameters[1] = static_cast<float>(
-          depth * draws.meters_per_unit / kMetersPerMmdUnit);
-      parameters.parameters[2] = static_cast<float>(size);
-      parameters.texel[0] = static_cast<float>(
-          3.0 * std::max(across[0], across[1]) / size);
-      parameters.texel[1] = static_cast<float>(std::max(across[0], across[1]) /
-          size * draws.meters_per_unit / kMetersPerMmdUnit);
-      active_ = true;
-    }
+    // MMD's receivers compare in MMD units and read in view space.
+    const Matrix4 clip_from_view =
+        Multiply(view.clip_from_world, AffineInverse(draws.view.view));
+    std::memcpy(parameters.clip_from_view, clip_from_view.m.data(),
+        sizeof(parameters.clip_from_view));
+    parameters.parameters[0] = 1.0F;
+    parameters.parameters[1] = static_cast<float>(
+        view.depth * draws.meters_per_unit / kMetersPerMmdUnit);
+    parameters.parameters[2] = static_cast<float>(kShadowMapSize);
+    parameters.texel[0] = static_cast<float>(3.0 * view.texel);
+    parameters.texel[1] = static_cast<float>(
+        view.texel * draws.meters_per_unit / kMetersPerMmdUnit);
   }
   parameters.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
   std::memcpy(buffer_.mapped, &parameters, sizeof(parameters));
   return FlushIfNeeded(device_, buffer_, detail);
 }
 
-std::uint32_t ShadowMap::Record(VkCommandBuffer command,
+void ShadowMap::Record(VkCommandBuffer command,
     const ScenePipelines& pipelines, const MaterialCache& materials,
     const MeshCache& meshes, const DrawList& draws) {
-  if (!active_ && ready_) {
-    return 0;
+  caster_draws_ = 0;
+  mmd_draws_ = 0;
+  const bool active = !fit_.views().empty();
+  if (!active && ready_) {
+    return;
   }
-  // The map is drawn whole each time, so what it held is not kept; the
+  // The view is drawn whole each time, so what it held is not kept; the
   // last frame that read it has completed.
   Barrier(command, ImageBarrier(image_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_NONE,
@@ -2707,15 +2443,15 @@ std::uint32_t ShadowMap::Record(VkCommandBuffer command,
   rendering.layerCount = 1;
   rendering.pDepthAttachment = &depth;
   vkCmdBeginRendering(command, &rendering);
-  std::uint32_t recorded = 0;
-  if (active_) {
+  // One view until more are measured (kShadowViewCapacity).
+  for (const ShadowView& view : fit_.views()) {
     const VkViewport viewport{0.0F, 0.0F, static_cast<float>(extent.width),
         static_cast<float>(extent.height), 0.0F, 1.0F};
     const VkRect2D scissor{{0, 0}, extent};
     vkCmdSetViewport(command, 0, 1, &viewport);
     vkCmdSetScissor(command, 0, 1, &scissor);
-    recorded = meshes.RecordSelfShadow(command, pipelines, materials, draws,
-        clip_from_world_);
+    meshes.RecordShadowCasters(command, pipelines, materials, draws,
+        view.clip_from_world, caster_draws_, mmd_draws_);
   }
   vkCmdEndRendering(command);
   Barrier(command, ImageBarrier(image_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -2726,13 +2462,11 @@ std::uint32_t ShadowMap::Record(VkCommandBuffer command,
                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
   ready_ = true;
-  return recorded;
 }
 
 void ShadowMap::Destroy() {
   DestroyDeviceImage(device_, image_);
   DestroyHostBuffer(device_, buffer_);
-  active_ = false;
   ready_ = false;
 }
 

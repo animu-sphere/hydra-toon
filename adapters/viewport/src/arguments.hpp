@@ -17,6 +17,7 @@ struct Arguments {
   // Whether the overlay is laid out and drawn; O shows and hides it.
   bool overlay = true;
   bool outlines = true;
+  bool shadows = true;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints = false;
   bool outline_culling = true;
