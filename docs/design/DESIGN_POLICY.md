@@ -30,6 +30,7 @@ owner: hydra-toon
 > | What this repository owns, and what it consumes from its siblings | [INTEGRATION_SCOPE_POLICY.md](INTEGRATION_SCOPE_POLICY.md) |
 > | Consuming MToon, MMD and PreviewSurface materials; `ToonMaterial`; pipelines | [MATERIAL_POLICY.md](MATERIAL_POLICY.md) |
 > | Reusable RGBA, background, alpha, compositing and GPU output handoff | [RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md) |
+> | Shared shadows: shadowing lights, casters, views and their resources | [SHADOW_POLICY.md](SHADOW_POLICY.md) |
 > | Targets, directories and dependency directions | [architecture/PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) |
 
 ---
@@ -802,7 +803,7 @@ The renderer core owns four services every material family reads:
 | Service | Owns |
 | --- | --- |
 | Scene lighting | the light rig: identities, visibility, transforms and the light buffer (§32) |
-| Shadow services | shadow settings, caster geometry and visibility, shadow passes and their resources |
+| Shadow services | shadow settings, caster geometry and visibility, shadow passes and their resources ([SHADOW_POLICY.md](SHADOW_POLICY.md)) |
 | Colour output | the RGBA product, its alpha and colour boundaries ([RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md)) |
 | Visibility | what draws, casts and receives, and into which product |
 
