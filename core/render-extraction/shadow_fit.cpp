@@ -33,6 +33,46 @@ std::array<double, 3> CornerOf(const std::array<double, 3>& low,
   return point;
 }
 
+// The light's frame, from the scene's space: it looks down its -z, along
+// `travel`, from `origin`. False for a travel of no length.
+bool LightFrame(const Float3& travel, const Float3& origin,
+    Matrix4& light_from_world) {
+  const double travel_length =
+      std::sqrt(double(travel.x) * travel.x + double(travel.y) * travel.y +
+                double(travel.z) * travel.z);
+  if (!(travel_length > 0.0) || !std::isfinite(travel_length)) {
+    return false;
+  }
+  const std::array<double, 3> z{-travel.x / travel_length,
+      -travel.y / travel_length, -travel.z / travel_length};
+  const std::array<double, 3> up = std::abs(z[1]) < 0.99
+                                       ? std::array<double, 3>{0.0, 1.0, 0.0}
+                                       : std::array<double, 3>{1.0, 0.0, 0.0};
+  std::array<double, 3> x{up[1] * z[2] - up[2] * z[1],
+      up[2] * z[0] - up[0] * z[2], up[0] * z[1] - up[1] * z[0]};
+  const double x_length = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+  for (double& value : x) {
+    value /= x_length;
+  }
+  const std::array<double, 3> y{z[1] * x[2] - z[2] * x[1],
+      z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+  light_from_world = Matrix4{};
+  for (std::size_t column = 0; column < 3; ++column) {
+    light_from_world.m[column * 4 + 0] = static_cast<float>(x[column]);
+    light_from_world.m[column * 4 + 1] = static_cast<float>(y[column]);
+    light_from_world.m[column * 4 + 2] = static_cast<float>(z[column]);
+  }
+  if (origin != Float3{}) {
+    const std::array<double, 3> at{origin.x, origin.y, origin.z};
+    for (std::size_t row = 0; row < 3; ++row) {
+      const auto& axis = row == 0 ? x : row == 1 ? y : z;
+      light_from_world.m[12 + row] = static_cast<float>(
+          -(axis[0] * at[0] + axis[1] * at[1] + axis[2] * at[2]));
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 ShadowRole ShadowRoleOf(const ToonMaterial* material) {
@@ -89,7 +129,15 @@ bool ShadowFit::Receives(const ShadowRole& role, const DrawList& draws,
          (role.mmd ? draws.mmd_self_shadow && view.mmd : draws.shadows);
 }
 
-void ShadowFit::Update(const DrawList& draws, std::uint32_t resolution) {
+std::uint32_t ShadowResolution(std::uint32_t requested) {
+  std::uint32_t resolution = 512;
+  while (resolution < 4096 && resolution * 2U <= requested) {
+    resolution *= 2U;
+  }
+  return resolution;
+}
+
+void ShadowFit::Update(const DrawList& draws) {
   views_.clear();
   unviewed_ = 0;
   ++generation_;
@@ -101,10 +149,7 @@ void ShadowFit::Update(const DrawList& draws, std::uint32_t resolution) {
   std::erase_if(bounds_, [&](const auto& entry) {
     return entry.second.generation != generation_;
   });
-  if (resolution == 0) {
-    return;
-  }
-  const double size = resolution;
+  const double size = ShadowResolution(draws.shadow_settings.resolution);
 
   // The fallback key stands in for a missing rig, as the light buffer
   // does, and is MMD's light then; it is in view space.
@@ -137,18 +182,45 @@ void ShadowFit::Update(const DrawList& draws, std::uint32_t resolution) {
     if (!light.light.shadow || light.light.type == ToonLightType::Point) {
       continue;
     }
-    if (light.light.type != ToonLightType::Directional ||
-        views_.size() == kShadowViewCapacity) {
+    const bool spot = light.light.type == ToonLightType::Spot;
+    if (views_.size() == kShadowViewCapacity ||
+        (spot && !(light.light.cone_angle <= kShadowSpotLimit))) {
       ++unviewed_;
       continue;
     }
     ShadowView view;
     view.light = light.id;
-    view.mmd = mmd_light && draws.mmd_self_shadow;
-    if (Fit(draws, light.light.direction, size, view)) {
+    view.mmd = !spot && mmd_light && draws.mmd_self_shadow;
+    if (spot ? FitSpot(draws, light.light, size, view)
+             : Fit(draws, light.light.direction, size, view)) {
       views_.push_back(view);
     }
   }
+}
+
+bool ShadowFit::MeshBox(const DrawList& draws, const MeshSnapshot& mesh,
+    const ShadowView& view, std::array<double, 3>& low,
+    std::array<double, 3>& high, bool& receives) const {
+  const auto found = bounds_.find(mesh.id);
+  if (found == bounds_.end()) {
+    return false;
+  }
+  const std::uint32_t index_count = mesh.indices != nullptr
+      ? static_cast<std::uint32_t>(mesh.indices->size())
+      : 0U;
+  bool casts = false;
+  receives = false;
+  MeshPart whole;
+  for (const MeshPart& part : PartsOf(mesh, index_count, whole)) {
+    if (!Fits(part, index_count)) {
+      continue;
+    }
+    const ShadowRole role = ShadowRoleOf(FindMaterial(draws, part.material));
+    casts = casts || Casts(role, draws);
+    receives = receives || Receives(role, draws, view);
+  }
+  return (casts || receives) &&
+         found->second.bounds.SceneBounds(mesh, low, high);
 }
 
 // The view looks along the light with an orthographic projection. Along
@@ -163,31 +235,9 @@ void ShadowFit::Update(const DrawList& draws, std::uint32_t resolution) {
 // filtered edge and a point moved along its normal stay inside.
 bool ShadowFit::Fit(const DrawList& draws, const Float3& travel, double size,
     ShadowView& view) {
-  const double travel_length =
-      std::sqrt(double(travel.x) * travel.x + double(travel.y) * travel.y +
-                double(travel.z) * travel.z);
-  if (!(travel_length > 0.0) || !std::isfinite(travel_length)) {
-    return false;
-  }
-  // The light's frame: it looks down its -z, along the travel.
-  const std::array<double, 3> z{-travel.x / travel_length,
-      -travel.y / travel_length, -travel.z / travel_length};
-  const std::array<double, 3> up = std::abs(z[1]) < 0.99
-                                       ? std::array<double, 3>{0.0, 1.0, 0.0}
-                                       : std::array<double, 3>{1.0, 0.0, 0.0};
-  std::array<double, 3> x{up[1] * z[2] - up[2] * z[1],
-      up[2] * z[0] - up[0] * z[2], up[0] * z[1] - up[1] * z[0]};
-  const double x_length = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
-  for (double& value : x) {
-    value /= x_length;
-  }
-  const std::array<double, 3> y{z[1] * x[2] - z[2] * x[1],
-      z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
   Matrix4 light_from_world;
-  for (std::size_t column = 0; column < 3; ++column) {
-    light_from_world.m[column * 4 + 0] = static_cast<float>(x[column]);
-    light_from_world.m[column * 4 + 1] = static_cast<float>(y[column]);
-    light_from_world.m[column * 4 + 2] = static_cast<float>(z[column]);
+  if (!LightFrame(travel, Float3{}, light_from_world)) {
+    return false;
   }
   const auto& m = light_from_world.m;
   const auto light = [&](const std::array<double, 3>& point, std::size_t row) {
@@ -218,31 +268,14 @@ bool ShadowFit::Fit(const DrawList& draws, const Float3& travel, double size,
   std::array<double, 3> seen_low{};
   std::array<double, 3> seen_high{};
   bool seen = false;
-  MeshPart whole;
   for (const MeshSnapshot& mesh : draws.draws) {
-    const auto found = bounds_.find(mesh.id);
-    if (found == bounds_.end()) {
-      continue;
-    }
-    const OutlineBounds& bounds = found->second.bounds;
-    const std::uint32_t index_count = mesh.indices != nullptr
-        ? static_cast<std::uint32_t>(mesh.indices->size())
-        : 0U;
-    bool casts = false;
-    bool receives = false;
-    for (const MeshPart& part : PartsOf(mesh, index_count, whole)) {
-      if (!Fits(part, index_count)) {
-        continue;
-      }
-      const ShadowRole role = ShadowRoleOf(FindMaterial(draws, part.material));
-      casts = casts || Casts(role, draws);
-      receives = receives || Receives(role, draws, view);
-    }
     std::array<double, 3> mesh_low{};
     std::array<double, 3> mesh_high{};
-    if ((!casts && !receives) || !bounds.SceneBounds(mesh, mesh_low, mesh_high)) {
+    bool receives = false;
+    if (!MeshBox(draws, mesh, view, mesh_low, mesh_high, receives)) {
       continue;
     }
+    const OutlineBounds& bounds = bounds_.find(mesh.id)->second.bounds;
     receivers = receivers || receives;
     for (unsigned corner = 0; corner < 8U; ++corner) {
       const std::array<double, 3> point = CornerOf(mesh_low, mesh_high, corner);
@@ -377,6 +410,69 @@ bool ShadowFit::Fit(const DrawList& draws, const Float3& travel, double size,
   view.clip_from_world = Multiply(clip, light_from_world);
   view.depth = depth;
   view.texel = std::max(across[0], across[1]) / size;
+  return true;
+}
+
+// The view looks from the light down its axis with a perspective
+// projection over its cone, padded as a directional view is so a filtered
+// edge stays inside. Its near and far planes span the box around every
+// draw that casts into it or receives it, the near plane no closer than a
+// thousandth of the far one, so the depth keeps its precision.
+bool ShadowFit::FitSpot(const DrawList& draws, const ToonLight& light,
+    double size, ShadowView& view) const {
+  Matrix4 light_from_world;
+  if (!LightFrame(light.direction, light.position, light_from_world)) {
+    return false;
+  }
+  const auto& m = light_from_world.m;
+  double nearest = 0.0;
+  double farthest = 0.0;
+  bool bounded = false;
+  bool receivers = false;
+  for (const MeshSnapshot& mesh : draws.draws) {
+    std::array<double, 3> low{};
+    std::array<double, 3> high{};
+    bool receives = false;
+    if (!MeshBox(draws, mesh, view, low, high, receives)) {
+      continue;
+    }
+    double mesh_far = 0.0;
+    for (unsigned corner = 0; corner < 8U; ++corner) {
+      const std::array<double, 3> point = CornerOf(low, high, corner);
+      const double distance = -(m[14] + m[2] * point[0] + m[6] * point[1] +
+                                  m[10] * point[2]);
+      nearest = bounded ? std::min(nearest, distance) : distance;
+      farthest = bounded ? std::max(farthest, distance) : distance;
+      mesh_far = corner ? std::max(mesh_far, distance) : distance;
+      bounded = true;
+    }
+    receivers = receivers || (receives && mesh_far > 0.0);
+  }
+  if (!bounded || !receivers || !(farthest > 0.0)) {
+    return false;
+  }
+  const double pad = 0.02 * (farthest - nearest);
+  const double far_plane = farthest + pad;
+  const double near_plane = std::max(nearest - pad, far_plane * 1e-3);
+  constexpr double radians = 0.017453292519943295;
+  const double spread = std::tan(double(light.cone_angle) * radians) *
+                        (1.0 + 16.0 / size);
+  if (!(spread > 0.0) || !std::isfinite(spread)) {
+    return false;
+  }
+  // Vulkan's depth: 0 at the near plane, 1 at the far, w the distance.
+  Matrix4 clip;
+  clip.m[0] = static_cast<float>(1.0 / spread);
+  clip.m[5] = static_cast<float>(1.0 / spread);
+  clip.m[10] = static_cast<float>(-far_plane / (far_plane - near_plane));
+  clip.m[11] = -1.0F;
+  clip.m[14] = static_cast<float>(-far_plane * near_plane / (far_plane - near_plane));
+  clip.m[15] = 0.0F;
+  view.clip_from_world = Multiply(clip, light_from_world);
+  view.perspective = true;
+  view.depth = far_plane - near_plane;
+  view.near_plane = near_plane;
+  view.texel = 2.0 * spread / size;
   return true;
 }
 
