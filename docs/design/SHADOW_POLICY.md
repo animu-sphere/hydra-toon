@@ -1,11 +1,11 @@
 ---
-status: proposed
+status: accepted
 owner: hydra-toon
 ---
 
 # Shadow policy
 
-> The v0.6.0 shadow RFC. It expands
+> The v0.6.0 shadow RFC, accepted on 2026-10-21. It expands
 > [DESIGN_POLICY.md](DESIGN_POLICY.md) §32 and §35 and wins over it on shared
 > shadows. How each material family *receives* stays
 > [MATERIAL_POLICY.md §14](MATERIAL_POLICY.md#14-shadows-across-material-families),
@@ -25,7 +25,7 @@ Two decisions were taken by the project on 2026-10-21 and shape the rest:
 - **One map per shadowing light, drawn by one shared caster pass.** MMD's
   camera-following self-shadow map becomes the shared view of the first
   directional light; MMD receivers keep reading it with material
-  policy §10's comparison and filter. Accepting this policy resolves
+  policy §10's comparison and filter. This resolves
   [MAT-Q7](MATERIAL_POLICY.md#9-open-questions) (§6).
 - **On by default, the fallback key included.** Shared shadows follow
   `UsdLux`'s `shadow:enable`, whose fallback is true, and the camera key

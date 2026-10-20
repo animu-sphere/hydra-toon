@@ -205,7 +205,7 @@ structural.
 
 ## 9. Open questions
 
-MAT-Q1–MAT-Q6 retain their identifiers for historical links. Their adopted
+MAT-Q1–MAT-Q7 retain their identifiers for historical links. Their adopted
 contracts are summarized below; dated experiments stay in the linked reports,
 and implementation status stays in the capability matrix.
 
@@ -217,12 +217,7 @@ and implementation status stays in the capability matrix.
 | MAT-Q4 | Use §5's edge width in MMD units; [report 58](../reports/renderer/58-2026-10-12-mat-q4-edge-width.md). |
 | MAT-Q5 | Use §10's camera-following map and depth comparison at default self-shadow distance; [report 63](../reports/renderer/63-2026-10-17-self-shadow-quality.md) and [66](../reports/renderer/66-2026-10-17-mat-q5-shadow-depth.md). |
 | MAT-Q6 | Omit morph texture/sphere/toon tints by default; allow the explicit `full.fx` interpretation in §11; [report 62](../reports/renderer/62-2026-10-17-mat-q6-morph-tints.md). |
-
-The remaining design question is **MAT-Q7**: whether MMD receivers read a
-shared map, retain a separate camera-following map, or use an MMD map drawn
-by the shared pass, and how non-MMD casters reach them. Resolve it in the
-[v0.6.0 shadow RFC](SHADOW_POLICY.md#6-mat-q7-and-mmds-migration),
-preserving MMD self-shadow regression behaviour.
+| MAT-Q7 | MMD receivers read the first direct light's shared camera-following view, drawn by the shared caster pass into which every family's casters draw, with §10's comparison and filter unchanged; no separate MMD map. An MMD-only scene matches the current self-shadow; [shadow policy §6](SHADOW_POLICY.md#6-mat-q7-and-mmds-migration), accepted 2026-10-21. |
 
 ## 10. MMD's self-shadow
 
@@ -432,8 +427,8 @@ the shadow resources drawn from them. The material owns how it receives.
 Casters are opaque and Mask geometry first, skinned and morphed casters at
 their deformed positions, and a material's cast and receive flags stay its
 own: MMD's `castSelfShadow` and `receiveSelfShadow` keep their meaning.
-Whether MMD's own map is one of the shared resources is
-[MAT-Q7](#9-open-questions). A cast or receive setting is a value in the
+MMD's map is the first direct light's shared view
+([MAT-Q7](#9-open-questions)). A cast or receive setting is a value in the
 material's slot or the draw's visibility, not a pipeline variant (§7), and
 moving a caster by pose is a value update that reuploads no geometry
 ([DESIGN_POLICY.md](DESIGN_POLICY.md) §11, §14).
