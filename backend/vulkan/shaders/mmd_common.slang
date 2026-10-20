@@ -44,9 +44,6 @@ static const uint kSphereNone = 0;
 static const uint kSphereMultiply = 1;
 static const uint kSphereAdd = 2;
 static const uint kSphereSubTexture = 3;
-// The sampler that clamps both axes: ToonWrap::ClampToEdge is 1, and a
-// sampler's index is wrap_s * 3 + wrap_t.
-static const uint kClampSampler = 4;
 
 [[vk::binding(4, 0)]] StructuredBuffer<MmdParameters> mmd_materials;
 
@@ -66,8 +63,8 @@ struct MmdShadowParameters {
   float4 texel;
 };
 
-// The self-shadow map's depth, read texel by texel and filtered here.
-[[vk::binding(5, 0)]] Texture2D<float> mmd_shadow_map;
+// The first direct light's shared view (surface_common's shadow_map) is
+// MMD's self-shadow map, read texel by texel and filtered here.
 [[vk::binding(6, 0)]] StructuredBuffer<MmdShadowParameters> mmd_shadow;
 
 // How far behind the map's depth, in MMD units, a point falls into MMD's
@@ -215,7 +212,7 @@ float SelfShadowLight(float3 view_position, float3 normal, float lambert) {
     const float2 f = tap - base;
     // The four texels around the tap: w its own, z the next across, x the
     // next down, y both.
-    const float4 seen = mmd_shadow_map.Gather(samplers[kClampSampler],
+    const float4 seen = shadow_map.Gather(samplers[kClampSampler],
         (base + 1.0) / size);
     const float4 behind = max(depth + dot(plane, apart) -
                                   seen * shadow.parameters.y - allowance,

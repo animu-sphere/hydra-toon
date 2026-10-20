@@ -50,8 +50,105 @@ static const uint kOutlineScreen = 2;
 [[vk::binding(2, 0)]] SamplerState samplers[kSamplerCount];
 // Header: time, direct-light count, material debug mode, metres per unit;
 // uniform ambient RGB. Then four float4 rows per light, in view space:
-// colour/type, position/radius (metres), direction/outer cosine, inner cosine.
+// colour/type, position/radius (metres), direction/outer cosine, inner
+// cosine and the shared shadow view it casts into, plus one, or 0.
 [[vk::binding(3, 0)]] StructuredBuffer<float4> frame;
+// The sampler that clamps both axes: ToonWrap::ClampToEdge is 1, and a
+// sampler's index is wrap_s * 3 + wrap_t.
+static const uint kClampSampler = 4;
+
+// The shared shadow views' depth (shadow policy §5), and where each was
+// drawn from this frame, for the receivers of every family but MMD, whose
+// own reading of the first direct light's view is mmd_common's.
+[[vk::binding(5, 0)]] Texture2D<float> shadow_map;
+// Must match vulkan_internal::ShadowViewParameters.
+struct ShadowViewParameters {
+  // The view's clip space from view space: x and y in [-1, 1] across it,
+  // z its depth in [0, 1] from the light.
+  float4x4 clip_from_view;
+  // x its size in texels, y its depth range and z a texel's width, both in
+  // view-space units; w unused.
+  float4 extent;
+};
+[[vk::binding(8, 0)]] StructuredBuffer<ShadowViewParameters> shadow_views;
+
+// How a receiver of MToon or PreviewSurface compares with a view, in its
+// texels, until stage 2 measures them (shadow policy §3, §9): the point
+// moves along its normal by up to a texel and a half as it turns from the
+// light, must lie a texel and a half behind what the view saw, more as it
+// slopes, and reads 16 bilinear taps over a disc a texel and a half in
+// radius, each compared with the depth the point's own plane has there,
+// so that the texels around it, which a sloping surface or the far side of
+// a ridge show nearer the light, do not shadow it.
+static const float kReceiverNormalTexels = 1.5;
+static const float kReceiverDepthTexels = 1.5;
+static const float kReceiverSlopeLimit = 4.0;
+static const float kReceiverFilterTexels = 1.5;
+static const int kReceiverFilterTaps = 16;
+
+// How much of direct light `index` reaches a view-space point past its
+// shared shadow view: 1 when the light has none, or outside the view.
+// `lambert` is N·L, toward the light; `position_dx` and `position_dy` are
+// the point's screen derivatives, taken by the caller in uniform control
+// flow, from which the point's plane across the view follows, the view
+// being orthographic. Gather takes no derivatives of its own.
+float ShadowVisibility(uint index, float3 view_position, float3 position_dx,
+    float3 position_dy, float3 normal, float lambert) {
+  const uint slot = uint(frame[2 + index * 4 + 3].y + 0.5);
+  if (slot == 0) {
+    return 1.0;
+  }
+  const ShadowViewParameters view = shadow_views[slot - 1];
+  const float texel = view.extent.z;
+  const float facing = saturate(lambert);
+  const float sine = sqrt(saturate(1.0 - facing * facing));
+  const float4 clip = mul(view.clip_from_view,
+      float4(view_position + normal * texel * kReceiverNormalTexels * sine, 1.0));
+  const float3 map = clip.xyz / clip.w;
+  const float2 uv = map.xy * 0.5 + 0.5;
+  if (any(uv < 0.0) || any(uv > 1.0) || map.z > 1.0) {
+    return 1.0;
+  }
+  const float size = view.extent.x;
+  // Depth in the view's texels, so the comparison is the view's own.
+  const float texels = view.extent.y / max(texel, 1e-12);
+  const float depth = map.z * texels;
+  const float slope = min(sine / max(facing, 0.05), kReceiverSlopeLimit);
+  const float allowance = kReceiverDepthTexels * (1.0 + slope);
+  const float2 at = uv * size - 0.5;
+  // The point's plane across the view, in texels of depth per texel.
+  const float3x3 linear = (float3x3)view.clip_from_view;
+  const float3 scale = float3(0.5 * size, 0.5 * size, texels);
+  const float3 across_x = mul(linear, position_dx) * scale;
+  const float3 across_y = mul(linear, position_dy) * scale;
+  const float determinant = across_x.x * across_y.y - across_y.x * across_x.y;
+  float2 plane = float2(0.0);
+  if (abs(determinant) > 1e-8) {
+    plane = float2(across_x.z * across_y.y - across_y.z * across_x.y,
+                across_y.z * across_x.x - across_x.z * across_y.x) /
+            determinant;
+    plane *= min(1.0, kReceiverSlopeLimit / max(length(plane), 1e-12));
+  }
+  float light = 0.0;
+  [unroll] for (int i = 0; i < kReceiverFilterTaps; ++i) {
+    // Vogel's spiral: taps spread evenly over the disc.
+    const float angle = float(i) * 2.39996323;
+    const float2 apart = kReceiverFilterTexels *
+        sqrt((float(i) + 0.5) / float(kReceiverFilterTaps)) *
+        float2(cos(angle), sin(angle));
+    const float2 tap = at + apart;
+    const float2 base = floor(tap);
+    const float2 f = tap - base;
+    // The four texels around the tap: w its own, z the next across, x the
+    // next down, y both.
+    const float4 seen = shadow_map.Gather(samplers[kClampSampler],
+        (base + 1.0) / size);
+    const float4 lit = step(depth + dot(plane, apart) - allowance,
+        seen * texels);
+    light += lerp(lerp(lit.w, lit.z, f.x), lerp(lit.x, lit.y, f.x), f.y);
+  }
+  return light / float(kReceiverFilterTaps);
+}
 
 struct VertexInput {
   float3 position : POSITION;

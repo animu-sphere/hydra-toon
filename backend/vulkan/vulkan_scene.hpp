@@ -246,6 +246,18 @@ struct MmdShadowParameters {
 };
 static_assert(sizeof(MmdShadowParameters) == 96);
 
+// Where a shared shadow view was drawn from this frame, for the receivers
+// of every family but MMD. Must match ShadowViewParameters in
+// shaders/surface_common.slang.
+struct ShadowViewParameters {
+  // The view's clip space from view space, column-major.
+  float clip_from_view[16];
+  // x its size in texels, y its depth range and z a texel's width, both in
+  // view-space units; w unused.
+  float extent[4];
+};
+static_assert(sizeof(ShadowViewParameters) == 80);
+
 // A shared shadow view's depth image, square: its texels go where the
 // camera sees a receiver, and a receiver reads them filtered (shadow
 // policy §5).
@@ -581,9 +593,12 @@ public:
       VkDescriptorSetLayout layout, std::string& detail);
   // Write whatever `draws.materials` changed and free the slots of
   // materials it no longer has. No frame that reads the buffer may be in
-  // flight, and `textures` has been updated for the same draws.
+  // flight, and `textures` has been updated for the same draws. A light's
+  // entry names the view of `views` it casts into, while `draws.shadows`
+  // has every family but MMD receive.
   bool Update(const DrawList& draws, const TextureCache& textures,
-      std::string& detail, bool fast_values = true);
+      std::string& detail, bool fast_values = true,
+      const std::vector<ShadowView>* views = nullptr);
   [[nodiscard]] const Entry* Find(MaterialId material) const;
   [[nodiscard]] VkDescriptorSet descriptor_set() const {
     return set_;
@@ -789,8 +804,8 @@ private:
 // ShadowFit decides which views are drawn and from where, and each is
 // drawn before the scene by the shared caster pass into one depth image.
 // MMD's receivers read the view of the scene's first direct light as MMD's
-// self-shadow map (material policy §10). The image and MMD's parameters
-// sit in the material descriptor set, at bindings 5 and 6.
+// self-shadow map (material policy §10). The image, MMD's parameters and
+// every view's sit in the material descriptor set, at bindings 5, 6 and 8.
 class ShadowMap {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,
@@ -816,6 +831,7 @@ private:
   ShadowFit fit_;
   DeviceImage image_;
   HostBuffer buffer_;
+  HostBuffer views_buffer_;
   std::uint32_t caster_draws_ = 0;
   std::uint32_t mmd_draws_ = 0;
   // Whether the image has been laid out for reading.

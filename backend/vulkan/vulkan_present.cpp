@@ -809,8 +809,9 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
   if (!meshes_.Update(draws, error) ||
-      !materials_.Update(draws, textures_, error) ||
-      !shadow_.Update(draws, error)) {
+      !shadow_.Update(draws, error) ||
+      !materials_.Update(draws, textures_, error, true,
+          &shadow_.fit().views())) {
     return false;
   }
   statistics_.latency.buffers_written = SteadyNanoseconds();

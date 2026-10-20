@@ -3150,6 +3150,162 @@ Check SharedCastersCheck(const Toon::SceneShaders& shaders) {
       "Blend, faces, mirror and pose on a 64x64 target"};
 }
 
+// MToon and PreviewSurface receivers of the shared shadow views (shadow
+// policy §7), on a wall at z 0 under a light travelling along (1, 0, -1),
+// with a square in front of it at z 0.4 to its left, as in
+// MmdSelfShadowCheck. An MToon wall, white lit and 0.2 shade, toony 0.9,
+// faces the light at N·L 0.71, so where the light reaches it its ramp is
+// wholly lit, 255, and in the square's shadow, MToon, MMD or PreviewSurface,
+// the ramp falls to its shade, 51. A PreviewSurface wall loses the light's
+// direct response there. The lit wall does not shadow itself; shared
+// shadows off, MMD's self-shadow off, or the light's shadow off, each as
+// it should; a square moved into place by a morph casts there, its weight
+// writing no geometry.
+Check ShadowReceiversCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.shadow.receivers";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const auto add_square = [&](float left, float right, float bottom,
+                              float top, float z) {
+    const Toon::MeshId mesh = world.CreateMesh();
+    world.SetMeshPoints(mesh, {{left, bottom, z}, {right, bottom, z},
+                                  {right, top, z}, {left, top, z}});
+    world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3});
+    return mesh;
+  };
+  const Toon::MeshId wall = add_square(-0.9F, 0.9F, -0.9F, 0.9F, 0.0F);
+  const Toon::MeshId square = add_square(-0.6F, -0.2F, -0.3F, 0.3F, 0.4F);
+  const Toon::LightId key = world.CreateLight();
+  Toon::ToonLight light;
+  light.direction = {1.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+  Toon::ToonMaterial wall_values;
+  wall_values.model = Toon::ToonShadingModel::MToon;
+  wall_values.mtoon.shade_color = {0.2F, 0.2F, 0.2F};
+  const Toon::MaterialId wall_material = world.CreateMaterial();
+  world.SetMaterial(wall_material, wall_values);
+  world.SetMeshMaterial(wall, wall_material);
+  Toon::ToonMaterial square_values;
+  square_values.model = Toon::ToonShadingModel::MToon;
+  const Toon::MaterialId square_material = world.CreateMaterial();
+  world.SetMaterial(square_material, square_values);
+  world.SetMeshMaterial(square, square_material);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  int center = 0;
+  int lit = 0;
+  // x 0.6 on the centre row: the wall, outside the shadow.
+  const auto render = [&](bool shadows = true, bool mmd_self_shadow = true) {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.shadows = shadows;
+    draws.mmd_self_shadow = mmd_self_shadow;
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
+      return false;
+    }
+    center = CenterPixel(color)[0];
+    lit = PixelAt(color, 51U, 32U)[0];
+    return true;
+  };
+  const auto near = [](int value, int expected) {
+    return std::abs(value - expected) <= 2;
+  };
+  const auto report = [&](const std::string& what) {
+    return Check{id, "fail",
+        what + ": centre " + std::to_string(center) + ", lit " +
+            std::to_string(lit)};
+  };
+
+  if (!render() || !near(lit, 255) || !near(center, 51)) {
+    return report("an MToon wall must fall to its shade in an MToon square's "
+                  "shadow and stay lit beside it");
+  }
+  if (!render(false) || !near(center, 255) || !near(lit, 255)) {
+    return report("with shared shadows off an MToon wall must be lit");
+  }
+  if (!render(true, false) || !near(center, 51)) {
+    return report("MMD's self-shadow off must not change an MToon receiver");
+  }
+  Toon::ToonMaterial mmd_caster;
+  mmd_caster.model = Toon::ToonShadingModel::MMD;
+  mmd_caster.mmd.cast_self_shadow = true;
+  const Toon::MaterialId mmd_material = world.CreateMaterial();
+  world.SetMaterial(mmd_material, mmd_caster);
+  world.SetMeshMaterial(square, mmd_material);
+  if (!render(true, false) || !near(center, 51)) {
+    return report("an MMD caster must shadow an MToon receiver, whether or "
+                  "not MMD's self-shadow is on");
+  }
+  Toon::ToonMaterial preview_caster;
+  preview_caster.preview.enabled = true;
+  const Toon::MaterialId preview_material = world.CreateMaterial();
+  world.SetMaterial(preview_material, preview_caster);
+  world.SetMeshMaterial(square, preview_material);
+  if (!render() || !near(center, 51)) {
+    return report("a PreviewSurface caster must shadow an MToon receiver");
+  }
+  world.SetMeshMaterial(square, square_material);
+
+  Toon::ToonLight unshadowed = light;
+  unshadowed.shadow = false;
+  world.SetLight(key, unshadowed);
+  if (!render() || !near(center, 255) ||
+      renderer->statistics().shadow_views != 0U) {
+    return report("a light whose shadow is off must draw no view");
+  }
+  world.SetLight(key, light);
+
+  // A morph moves the square into the light's path; its rest points are
+  // out of it.
+  world.SetMeshPoints(square, {{-0.6F, 1.2F, 0.4F}, {-0.2F, 1.2F, 0.4F},
+                                  {-0.2F, 1.8F, 0.4F}, {-0.6F, 1.8F, 0.4F}});
+  Toon::ToonMorph morph;
+  for (std::uint32_t point = 0; point < 4U; ++point) {
+    morph.offsets.push_back({{0.0F, -1.5F, 0.0F}, 0, {}, 0});
+    morph.ranges.push_back({point, 1});
+  }
+  world.SetMeshMorph(square, morph);
+  world.SetMeshMorphWeights(square, {0.0F});
+  if (!render() || !near(center, 255)) {
+    return report("a square morphed nowhere must not shadow the wall");
+  }
+  const std::uint64_t points = renderer->statistics().point_uploads;
+  world.SetMeshMorphWeights(square, {1.0F});
+  if (!render() || !near(center, 51)) {
+    return report("a square morphed into the light's path must cast there");
+  }
+  if (renderer->statistics().point_uploads != points) {
+    return {id, "fail", "a morph weight must move a caster without uploading points"};
+  }
+
+  Toon::ToonMaterial preview_wall;
+  preview_wall.preview.enabled = true;
+  preview_wall.preview.roughness = 1.0F;
+  world.SetMaterial(wall_material, preview_wall);
+  if (!render() || lit < 40 || center > 2) {
+    return report("a PreviewSurface wall must lose the light's direct "
+                  "response in the shadow");
+  }
+  const int preview_lit = lit;
+  if (!render(false) || std::abs(center - preview_lit) > 2) {
+    return report("with shared shadows off a PreviewSurface wall must be lit");
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass",
+      "MToon lit 255, shaded 51 under MToon, MMD, PreviewSurface and morphed "
+      "casters; PreviewSurface " + std::to_string(preview_lit) +
+          " to 0 on a 64x64 target"};
+}
+
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
 // the default, 4, through SetOrthographicView. The first scene is
 // AddOctahedron's diamond in unlit red under an unlit green world outline
@@ -3595,6 +3751,7 @@ int main(int argc, char** argv) {
     checks.push_back(MmdOutlineCheck(shaders));
     checks.push_back(MmdSelfShadowCheck(shaders));
     checks.push_back(SharedCastersCheck(shaders));
+    checks.push_back(ShadowReceiversCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
@@ -3619,6 +3776,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mmd_outline", "skip", dependent});
     checks.push_back({"renderer.material.mmd_self_shadow", "skip", dependent});
     checks.push_back({"renderer.shadow.shared_casters", "skip", dependent});
+    checks.push_back({"renderer.shadow.receivers", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }

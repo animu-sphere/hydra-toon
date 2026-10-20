@@ -660,10 +660,10 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   // from the same slot and table the fragment stages do. Binding 0 is the
   // MToon parameter buffer and 4 the MMD one; 5 is the shared shadow
   // views' image and 6 MMD's reading of it; 7 is the PreviewSurface
-  // parameter buffer.
+  // parameter buffer and 8 the shared views' parameters.
   const VkShaderStageFlags material_stages =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding material_bindings[8]{};
+  VkDescriptorSetLayoutBinding material_bindings[9]{};
   material_bindings[0].binding = 0;
   material_bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   material_bindings[0].descriptorCount = 1;
@@ -695,9 +695,11 @@ bool CreateScenePipelines(VkDevice device, const SceneShaderWords& words,
   material_bindings[6].stageFlags = material_stages;
   material_bindings[7] = material_bindings[6];
   material_bindings[7].binding = 7;
+  material_bindings[8] = material_bindings[6];
+  material_bindings[8].binding = 8;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_layout_create.bindingCount = 8;
+  set_layout_create.bindingCount = 9;
   set_layout_create.pBindings = material_bindings;
   if (!VulkanOk(vkCreateDescriptorSetLayout(device, &set_layout_create,
                     nullptr, &pipelines.material_layout),
@@ -1321,7 +1323,7 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
   device_ = device;
   VkDescriptorPoolSize pool_sizes[3]{};
   pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_sizes[0].descriptorCount = 5;
+  pool_sizes[0].descriptorCount = 6;
   pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   pool_sizes[1].descriptorCount = kTextureCapacity + 1U;
   pool_sizes[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -1362,7 +1364,8 @@ bool MaterialCache::Initialize(VkPhysicalDevice physical_device,
 }
 
 bool MaterialCache::Update(const DrawList& draws,
-    const TextureCache& textures, std::string& detail, bool fast_values) {
+    const TextureCache& textures, std::string& detail, bool fast_values,
+    const std::vector<ShadowView>* views) {
   if (fast_values) {
     auto* frame = static_cast<float*>(frame_buffer_.mapped);
     std::memset(frame, 0, kFrameBytes);
@@ -1376,7 +1379,8 @@ bool MaterialCache::Update(const DrawList& draws,
           m[2] * value.x + m[6] * value.y + m[10] * value.z + m[14] * w};
     };
     std::uint32_t count = 0;
-    const auto append = [&](const ToonLight& light, bool view_space) {
+    const auto append = [&](const ToonLight& light, bool view_space,
+                            LightId id) {
       if (!light.visible) {
         return;
       }
@@ -1406,6 +1410,15 @@ bool MaterialCache::Update(const DrawList& draws,
       constexpr float radians = 0.017453292519943295F;
       slot[11] = std::cos(light.cone_angle * radians);
       slot[12] = std::cos(light.cone_angle * (1.0F - light.cone_softness) * radians);
+      // The view it casts into, plus one, for the receivers that are not
+      // MMD's; 0 when it has none or they do not receive.
+      if (views != nullptr && draws.shadows) {
+        for (std::size_t view = 0; view < views->size(); ++view) {
+          if ((*views)[view].light == id) {
+            slot[13] = static_cast<float>(view + 1U);
+          }
+        }
+      }
     };
     if (!draws.lighting.scene_lights || draws.lights.empty()) {
       ToonLight key;
@@ -1415,14 +1428,14 @@ bool MaterialCache::Update(const DrawList& draws,
       if (key.direction == Float3{}) {
         key.direction = {-0.25F, -0.5F, -1.0F};
       }
-      append(key, true);
+      append(key, true, 0);
       ToonLight ambient;
       ambient.type = ToonLightType::Ambient;
       ambient.color = {0.25F, 0.25F, 0.25F};
-      append(ambient, true);
+      append(ambient, true, 0);
     } else {
       for (const auto& light : draws.lights) {
-        append(light.light, false);
+        append(light.light, false, light.id);
       }
     }
     frame[1] = static_cast<float>(count);
@@ -2360,17 +2373,24 @@ bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
           VK_IMAGE_ASPECT_DEPTH_BIT, kShadowMapSize, kShadowMapSize, image_,
           detail) ||
       !CreateHostBuffer(physical_device, device, sizeof(MmdShadowParameters),
-          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, buffer_, detail)) {
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, buffer_, detail) ||
+      !CreateHostBuffer(physical_device, device,
+          sizeof(ShadowViewParameters) * kShadowViewCapacity,
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, views_buffer_, detail)) {
     return false;
   }
   // Off until a frame draws the map.
   std::memset(buffer_.mapped, 0, sizeof(MmdShadowParameters));
+  std::memset(views_buffer_.mapped, 0,
+      sizeof(ShadowViewParameters) * kShadowViewCapacity);
   VkDescriptorImageInfo image_info{};
   image_info.imageView = image_.view;
   image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   VkDescriptorBufferInfo buffer_info{buffer_.buffer, 0,
       sizeof(MmdShadowParameters)};
-  VkWriteDescriptorSet writes[2]{};
+  VkDescriptorBufferInfo views_info{views_buffer_.buffer, 0,
+      sizeof(ShadowViewParameters) * kShadowViewCapacity};
+  VkWriteDescriptorSet writes[3]{};
   writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writes[0].dstSet = set;
   writes[0].dstBinding = 5;
@@ -2383,20 +2403,34 @@ bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
   writes[1].descriptorCount = 1;
   writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   writes[1].pBufferInfo = &buffer_info;
-  vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
-  return FlushIfNeeded(device_, buffer_, detail);
+  writes[2] = writes[1];
+  writes[2].dstBinding = 8;
+  writes[2].pBufferInfo = &views_info;
+  vkUpdateDescriptorSets(device_, 3, writes, 0, nullptr);
+  return FlushIfNeeded(device_, buffer_, detail) &&
+         FlushIfNeeded(device_, views_buffer_, detail);
 }
 
 bool ShadowMap::Update(const DrawList& draws, std::string& detail) {
   fit_.Update(draws, kShadowMapSize);
   MmdShadowParameters parameters{};
-  for (const ShadowView& view : fit_.views()) {
+  auto* views = static_cast<ShadowViewParameters*>(views_buffer_.mapped);
+  const Matrix4 world_from_view = AffineInverse(draws.view.view);
+  for (std::size_t index = 0; index < fit_.views().size(); ++index) {
+    const ShadowView& view = fit_.views()[index];
+    // Every receiver reads in view space.
+    const Matrix4 clip_from_view = Multiply(view.clip_from_world, world_from_view);
+    ShadowViewParameters& written = views[index];
+    std::memcpy(written.clip_from_view, clip_from_view.m.data(),
+        sizeof(written.clip_from_view));
+    written.extent[0] = static_cast<float>(kShadowMapSize);
+    written.extent[1] = static_cast<float>(view.depth);
+    written.extent[2] = static_cast<float>(view.texel);
+    written.extent[3] = 0.0F;
     if (!view.mmd) {
       continue;
     }
-    // MMD's receivers compare in MMD units and read in view space.
-    const Matrix4 clip_from_view =
-        Multiply(view.clip_from_world, AffineInverse(draws.view.view));
+    // MMD's receivers compare in MMD units.
     std::memcpy(parameters.clip_from_view, clip_from_view.m.data(),
         sizeof(parameters.clip_from_view));
     parameters.parameters[0] = 1.0F;
@@ -2409,7 +2443,8 @@ bool ShadowMap::Update(const DrawList& draws, std::string& detail) {
   }
   parameters.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
   std::memcpy(buffer_.mapped, &parameters, sizeof(parameters));
-  return FlushIfNeeded(device_, buffer_, detail);
+  return FlushIfNeeded(device_, buffer_, detail) &&
+         FlushIfNeeded(device_, views_buffer_, detail);
 }
 
 void ShadowMap::Record(VkCommandBuffer command,
@@ -2467,6 +2502,7 @@ void ShadowMap::Record(VkCommandBuffer command,
 void ShadowMap::Destroy() {
   DestroyDeviceImage(device_, image_);
   DestroyHostBuffer(device_, buffer_);
+  DestroyHostBuffer(device_, views_buffer_);
   ready_ = false;
 }
 
