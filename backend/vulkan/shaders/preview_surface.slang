@@ -47,13 +47,24 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
   const float gv = 2.0 * nv / (nv + sqrt(a2 + (1.0 - a2) * nv * nv));
   const float pi = 3.14159265359;
   float3 color = base * (1.0 - metallic) * (1.0 - f0) * frame[1].rgb;
+  // The material debug view of the shadows: the mean visibility of the
+  // lights that have a shared view, 1 without, linear. It reads a light
+  // the surface turns from too, which the shading skips.
+  const bool shadow_debug = uint(frame[0].z) == kDebugShadow;
+  float shadowed = 0.0;
+  float viewed = 0.0;
   for (uint index = 0; index < uint(frame[0].y); ++index) {
     float3 l;
     const float3 light = DirectLight(index, view_position, l);
     const float nl = saturate(dot(n, l));
-    if (nl <= 0.0) continue;
+    if (nl <= 0.0 && !shadow_debug) continue;
     const float visibility = ShadowVisibility(index, view_position,
         position_dx, position_dy, n, nl);
+    if (ShadowSlot(index) != 0) {
+      shadowed += visibility;
+      viewed += 1.0;
+    }
+    if (nl <= 0.0) continue;
     const float3 half_vector = v + l;
     const float3 h = half_vector * rsqrt(max(dot(half_vector, half_vector), 1e-8));
     const float nh = saturate(dot(n, h));
@@ -65,6 +76,9 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
     const float3 specular = distribution * gv * gl * fresnel / max(4.0 * nv * nl, 1e-6);
     const float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base / pi;
     color += (diffuse + specular) * light * nl * visibility;
+  }
+  if (shadow_debug) {
+    return float4(float3(viewed > 0.0 ? shadowed / viewed : 1.0), alpha);
   }
   return float4(color + emission, alpha);
 }

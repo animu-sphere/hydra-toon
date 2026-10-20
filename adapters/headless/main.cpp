@@ -3306,6 +3306,200 @@ Check ShadowReceiversCheck(const Toon::SceneShaders& shaders) {
           " to 0 on a 64x64 target"};
 }
 
+// More shadow views and their settings (shadow policy §2, §3, §9 stage 2),
+// on ShadowReceiversCheck's MToon wall, white lit and 0.2 shade, and its
+// square raised 0.4 over it. Two directional lights of half strength
+// travelling +x and -x each shadow their own side of the square: 153 in
+// one shadow, 255 lit. A spot light from z = 2 shadows the square's
+// perspective projection, the wall there falling to its shade of the
+// light that reaches the mirrored point. The resolution setting rebuilds
+// the image; the depth bias setting lifts the shadow of a square raised
+// only 0.05; five lights give four views and one counted without; the
+// material debug view shows each receiver's visibility, MToon's and MMD's.
+Check ShadowViewsCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.shadow.views";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const auto add_square = [&](float left, float right, float bottom,
+                              float top, float z) {
+    const Toon::MeshId mesh = world.CreateMesh();
+    world.SetMeshPoints(mesh, {{left, bottom, z}, {right, bottom, z},
+                                  {right, top, z}, {left, top, z}});
+    world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3});
+    return mesh;
+  };
+  const Toon::MeshId wall = add_square(-0.9F, 0.9F, -0.9F, 0.9F, 0.0F);
+  const Toon::MeshId square = add_square(-0.6F, -0.2F, -0.3F, 0.3F, 0.4F);
+  Toon::ToonMaterial wall_values;
+  wall_values.model = Toon::ToonShadingModel::MToon;
+  wall_values.mtoon.shade_color = {0.2F, 0.2F, 0.2F};
+  const Toon::MaterialId wall_material = world.CreateMaterial();
+  world.SetMaterial(wall_material, wall_values);
+  world.SetMeshMaterial(wall, wall_material);
+  Toon::ToonMaterial square_values;
+  square_values.model = Toon::ToonShadingModel::MToon;
+  const Toon::MaterialId square_material = world.CreateMaterial();
+  world.SetMaterial(square_material, square_values);
+  world.SetMeshMaterial(square, square_material);
+
+  Toon::ToonLight half;
+  half.color = {0.5F, 0.5F, 0.5F};
+  half.direction = {1.0F, 0.0F, -1.0F};
+  const Toon::LightId east = world.CreateLight();
+  world.SetLight(east, half);
+  half.direction = {-1.0F, 0.0F, -1.0F};
+  const Toon::LightId west = world.CreateLight();
+  world.SetLight(west, half);
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  Toon::ShadowSettings settings;
+  Toon::MaterialDebug debug = Toon::MaterialDebug::Surface;
+  const auto render = [&] {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.shadow_settings = settings;
+    draws.lighting.material = debug;
+    return renderer->Render(draws, 64, 64, color, depth, detail);
+  };
+  // Pixel columns on the centre row: column c is at x = (c + 0.5) / 32 - 1.
+  const auto at = [&](std::uint32_t column) {
+    return static_cast<int>(PixelAt(color, column, 32U)[0]);
+  };
+  const auto near = [](int value, int expected) {
+    return std::abs(value - expected) <= 2;
+  };
+  const auto report = [&](const std::string& what) {
+    std::string row;
+    for (const std::uint32_t column : {6U, 10U, 27U, 32U, 51U, 53U}) {
+      row += " " + std::to_string(column) + ":" + std::to_string(at(column));
+    }
+    return Check{id, "fail",
+        what + ": columns" + row + "; views " +
+            std::to_string(renderer->statistics().shadow_views)};
+  };
+
+  if (!render() || renderer->statistics().shadow_views != 2U ||
+      !near(at(32U), 153) || !near(at(6U), 153) || !near(at(51U), 255)) {
+    return report("two directional lights must each shadow their own side");
+  }
+  debug = Toon::MaterialDebug::Shadow;
+  if (!render() || !near(at(32U), 128) || !near(at(6U), 128) ||
+      !near(at(51U), 255)) {
+    return report("the shadow debug view must show the mean visibility");
+  }
+  debug = Toon::MaterialDebug::Surface;
+
+  const std::uint64_t rebuilds = renderer->statistics().shadow_rebuilds;
+  settings.resolution = 512;
+  if (!render() || !near(at(32U), 153) ||
+      renderer->statistics().shadow_resolution != 512U ||
+      renderer->statistics().shadow_rebuilds != rebuilds + 1U ||
+      renderer->statistics().shadow_memory_bytes < 2U * 512U * 512U * 4U) {
+    return report("the resolution setting must rebuild the image alone");
+  }
+  const std::uint64_t topology = renderer->statistics().topology_uploads;
+  if (!render() || renderer->statistics().shadow_rebuilds != rebuilds + 1U ||
+      renderer->statistics().topology_uploads != topology) {
+    return report("a steady resolution must rebuild and upload nothing");
+  }
+
+  // A square raised 0.05 under a light at 2 across to 1 down, 0.11 apart
+  // along the light, shadows within the default bias and not past a bias
+  // of 16 texels of a 512-texel view, three times that at the wall's
+  // slope; the camera sees its shadow at x -0.2..-0.1, beside it.
+  settings = {};
+  world.RemoveLight(west);
+  half.color = {1.0F, 1.0F, 1.0F};
+  half.direction = {2.0F, 0.0F, -1.0F};
+  world.SetLight(east, half);
+  world.SetMeshPoints(square, {{-0.6F, -0.3F, 0.05F}, {-0.2F, -0.3F, 0.05F},
+                                  {-0.2F, 0.3F, 0.05F}, {-0.6F, 0.3F, 0.05F}});
+  if (!render() || !near(at(27U), 51)) {
+    return report("a square close over the wall must shadow it");
+  }
+  settings.resolution = 512;
+  settings.depth_bias = 16.0F;
+  if (!render() || !near(at(27U), 255)) {
+    return report("the depth bias setting must reach the receivers");
+  }
+  settings = {};
+  half.direction = {1.0F, 0.0F, -1.0F};
+  world.SetMeshPoints(square, {{-0.6F, -0.3F, 0.4F}, {-0.2F, -0.3F, 0.4F},
+                                  {-0.2F, 0.3F, 0.4F}, {-0.6F, 0.3F, 0.4F}});
+
+  // The spot's cone holds the wall's centre; the square projects from
+  // x -0.6..-0.2 at 0.4 to -0.75..-0.25 on the wall, which the camera sees
+  // at -0.75..-0.6, beside the square: x -0.67 falls to the shade of what
+  // reaches x 0.67, its mirror.
+  world.RemoveLight(east);
+  Toon::ToonLight spot;
+  spot.type = Toon::ToonLightType::Spot;
+  spot.position = {0.0F, 0.0F, 2.0F};
+  spot.direction = {0.0F, 0.0F, -1.0F};
+  spot.color = {4.0F, 4.0F, 4.0F};
+  spot.cone_angle = 45.0F;
+  const Toon::LightId cone = world.CreateLight();
+  world.SetLight(cone, spot);
+  if (!render() || renderer->statistics().shadow_views != 1U ||
+      at(53U) < 180 || std::abs(at(10U) - at(53U) / 5) > 3 ||
+      at(32U) < at(53U)) {
+    return report("a spot light must cast the square's perspective shadow");
+  }
+  Toon::ToonLight wide = spot;
+  wide.cone_angle = 85.0F;
+  world.SetLight(cone, wide);
+  if (!render() || renderer->statistics().shadow_views != 0U ||
+      renderer->statistics().shadow_unviewed != 1U) {
+    return report("a spot cone past the limit must be counted, not viewed");
+  }
+  world.RemoveLight(cone);
+
+  // Five shadowing lights: four views, the fifth counted.
+  std::vector<Toon::LightId> lights;
+  half.color = {0.2F, 0.2F, 0.2F};
+  for (int index = 0; index < 5; ++index) {
+    half.direction = {0.2F * static_cast<float>(index), 0.0F, -1.0F};
+    lights.push_back(world.CreateLight());
+    world.SetLight(lights.back(), half);
+  }
+  if (!render() ||
+      renderer->statistics().shadow_views != Toon::kShadowViewCapacity ||
+      renderer->statistics().shadow_unviewed != 1U ||
+      renderer->statistics().shadow_layers < Toon::kShadowViewCapacity) {
+    return report("lights past the capacity must be counted, not viewed");
+  }
+  for (const Toon::LightId light : lights) {
+    world.RemoveLight(light);
+  }
+
+  // MMD's debug view: its self-shadow's visibility, from the first light.
+  half.color = {1.0F, 1.0F, 1.0F};
+  half.direction = {1.0F, 0.0F, -1.0F};
+  world.SetLight(world.CreateLight(), half);
+  Toon::ToonMaterial mmd_wall;
+  mmd_wall.model = Toon::ToonShadingModel::MMD;
+  mmd_wall.mmd.receive_self_shadow = true;
+  world.SetMaterial(wall_material, mmd_wall);
+  debug = Toon::MaterialDebug::Shadow;
+  if (!render() || !near(at(32U), 0) || !near(at(51U), 255)) {
+    return report("the shadow debug view must show MMD's visibility");
+  }
+  if (renderer->statistics().validation_message_count != 0) {
+    return {id, "fail", renderer->statistics().validation_detail};
+  }
+  return {id, "pass",
+      "two directional views 153/255, a spot view, resolution 512 rebuilt "
+      "once, depth bias, four views and one counted, debug views on a 64x64 "
+      "target"};
+}
+
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
 // the default, 4, through SetOrthographicView. The first scene is
 // AddOctahedron's diamond in unlit red under an unlit green world outline
@@ -3752,6 +3946,7 @@ int main(int argc, char** argv) {
     checks.push_back(MmdSelfShadowCheck(shaders));
     checks.push_back(SharedCastersCheck(shaders));
     checks.push_back(ShadowReceiversCheck(shaders));
+    checks.push_back(ShadowViewsCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
@@ -3777,6 +3972,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.material.mmd_self_shadow", "skip", dependent});
     checks.push_back({"renderer.shadow.shared_casters", "skip", dependent});
     checks.push_back({"renderer.shadow.receivers", "skip", dependent});
+    checks.push_back({"renderer.shadow.views", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }

@@ -383,6 +383,10 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   statistics_.shadow_views =
       static_cast<std::uint32_t>(shadow_.fit().views().size());
   statistics_.shadow_unviewed = shadow_.fit().unviewed();
+  statistics_.shadow_resolution = shadow_.resolution();
+  statistics_.shadow_layers = shadow_.layers();
+  statistics_.shadow_memory_bytes = shadow_.memory_bytes();
+  statistics_.shadow_rebuilds = shadow_.rebuilds();
 
   // Every attachment is cleared, so none keeps its contents. Multisampled,
   // the depth product is written by the resolve, at the colour output stage

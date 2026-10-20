@@ -810,10 +810,18 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
   const DrawList& draws = *frame;
   if (!meshes_.Update(draws, error) ||
       !shadow_.Update(draws, error, statistics_.latency.shadow_fit_ms) ||
+      !overlay_.UpdateShadowViews(shadow_, error) ||
       !materials_.Update(draws, textures_, error, true,
           &shadow_.fit().views())) {
     return false;
   }
+  statistics_.shadow_views =
+      static_cast<std::uint32_t>(shadow_.fit().views().size());
+  statistics_.shadow_unviewed = shadow_.fit().unviewed();
+  statistics_.shadow_resolution = shadow_.resolution();
+  statistics_.shadow_layers = shadow_.layers();
+  statistics_.shadow_memory_bytes = shadow_.memory_bytes();
+  statistics_.shadow_rebuilds = shadow_.rebuilds();
   statistics_.latency.buffers_written = SteadyNanoseconds();
   statistics_.latency.pose_write_ms = meshes_.pose_write_ms() - pose_before;
   statistics_.latency.morph_write_ms = meshes_.morph_write_ms() - morph_before;
@@ -1014,7 +1022,8 @@ bool VulkanPresentSession::RenderFrame(const DrawList& extracted,
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachments = &color_attachment;
     vkCmdBeginRendering(command_, &rendering);
-    overlay_draws = overlay_.Record(command_, overlay, extent_);
+    overlay_draws = overlay_.Record(command_, overlay, extent_,
+        static_cast<std::uint32_t>(shadow_.fit().views().size()));
     vkCmdEndRendering(command_);
     rendered = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     rendered_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;

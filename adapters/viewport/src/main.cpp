@@ -356,6 +356,7 @@ int RunViewport(int argc, char** argv) {
       throw std::runtime_error(error);
     bool outlines = arguments.outlines;
     bool shadows = arguments.shadows;
+    Toon::ShadowSettings shadow_settings = arguments.shadow_settings;
     bool mmd_self_shadow = arguments.mmd_self_shadow;
     bool mmd_morph_tints = arguments.mmd_morph_tints;
     Toon::LightingDebug lighting = arguments.lighting;
@@ -596,6 +597,7 @@ int RunViewport(int argc, char** argv) {
       draws.meters_per_unit = meters_per_unit;
       draws.outlines = outlines;
       draws.shadows = shadows;
+      draws.shadow_settings = shadow_settings;
       draws.mmd_self_shadow = mmd_self_shadow;
       draws.mmd_morph_tints = mmd_morph_tints;
       draws.outline_frustum_culling = arguments.outline_culling;
@@ -638,6 +640,7 @@ int RunViewport(int argc, char** argv) {
         shown.outlines = outlines;
         shown.background = background;
         shown.shadows = shadows;
+        shown.shadow_settings = shadow_settings;
         shown.mmd_self_shadow = mmd_self_shadow;
         shown.mmd_morph_tints = mmd_morph_tints;
         shown.lighting = lighting;
@@ -724,6 +727,11 @@ int RunViewport(int argc, char** argv) {
         if (controls.shadows_changed) {
           shadows = controls.shadows;
           draws.shadows = shadows;
+          telemetry = {};
+        }
+        if (controls.shadow_settings_changed) {
+          shadow_settings = controls.shadow_settings;
+          draws.shadow_settings = shadow_settings;
           telemetry = {};
         }
         if (controls.mmd_self_shadow_changed) {
@@ -832,6 +840,12 @@ int RunViewport(int argc, char** argv) {
               << telemetry.Report();
     std::cout << "Late latch: applied=" << statistics.late_samples_applied
               << " rejected=" << statistics.late_samples_rejected << '\n';
+    std::cout << "Shadow views: drawn=" << statistics.shadow_views
+              << " unviewed=" << statistics.shadow_unviewed
+              << " resolution=" << statistics.shadow_resolution
+              << " layers=" << statistics.shadow_layers
+              << " memory_bytes=" << statistics.shadow_memory_bytes
+              << " builds=" << statistics.shadow_rebuilds << '\n';
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
     if (avatar) {
       const auto now = Toon::viewport::UploadCounts::Of(statistics);

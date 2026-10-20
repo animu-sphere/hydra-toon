@@ -135,16 +135,24 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   const float3 shade = material.shade_color.rgb * shade_texel;
   float3 color = float3(0.0);
   float3 lighting = float3(0.0);
+  // The visibility of the lights that have a shared view, for the debug
+  // view: their sum and count.
+  float shadowed = 0.0;
+  float viewed = 0.0;
   for (uint index = 0; index < uint(frame[0].y); ++index) {
     float3 light;
     const float3 incident = DirectLight(index, view_position, light);
     const float lambert = dot(normal, light);
+    const float visibility = ShadowVisibility(index, view_position,
+        position_dx, position_dy, normal, lambert);
     const float shading = LinearStep(-1.0 + toony, 1.0 - toony,
-        lambert + material.shading.x + shift) *
-        ShadowVisibility(index, view_position, position_dx, position_dy,
-            normal, lambert);
+        lambert + material.shading.x + shift) * visibility;
     color += lerp(shade, lit, shading) * incident;
     lighting += incident;
+    if (ShadowSlot(index) != 0) {
+      shadowed += visibility;
+      viewed += 1.0;
+    }
   }
 
   // Raw GI would be the ambient seen along the normal; uniformed GI its
@@ -175,6 +183,8 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   if (debug == 2) color = normal * 0.5 + 0.5;
   if (debug == 3) color = lighting;
   if (debug == 4) color = gi;
+  // The mean visibility of the lights that have a shared view, 1 without.
+  if (debug == kDebugShadow) color = float3(viewed > 0.0 ? shadowed / viewed : 1.0);
 
   MToonSurface surface;
   surface.color = color;

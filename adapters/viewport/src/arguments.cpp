@@ -128,7 +128,7 @@ Arguments ParseArguments(int argc, char** argv) {
       result.lighting.scene_lights = value == "scene";
     } else if (option == "--material-view") {
       const auto value = next();
-      const std::vector<std::string_view> modes{"surface", "base", "normal", "direct", "ambient"};
+      const std::vector<std::string_view> modes{"surface", "base", "normal", "direct", "ambient", "shadow"};
       const auto found = std::find(modes.begin(), modes.end(), value);
       if (found == modes.end())
         throw std::invalid_argument("unknown material view");
@@ -150,6 +150,29 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--shadows must be on or off");
       }
       result.shadows = value == "on";
+    } else if (option == "--shadow-resolution") {
+      const std::uint64_t value = ReadUnsigned(next(), option);
+      if (value < 512 || value > 4096 || (value & (value - 1)) != 0) {
+        throw std::invalid_argument(
+            "--shadow-resolution must be 512, 1024, 2048 or 4096");
+      }
+      result.shadow_settings.resolution = static_cast<std::uint32_t>(value);
+    } else if (option == "--shadow-depth-bias" ||
+               option == "--shadow-normal-bias" ||
+               option == "--shadow-filter-radius") {
+      const std::string value(next());
+      std::size_t consumed = 0;
+      const float number = std::stof(value, &consumed);
+      const float limit = option == "--shadow-filter-radius" ? 8.0F : 16.0F;
+      if (consumed != value.size() || !std::isfinite(number) || number < 0.0F ||
+          number > limit) {
+        throw std::invalid_argument(std::string(option) + " must be in [0, " +
+                                    (limit == 8.0F ? "8]" : "16]"));
+      }
+      (option == "--shadow-depth-bias"    ? result.shadow_settings.depth_bias
+       : option == "--shadow-normal-bias" ? result.shadow_settings.normal_bias
+                                          : result.shadow_settings.filter_radius) =
+          number;
     } else if (option == "--mmd-self-shadow") {
       const auto value = next();
       if (value != "on" && value != "off") {
@@ -209,6 +232,11 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --outlines on|off        draw hulls (default on)\n"
                    "  --shadows on|off         shared shadows across material\n"
                    "                           families (default on)\n"
+                   "  --shadow-resolution N    texels on a side of each shadow\n"
+                   "                           view: 512|1024|2048|4096\n"
+                   "  --shadow-depth-bias N    receivers' depth bias, texels\n"
+                   "  --shadow-normal-bias N   receivers' normal bias, texels\n"
+                   "  --shadow-filter-radius N receivers' PCF radius, texels\n"
                    "  --mmd-self-shadow on|off MMD's self-shadow (default on)\n"
                    "  --mmd-morph-tints on|off full.fx's material morph tints,\n"
                    "                           which MMD does not draw\n"
@@ -217,7 +245,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --lighting scene|camera  scene lights or camera key\n"
                    "  --direct-strength N      direct multiplier [0, 4]\n"
                    "  --ambient-strength N     ambient multiplier [0, 4]\n"
-                   "  --material-view MODE     surface|base|normal|direct|ambient\n"
+                   "  --material-view MODE     surface|base|normal|direct|ambient|\n"
+                   "                           shadow\n"
                    "  --time T                 initial USD time code\n"
                    "  --time-step T            USD time codes per presented\n"
                    "                           frame (deterministic evaluation)\n"

@@ -7,7 +7,8 @@ struct OverlayConstants {
   // Framebuffer pixels to clip space: clip = pixel * scale + translate.
   float2 scale;
   float2 translate;
-  // kOverlayLinearize when the target encodes to sRGB as it is written.
+  // kOverlayLinearize when the target encodes to sRGB as it is written,
+  // and kOverlayDepth when the texture is a shadow view's depth.
   uint flags;
   uint padding0;
   uint padding1;
@@ -15,6 +16,7 @@ struct OverlayConstants {
 };
 
 static const uint kOverlayLinearize = 1;
+static const uint kOverlayDepth = 2;
 
 [[vk::push_constant]] ConstantBuffer<OverlayConstants> overlay;
 
@@ -56,5 +58,10 @@ VertexStageOutput vertex_main(VertexInput input) {
 
 [shader("fragment")]
 float4 fragment_main(VertexStageOutput input) : SV_Target {
-  return input.color * atlas.Sample(input.uv);
+  const float4 texel = atlas.Sample(input.uv);
+  // A depth image's red is its depth; grey, opaque.
+  if ((overlay.flags & kOverlayDepth) != 0) {
+    return input.color * float4(texel.rrr, 1.0);
+  }
+  return input.color * texel;
 }

@@ -569,6 +569,47 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
     controls.outlines_changed = ImGui::Checkbox("Outlines", &controls.outlines);
     controls.shadows = frame.shadows;
     controls.shadows_changed = ImGui::Checkbox("Shadows", &controls.shadows);
+    controls.shadow_settings = frame.shadow_settings;
+    if (ImGui::CollapsingHeader("Shadow views")) {
+      ShadowSettings& settings = controls.shadow_settings;
+      ImGui::Text("%u views, %u lights without one", statistics.shadow_views,
+          statistics.shadow_unviewed);
+      ImGui::Text("%u x %u texels, %u layers, %.1f MiB",
+          statistics.shadow_resolution, statistics.shadow_resolution,
+          statistics.shadow_layers,
+          static_cast<double>(statistics.shadow_memory_bytes) / 1048576.0);
+      ImGui::TextUnformatted("Resolution");
+      for (const std::uint32_t resolution : {512U, 1024U, 2048U, 4096U}) {
+        ImGui::SameLine();
+        char label[8];
+        std::snprintf(label, sizeof(label), "%u", resolution);
+        if (ImGui::RadioButton(label, settings.resolution == resolution)) {
+          settings.resolution = resolution;
+          controls.shadow_settings_changed = true;
+        }
+      }
+      controls.shadow_settings_changed |= ImGui::SliderFloat(
+          "Depth bias (texels)", &settings.depth_bias, 0.0F, 8.0F);
+      controls.shadow_settings_changed |= ImGui::SliderFloat(
+          "Normal bias (texels)", &settings.normal_bias, 0.0F, 8.0F);
+      controls.shadow_settings_changed |= ImGui::SliderFloat(
+          "Filter radius (texels)", &settings.filter_radius, 0.0F, 4.0F);
+      if (ImGui::Button("Reset shadow settings")) {
+        settings = {};
+        controls.shadow_settings_changed = true;
+      }
+      // Each view's depth, nearer the light darker, as the last frame drew
+      // it; the image's top row is the view's bottom.
+      for (std::uint32_t view = 0; view < statistics.shadow_views; ++view) {
+        if (view % 2U != 0U) {
+          ImGui::SameLine();
+        }
+        ImGui::Image(ImTextureRef(static_cast<ImTextureID>(
+                         kOverlayShadowView + view)),
+            ImVec2(180.0F * scale, 180.0F * scale), ImVec2(0.0F, 1.0F),
+            ImVec2(1.0F, 0.0F));
+      }
+    }
     controls.mmd_self_shadow = frame.mmd_self_shadow;
     controls.mmd_self_shadow_changed =
         ImGui::Checkbox("MMD self-shadow", &controls.mmd_self_shadow);
@@ -586,7 +627,8 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
       ImGui::SliderFloat("Direct strength", &controls.lighting.direct_scale, 0.0F, 4.0F);
       ImGui::SliderFloat("Ambient strength", &controls.lighting.ambient_scale, 0.0F, 4.0F);
       int mode = static_cast<int>(controls.lighting.material);
-      ImGui::Combo("Material view", &mode, "Surface\0Base colour\0Normals\0Direct light\0Ambient\0");
+      ImGui::Combo("Material view", &mode,
+          "Surface\0Base colour\0Normals\0Direct light\0Ambient\0Shadow\0");
       controls.lighting.material = static_cast<MaterialDebug>(mode);
       if (ImGui::Button("Reset lighting and material"))
         controls.lighting = {};

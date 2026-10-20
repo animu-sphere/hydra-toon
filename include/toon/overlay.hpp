@@ -43,6 +43,13 @@ struct OverlayCommand {
   float clip[4] = {};
 };
 
+// A command whose texture is kOverlayShadowView plus i draws the present
+// session's shared shadow view i, the one the last frame drew i-th (shadow
+// policy §8), its depth as grey from black at the light to white at its
+// far side, with the vertex colour, rather than one of `textures`. A view
+// the frame did not draw is skipped.
+constexpr std::uint64_t kOverlayShadowView = 1ULL << 63U;
+
 // Drawn in order, source over, after the scene and after any capture is
 // copied, so a screenshot never shows it. A texture that has left
 // `textures` is released; a command whose texture is not there is skipped.

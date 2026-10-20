@@ -39,12 +39,20 @@ bool OverlayRenderer::Initialize(VkPhysicalDevice physical_device,
           "vkCreateSampler(overlay)", detail)) {
     return false;
   }
+  sampler_create.magFilter = VK_FILTER_NEAREST;
+  sampler_create.minFilter = VK_FILTER_NEAREST;
+  if (!VulkanOk(vkCreateSampler(device_, &sampler_create, nullptr,
+                    &nearest_sampler_),
+          "vkCreateSampler(overlay depth)", detail)) {
+    return false;
+  }
+  // The sampler is each set's own: an overlay texture's filters, a shadow
+  // view's does not.
   VkDescriptorSetLayoutBinding binding{};
   binding.binding = 0;
   binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   binding.descriptorCount = 1;
   binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-  binding.pImmutableSamplers = &sampler_;
   VkDescriptorSetLayoutCreateInfo set_layout_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
   set_layout_create.bindingCount = 1;
@@ -54,14 +62,15 @@ bool OverlayRenderer::Initialize(VkPhysicalDevice physical_device,
           "vkCreateDescriptorSetLayout(overlay)", detail)) {
     return false;
   }
-  // One set per resident texture, freed with it.
+  // One set per resident texture, freed with it, and one per layer of
+  // the shadow views' image.
   VkDescriptorPoolSize pool_size{};
   pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  pool_size.descriptorCount = kOverlayTextureCapacity;
+  pool_size.descriptorCount = kOverlayTextureCapacity + kShadowViewCapacity;
   VkDescriptorPoolCreateInfo pool_create{
       VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  pool_create.maxSets = kOverlayTextureCapacity;
+  pool_create.maxSets = kOverlayTextureCapacity + kShadowViewCapacity;
   pool_create.poolSizeCount = 1;
   pool_create.pPoolSizes = &pool_size;
   if (!VulkanOk(vkCreateDescriptorPool(device_, &pool_create, nullptr, &pool_),
@@ -69,7 +78,7 @@ bool OverlayRenderer::Initialize(VkPhysicalDevice physical_device,
     return false;
   }
   VkPushConstantRange push_range{};
-  push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   push_range.size = sizeof(OverlayConstants);
   VkPipelineLayoutCreateInfo layout_create{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -232,6 +241,7 @@ bool OverlayRenderer::Update(const OverlayDrawList& overlay,
       resident.width = texture.width;
       resident.height = texture.height;
       VkDescriptorImageInfo image_info{};
+      image_info.sampler = sampler_;
       image_info.imageView = resident.image.view;
       image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
       VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -272,6 +282,44 @@ bool OverlayRenderer::Update(const OverlayDrawList& overlay,
              overlay.indices.size() * sizeof(std::uint16_t), detail);
 }
 
+bool OverlayRenderer::UpdateShadowViews(const ShadowMap& shadow,
+    std::string& detail) {
+  if (shadow.rebuilds() == shadow_rebuilds_) {
+    return true;
+  }
+  if (!shadow_sets_.empty()) {
+    vkFreeDescriptorSets(device_, pool_,
+        static_cast<std::uint32_t>(shadow_sets_.size()), shadow_sets_.data());
+    shadow_sets_.clear();
+  }
+  for (std::uint32_t layer = 0; layer < shadow.layers(); ++layer) {
+    VkDescriptorSetAllocateInfo allocate{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    allocate.descriptorPool = pool_;
+    allocate.descriptorSetCount = 1;
+    allocate.pSetLayouts = &set_layout_;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if (!VulkanOk(vkAllocateDescriptorSets(device_, &allocate, &set),
+            "vkAllocateDescriptorSets(overlay shadow view)", detail)) {
+      return false;
+    }
+    shadow_sets_.push_back(set);
+    VkDescriptorImageInfo image_info{};
+    image_info.sampler = nearest_sampler_;
+    image_info.imageView = shadow.layer_view(layer);
+    image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = set;
+    write.dstBinding = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &image_info;
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+  }
+  shadow_rebuilds_ = shadow.rebuilds();
+  return true;
+}
+
 void OverlayRenderer::RecordUploads(VkCommandBuffer command) {
   for (const Upload& upload : pending_) {
     Barrier(command, ImageBarrier(upload.image, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -296,7 +344,8 @@ void OverlayRenderer::RecordUploads(VkCommandBuffer command) {
 }
 
 std::uint32_t OverlayRenderer::Record(VkCommandBuffer command,
-    const OverlayDrawList& overlay, VkExtent2D extent) const {
+    const OverlayDrawList& overlay, VkExtent2D extent,
+    std::uint32_t shadow_views) const {
   if (overlay.commands.empty() || overlay.vertices.empty() ||
       overlay.indices.empty()) {
     return 0;
@@ -315,7 +364,8 @@ std::uint32_t OverlayRenderer::Record(VkCommandBuffer command,
   constants.translate[0] = -1.0F;
   constants.translate[1] = -1.0F;
   constants.flags = linearize_ ? kOverlayLinearize : 0U;
-  vkCmdPushConstants(command, layout_, VK_SHADER_STAGE_VERTEX_BIT, 0,
+  vkCmdPushConstants(command, layout_,
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
       sizeof(constants), &constants);
 
   const auto width = static_cast<float>(extent.width);
@@ -323,8 +373,18 @@ std::uint32_t OverlayRenderer::Record(VkCommandBuffer command,
   VkDescriptorSet bound = VK_NULL_HANDLE;
   std::uint32_t recorded = 0;
   for (const OverlayCommand& draw : overlay.commands) {
-    const auto texture = textures_.find(draw.texture);
-    if (texture == textures_.end() || draw.index_count == 0 ||
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    const bool depth = draw.texture >= kOverlayShadowView;
+    if (depth) {
+      const std::uint64_t view = draw.texture - kOverlayShadowView;
+      if (view < shadow_views && view < shadow_sets_.size()) {
+        set = shadow_sets_[static_cast<std::size_t>(view)];
+      }
+    } else if (const auto texture = textures_.find(draw.texture);
+               texture != textures_.end()) {
+      set = texture->second.set;
+    }
+    if (set == VK_NULL_HANDLE || draw.index_count == 0 ||
         static_cast<std::size_t>(draw.first_index) + draw.index_count >
             overlay.indices.size()) {
       continue;
@@ -344,10 +404,18 @@ std::uint32_t OverlayRenderer::Record(VkCommandBuffer command,
     scissor.extent.height = static_cast<std::uint32_t>(
         std::ceil(bottom) - static_cast<float>(scissor.offset.y));
     vkCmdSetScissor(command, 0, 1, &scissor);
-    if (bound != texture->second.set) {
-      bound = texture->second.set;
+    if (bound != set) {
+      bound = set;
       vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
           layout_, 0, 1, &bound, 0, nullptr);
+      const std::uint32_t flags =
+          (linearize_ ? kOverlayLinearize : 0U) | (depth ? kOverlayDepth : 0U);
+      if (flags != constants.flags) {
+        constants.flags = flags;
+        vkCmdPushConstants(command, layout_,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+            sizeof(constants), &constants);
+      }
     }
     vkCmdDrawIndexed(command, draw.index_count, 1, draw.first_index,
         static_cast<std::int32_t>(draw.vertex_offset), 0);
@@ -379,6 +447,10 @@ void OverlayRenderer::Destroy() {
   vkDestroyDescriptorPool(device_, pool_, nullptr);
   vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
   vkDestroySampler(device_, sampler_, nullptr);
+  vkDestroySampler(device_, nearest_sampler_, nullptr);
+  shadow_sets_.clear();
+  shadow_rebuilds_ = 0;
+  nearest_sampler_ = VK_NULL_HANDLE;
   pipeline_ = VK_NULL_HANDLE;
   layout_ = VK_NULL_HANDLE;
   pool_ = VK_NULL_HANDLE;
