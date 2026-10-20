@@ -221,7 +221,7 @@ and implementation status stays in the capability matrix.
 The remaining design question is **MAT-Q7**: whether MMD receivers read a
 shared map, retain a separate camera-following map, or use an MMD map drawn
 by the shared pass, and how non-MMD casters reach them. Resolve it in the
-[v0.6.0 shadow RFC](../roadmap/later.md#v060--shared-shadow-and-lighting),
+[v0.6.0 shadow RFC](SHADOW_POLICY.md#6-mat-q7-and-mmds-migration),
 preserving MMD self-shadow regression behaviour.
 
 ## 10. MMD's self-shadow
@@ -439,4 +439,5 @@ moving a caster by pose is a value update that reuploads no geometry
 ([DESIGN_POLICY.md](DESIGN_POLICY.md) §11, §14).
 
 The cases and release condition belong to
-[v0.6.0](../roadmap/later.md#v060--shared-shadow-and-lighting).
+[v0.6.0](../roadmap/v0.6.0.md); the light, caster, view and resource
+contracts are the [shadow policy](SHADOW_POLICY.md).

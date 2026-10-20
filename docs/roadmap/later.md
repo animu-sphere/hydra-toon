@@ -1,40 +1,14 @@
-# After v0.5.0
+# After v0.6.0
 
-Unfinished work after reusable RGBA output. Each milestone gets its own page
-when it becomes next; [the index](README.md) owns the sequence. All work below
+Unfinished work after shared shadows and lighting. Each milestone gets its
+own page when it becomes next; [the index](README.md) owns the sequence. All work below
 is owned by `hydra-toon`; upstream prerequisites are linked to their owners.
-
-## v0.6.0 — Shared shadow and lighting
-
-Start after v0.5.0 closes. Implement shared scene lights, caster visibility,
-shadow passes and resources under [design policy §35](../design/DESIGN_POLICY.md#35-shared-scene-services).
-Receiver interpretation belongs to [material policy §14](../design/MATERIAL_POLICY.md#14-shadows-across-material-families).
-Share inputs and resources while retaining each material's shading algorithm.
-
-- Agree a short shadow RFC before code: light identity and transforms,
-  settings, caster/receiver boundaries, resource ownership and MMD self-shadow
-  migration ([MAT-Q7](../design/MATERIAL_POLICY.md#9-open-questions)).
-- Implement a shared caster pass for Opaque and Mask geometry at its static,
-  skinned or morphed position, followed by material-specific receivers.
-- Stage one directional shadow first, then multiple directional and spot
-  shadows. Add resolution, depth/normal bias, basic PCF, on/off and a debug
-  view. Atlas work follows measured need.
-- Check PreviewSurface → MToon, MToon → PreviewSurface, MMD → MToon,
-  MToon → MMD and self-shadow, including deformed casters. Preserve MMD's
-  self-shadow regression evidence and toon looks.
-- Verify Hydra/fast-path parity: pose-only caster updates reupload no geometry.
-
-Point-light cube shadows, cascades, advanced soft shadows, ray tracing and
-IBL are outside this milestone.
-
-**Done when** different material families cast and receive shared shadows,
-MToon and MMD show no representative look regressions, and bounded fixtures
-record CPU/GPU timing (including p95/p99) and memory use.
 
 ## v0.7.0 — WebGPU
 
-Reproduce the Vulkan contracts through v0.6.0 in `backend/webgpu/`, following
-[the backend boundary](../design/DESIGN_POLICY.md#4-backends) and
+Reproduce the Vulkan contracts through v0.6.0, the
+[shared shadows](../design/SHADOW_POLICY.md) included, in `backend/webgpu/`,
+following [the backend boundary](../design/DESIGN_POLICY.md#4-backends) and
 [project layout](../architecture/PROJECT_LAYOUT.md#3-where-new-code-goes).
 
 - Implement device/queue, resources, synchronization, presentation,
