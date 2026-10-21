@@ -149,6 +149,7 @@ void ShadowFit::Update(const DrawList& draws) {
   std::erase_if(bounds_, [&](const auto& entry) {
     return entry.second.generation != generation_;
   });
+  Gather(draws);
   const double size = ShadowResolution(draws.shadow_settings.resolution);
 
   // The fallback key stands in for a missing rig, as the light buffer
@@ -198,29 +199,125 @@ void ShadowFit::Update(const DrawList& draws) {
   }
 }
 
-bool ShadowFit::MeshBox(const DrawList& draws, const MeshSnapshot& mesh,
-    const ShadowView& view, std::array<double, 3>& low,
-    std::array<double, 3>& high, bool& receives) const {
-  const auto found = bounds_.find(mesh.id);
-  if (found == bounds_.end()) {
-    return false;
-  }
-  const std::uint32_t index_count = mesh.indices != nullptr
-      ? static_cast<std::uint32_t>(mesh.indices->size())
-      : 0U;
-  bool casts = false;
-  receives = false;
+// Each mesh's box, roles and seen corners, which every view of the frame
+// reads: the receiver's parts the frustum reaches, each cut to it, as the
+// camera alone decides them.
+void ShadowFit::Gather(const DrawList& draws) {
+  shadowed_.clear();
+  seen_.clear();
+  // OpenGL's clip space: a point is in the frustum where -w <= x, y, z <= w.
+  const Matrix4 clip_from_world = Multiply(draws.view.projection, draws.view.view);
+  const auto& c = clip_from_world.m;
+  const auto& v = draws.view.view.m;
+  const Matrix4 world_from_view = AffineInverse(draws.view.view);
+  const auto& w = world_from_view.m;
+  // An unskewed projection, perspective or orthographic, whose frustum a
+  // part's box is cut to.
+  const auto& p = draws.view.projection.m;
+  const bool unskewed = p[0] != 0.0F && p[5] != 0.0F && p[1] == 0.0F &&
+                        p[4] == 0.0F;
+  const bool perspective = unskewed && p[11] == -1.0F && p[15] == 0.0F;
+  const bool orthographic = unskewed && p[11] == 0.0F && p[15] == 1.0F;
   MeshPart whole;
-  for (const MeshPart& part : PartsOf(mesh, index_count, whole)) {
-    if (!Fits(part, index_count)) {
+  for (const MeshSnapshot& mesh : draws.draws) {
+    const auto found = bounds_.find(mesh.id);
+    if (found == bounds_.end()) {
       continue;
     }
-    const ShadowRole role = ShadowRoleOf(FindMaterial(draws, part.material));
-    casts = casts || Casts(role, draws);
-    receives = receives || Receives(role, draws, view);
+    const OutlineBounds& bounds = found->second.bounds;
+    const std::uint32_t index_count = mesh.indices != nullptr
+        ? static_cast<std::uint32_t>(mesh.indices->size())
+        : 0U;
+    Shadowed entry;
+    ShadowView mmd_view;
+    mmd_view.mmd = true;
+    for (const MeshPart& part : PartsOf(mesh, index_count, whole)) {
+      if (!Fits(part, index_count)) {
+        continue;
+      }
+      const ShadowRole role = ShadowRoleOf(FindMaterial(draws, part.material));
+      entry.casts = entry.casts || Casts(role, draws);
+      entry.receives = entry.receives || Receives(role, draws, ShadowView{});
+      entry.receives_mmd = entry.receives_mmd || Receives(role, draws, mmd_view);
+    }
+    if ((!entry.casts && !entry.receives && !entry.receives_mmd) ||
+        !bounds.SceneBounds(mesh, entry.low, entry.high)) {
+      continue;
+    }
+    entry.first_seen = seen_.size();
+    if (entry.receives || entry.receives_mmd) {
+      // A part is left out only when every corner of its box lies beyond
+      // one of the frustum's planes.
+      if (!bounds.ScenePieces(mesh, pieces_)) {
+        pieces_.assign(1, {entry.low, entry.high});
+      }
+      for (const OutlineBounds::SceneBox& piece : pieces_) {
+        std::array<std::array<double, 4>, 8> clip{};
+        for (unsigned corner = 0; corner < 8U; ++corner) {
+          const std::array<double, 3> point = CornerOf(piece.low, piece.high, corner);
+          for (std::size_t row = 0; row < 4; ++row) {
+            clip[corner][row] = c[12 + row] + c[row] * point[0] +
+                                c[4 + row] * point[1] + c[8 + row] * point[2];
+          }
+        }
+        bool outside = false;
+        for (std::size_t row = 0; row < 3 && !outside; ++row) {
+          for (const double sign : {-1.0, 1.0}) {
+            bool beyond = true;
+            for (const auto& point : clip) {
+              beyond = beyond && sign * point[row] > point[3];
+            }
+            outside = outside || beyond;
+          }
+        }
+        if (outside) {
+          continue;
+        }
+        // The part's box in view space, cut to the frustum's cross-section
+        // at the part's far side, which holds every nearer one, so the parts
+        // the camera sees only the edge of add only that edge.
+        std::array<double, 3> view_low{};
+        std::array<double, 3> view_high{};
+        for (unsigned corner = 0; corner < 8U; ++corner) {
+          const std::array<double, 3> point = CornerOf(piece.low, piece.high, corner);
+          for (std::size_t row = 0; row < 3; ++row) {
+            const double value = v[12 + row] + v[row] * point[0] +
+                                 v[4 + row] * point[1] + v[8 + row] * point[2];
+            view_low[row] = corner ? std::min(view_low[row], value) : value;
+            view_high[row] = corner ? std::max(view_high[row], value) : value;
+          }
+        }
+        if (perspective || orthographic) {
+          const double ahead = std::max(-view_low[2], 0.0);
+          for (std::size_t row = 0; row < 2; ++row) {
+            const double scale = p[5 * row];
+            const double shift = p[8 + row];
+            const double offset = p[12 + row];
+            const double from = perspective ? ahead * (-1.0 + shift) / scale
+                                            : (-1.0 - offset) / scale;
+            const double to = perspective ? ahead * (1.0 + shift) / scale
+                                          : (1.0 - offset) / scale;
+            view_low[row] = std::max(view_low[row], std::min(from, to));
+            view_high[row] = std::min(view_high[row], std::max(from, to));
+          }
+          if (!(view_low[0] <= view_high[0]) || !(view_low[1] <= view_high[1])) {
+            continue;
+          }
+        }
+        for (unsigned corner = 0; corner < 8U; ++corner) {
+          const std::array<double, 3> at = CornerOf(view_low, view_high, corner);
+          std::array<double, 3> point{};
+          for (std::size_t row = 0; row < 3; ++row) {
+            point[row] = w[12 + row] + w[row] * at[0] + w[4 + row] * at[1] +
+                         w[8 + row] * at[2];
+          }
+          seen_.push_back(point);
+        }
+      }
+    }
+    entry.seen_count = seen_.size() - entry.first_seen;
+    shadowed_.push_back(entry);
   }
-  return (casts || receives) &&
-         found->second.bounds.SceneBounds(mesh, low, high);
 }
 
 // The view looks along the light with an orthographic projection. Along
@@ -245,20 +342,6 @@ bool ShadowFit::Fit(const DrawList& draws, const Float3& travel, double size,
            m[8 + row] * point[2];
   };
 
-  // OpenGL's clip space: a point is in the frustum where -w <= x, y, z <= w.
-  const Matrix4 clip_from_world = Multiply(draws.view.projection, draws.view.view);
-  const auto& c = clip_from_world.m;
-  const auto& v = draws.view.view.m;
-  const Matrix4 world_from_view = AffineInverse(draws.view.view);
-  const auto& w = world_from_view.m;
-  // An unskewed projection, perspective or orthographic, whose frustum a
-  // part's box is cut to.
-  const auto& p = draws.view.projection.m;
-  const bool unskewed = p[0] != 0.0F && p[5] != 0.0F && p[1] == 0.0F &&
-                        p[4] == 0.0F;
-  const bool perspective = unskewed && p[11] == -1.0F && p[15] == 0.0F;
-  const bool orthographic = unskewed && p[11] == 0.0F && p[15] == 1.0F;
-
   // In the light's frame: around every draw that casts or receives, and
   // around what the camera sees of the receivers.
   std::array<double, 3> low{};
@@ -268,17 +351,14 @@ bool ShadowFit::Fit(const DrawList& draws, const Float3& travel, double size,
   std::array<double, 3> seen_low{};
   std::array<double, 3> seen_high{};
   bool seen = false;
-  for (const MeshSnapshot& mesh : draws.draws) {
-    std::array<double, 3> mesh_low{};
-    std::array<double, 3> mesh_high{};
-    bool receives = false;
-    if (!MeshBox(draws, mesh, view, mesh_low, mesh_high, receives)) {
+  for (const Shadowed& entry : shadowed_) {
+    const bool receives = entry.ReceivesView(view);
+    if (!entry.casts && !receives) {
       continue;
     }
-    const OutlineBounds& bounds = bounds_.find(mesh.id)->second.bounds;
     receivers = receivers || receives;
     for (unsigned corner = 0; corner < 8U; ++corner) {
-      const std::array<double, 3> point = CornerOf(mesh_low, mesh_high, corner);
+      const std::array<double, 3> point = CornerOf(entry.low, entry.high, corner);
       for (std::size_t row = 0; row < 3; ++row) {
         const double value = light(point, row);
         low[row] = bounded ? std::min(low[row], value) : value;
@@ -289,78 +369,14 @@ bool ShadowFit::Fit(const DrawList& draws, const Float3& travel, double size,
     if (!receives) {
       continue;
     }
-    // The receiver's parts the frustum reaches: a part is left out only
-    // when every corner of its box lies beyond one of the frustum's planes.
-    if (!bounds.ScenePieces(mesh, pieces_)) {
-      pieces_.assign(1, {mesh_low, mesh_high});
-    }
-    for (const OutlineBounds::SceneBox& piece : pieces_) {
-      std::array<std::array<double, 4>, 8> clip{};
-      for (unsigned corner = 0; corner < 8U; ++corner) {
-        const std::array<double, 3> point = CornerOf(piece.low, piece.high, corner);
-        for (std::size_t row = 0; row < 4; ++row) {
-          clip[corner][row] = c[12 + row] + c[row] * point[0] +
-                              c[4 + row] * point[1] + c[8 + row] * point[2];
-        }
+    for (std::size_t index = 0; index < entry.seen_count; ++index) {
+      const std::array<double, 3>& point = seen_[entry.first_seen + index];
+      for (std::size_t row = 0; row < 3; ++row) {
+        const double value = light(point, row);
+        seen_low[row] = seen ? std::min(seen_low[row], value) : value;
+        seen_high[row] = seen ? std::max(seen_high[row], value) : value;
       }
-      bool outside = false;
-      for (std::size_t row = 0; row < 3 && !outside; ++row) {
-        for (const double sign : {-1.0, 1.0}) {
-          bool beyond = true;
-          for (const auto& point : clip) {
-            beyond = beyond && sign * point[row] > point[3];
-          }
-          outside = outside || beyond;
-        }
-      }
-      if (outside) {
-        continue;
-      }
-      // The part's box in view space, cut to the frustum's cross-section
-      // at the part's far side, which holds every nearer one, so the parts
-      // the camera sees only the edge of add only that edge.
-      std::array<double, 3> view_low{};
-      std::array<double, 3> view_high{};
-      for (unsigned corner = 0; corner < 8U; ++corner) {
-        const std::array<double, 3> point = CornerOf(piece.low, piece.high, corner);
-        for (std::size_t row = 0; row < 3; ++row) {
-          const double value = v[12 + row] + v[row] * point[0] +
-                               v[4 + row] * point[1] + v[8 + row] * point[2];
-          view_low[row] = corner ? std::min(view_low[row], value) : value;
-          view_high[row] = corner ? std::max(view_high[row], value) : value;
-        }
-      }
-      if (perspective || orthographic) {
-        const double ahead = std::max(-view_low[2], 0.0);
-        for (std::size_t row = 0; row < 2; ++row) {
-          const double scale = p[5 * row];
-          const double shift = p[8 + row];
-          const double offset = p[12 + row];
-          const double from = perspective ? ahead * (-1.0 + shift) / scale
-                                          : (-1.0 - offset) / scale;
-          const double to = perspective ? ahead * (1.0 + shift) / scale
-                                        : (1.0 - offset) / scale;
-          view_low[row] = std::max(view_low[row], std::min(from, to));
-          view_high[row] = std::min(view_high[row], std::max(from, to));
-        }
-        if (!(view_low[0] <= view_high[0]) || !(view_low[1] <= view_high[1])) {
-          continue;
-        }
-      }
-      for (unsigned corner = 0; corner < 8U; ++corner) {
-        const std::array<double, 3> at = CornerOf(view_low, view_high, corner);
-        std::array<double, 3> point{};
-        for (std::size_t row = 0; row < 3; ++row) {
-          point[row] = w[12 + row] + w[row] * at[0] + w[4 + row] * at[1] +
-                       w[8 + row] * at[2];
-        }
-        for (std::size_t row = 0; row < 3; ++row) {
-          const double value = light(point, row);
-          seen_low[row] = seen ? std::min(seen_low[row], value) : value;
-          seen_high[row] = seen ? std::max(seen_high[row], value) : value;
-        }
-        seen = true;
-      }
+      seen = true;
     }
   }
   if (!bounded || !receivers) {
@@ -429,16 +445,14 @@ bool ShadowFit::FitSpot(const DrawList& draws, const ToonLight& light,
   double farthest = 0.0;
   bool bounded = false;
   bool receivers = false;
-  for (const MeshSnapshot& mesh : draws.draws) {
-    std::array<double, 3> low{};
-    std::array<double, 3> high{};
-    bool receives = false;
-    if (!MeshBox(draws, mesh, view, low, high, receives)) {
+  for (const Shadowed& entry : shadowed_) {
+    const bool receives = entry.ReceivesView(view);
+    if (!entry.casts && !receives) {
       continue;
     }
     double mesh_far = 0.0;
     for (unsigned corner = 0; corner < 8U; ++corner) {
-      const std::array<double, 3> point = CornerOf(low, high, corner);
+      const std::array<double, 3> point = CornerOf(entry.low, entry.high, corner);
       const double distance = -(m[14] + m[2] * point[0] + m[6] * point[1] +
                                   m[10] * point[2]);
       nearest = bounded ? std::min(nearest, distance) : distance;

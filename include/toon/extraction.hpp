@@ -33,7 +33,9 @@ struct LightingDebug {
 // The shared shadow views' render settings (shadow policy §3): per-frame
 // values, never material or geometry edits. Bias and filter apply to the
 // receivers of every family but MMD, whose comparison and edge are its
-// own (material policy §10).
+// own (material policy §10). The defaults were measured in renderer
+// report 86: no acne at 1,024 to 4,096 texels on its scenes and avatar,
+// few thin casters' shadows lost, and edges neither stepped nor grainy.
 struct ShadowSettings {
   // `toon:shadowResolution`: texels on a side of every view, a power of
   // two from 512 to 4096 (ShadowResolution).
@@ -43,7 +45,7 @@ struct ShadowSettings {
   float depth_bias = 1.5F;
   // `toon:shadowNormalBias`: how far a receiver moves along its normal
   // as it turns from the light, at most, in the view's texels.
-  float normal_bias = 1.5F;
+  float normal_bias = 1.0F;
   // `toon:shadowFilterRadius`: the radius of the PCF disc a receiver
   // reads, in the view's texels; 0 reads one bilinear tap.
   float filter_radius = 1.5F;
@@ -246,12 +248,23 @@ private:
     OutlineBounds bounds;
     std::uint64_t generation = 0;
   };
-  // Each mesh's box around its posed points, in the scene's space, and
-  // whether it casts and receives into `view`; false for a mesh that does
-  // neither or cannot be bounded.
-  bool MeshBox(const DrawList& draws, const MeshSnapshot& mesh,
-      const ShadowView& view, std::array<double, 3>& low,
-      std::array<double, 3>& high, bool& receives) const;
+  // A drawn mesh as every view of the frame sees it, gathered once: the
+  // box around its posed points in the scene's space, whether it casts,
+  // whether it receives every view or only MMD's, and the corners of what
+  // the camera sees of it, a range of `seen_`.
+  struct Shadowed {
+    std::array<double, 3> low{};
+    std::array<double, 3> high{};
+    bool casts = false;
+    bool receives = false;
+    bool receives_mmd = false;
+    std::size_t first_seen = 0;
+    std::size_t seen_count = 0;
+    [[nodiscard]] bool ReceivesView(const ShadowView& view) const {
+      return receives || (receives_mmd && view.mmd);
+    }
+  };
+  void Gather(const DrawList& draws);
   bool Fit(const DrawList& draws, const Float3& travel, double size,
       ShadowView& view);
   bool FitSpot(const DrawList& draws, const ToonLight& light, double size,
@@ -259,6 +272,8 @@ private:
 
   std::unordered_map<MeshId, Bounds> bounds_;
   std::vector<OutlineBounds::SceneBox> pieces_;
+  std::vector<Shadowed> shadowed_;
+  std::vector<std::array<double, 3>> seen_;
   std::vector<ShadowView> views_;
   std::uint64_t generation_ = 0;
   std::uint32_t unviewed_ = 0;
