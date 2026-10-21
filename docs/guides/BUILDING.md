@@ -280,7 +280,9 @@ with ShapingAPI cones, and dome lights as uniform ambient. A scene with no
 supported lights uses the camera key plus ambient; hiding all authored
 lights leaves it dark. Up to 32 visible direct lights are drawn in core-id
 order, with all ambient lights summed. This is basic lighting: sphere area
-and normalization, dome textures, shadows and light linking are not read.
+and normalization, dome textures, shadow colour and falloff, and light
+linking are not read; shared shadows follow the
+[shadow policy](../design/SHADOW_POLICY.md).
 In `usdview`, point attenuation uses `toon:metersPerUnit`; the viewport
 reads the stage's unit automatically. [Renderer report 26](../reports/renderer/26-2026-09-30-scene-lights.md)
 records the tested controls and scene route.
@@ -680,6 +682,18 @@ analysis. `present_endpoint` is `vkQueuePresentKHR_return` and
 `display_time_measured` is false: use external display instrumentation for
 scanout latency. [Report 39](../reports/renderer/39-2026-10-05-late-frame-input.md)
 records the receiver regression and representative avatar measurements.
+
+The shared shadow views' cost has two bounded, original fixtures,
+`adapters/viewport/tests/shadow-cost.usda` (one distant light) and
+`shadow-cost-4.usda` (four): sixteen skinned casters before a backdrop,
+moved by pose and weight alone. In the `viewport-usd` tree,
+`ctest -R toon-viewport-shadow-cost` draws each 64 frames at 256x256 with
+vsync off, fails if a pose or weight uploads a static resource, and writes
+`adapters/viewport/tests/shadow-cost*.json` with the device, samples, the
+views' resolution and memory, and mean, p95 and p99 of the GPU shadow pass,
+GPU work, CPU fit and CPU submit. Run the same stages with `--telemetry-output`
+for larger measurements; [report 87](../reports/renderer/87-2026-10-21-shared-shadow-acceptance.md)
+records them.
 
 In a USD viewport session, expand `Materials` to inspect effective normalized
 values, renderer material ids and the meshes bound to them. Expand a material

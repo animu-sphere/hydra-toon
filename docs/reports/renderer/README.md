@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [87](87-2026-10-21-shared-shadow-acceptance.md) | Shared shadows, stage 3: 192 cross-family receiver/caster/deformation/setting cases and self-shadow, Hydra/fast paths drawing identical views and images, MMD frames byte-identical, MToon shadows-on reference by digest, bounded `shadow-cost` fixtures (four views ≈0.14 ms GPU, 64 MiB) |
 | [86](86-2026-10-21-shared-shadow-stage-2.md) | Shared shadows, stage 2: up to four directional and spot views in one array image, resolution/bias/filter settings measured for acne and thin-caster loss (1.5/1.0/1.5 texels), debug views; MMD byte-identical, four views ≈0.40 ms GPU and 64 MiB on AliciaSolid |
 | [85](85-2026-10-21-shared-shadow-stage-1.md) | Shared shadows, stage 1: the core fits one directional view, one caster pass draws every family, MToon and PreviewSurface receive; MMD frames and fixtures byte-identical to `main`, pass ≈0.25 ms GPU and fit ≈0.15 ms CPU on AliciaSolid |
 | [84](84-2026-10-19-ci-primvar-device-skip.md) | Release dry-run failure on GPU-less CI: primvar GPU validation now probes actual renderer creation; forced missing-driver 1→77, shader failure retained, CPU/real-GPU checks passed |

@@ -219,7 +219,8 @@ Ambient lights are never shadowed.
 2. **More lights and controls.** Up to the measured count of directional
    and spot views; resolution, bias and filter settings; the debug views.
 3. **Acceptance.** The cross-family cases and done-when condition of the
-   [v0.6.0 roadmap](../roadmap/v0.6.0.md).
+   [v0.6.0 roadmap](../roadmap/v0.6.0.md)
+   ([report 87](../reports/renderer/87-2026-10-21-shared-shadow-acceptance.md)).
 
 ## 10. Outside this policy
 
