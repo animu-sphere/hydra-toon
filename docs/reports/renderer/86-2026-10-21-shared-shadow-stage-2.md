@@ -9,7 +9,7 @@
   `hydra` package (`sha256:3b60ed14…`, [report 85](85-2026-10-21-shared-shadow-stage-1.md))
   as the baseline
 - Occasion: stage 2 of the [shadow policy](../../design/SHADOW_POLICY.md#9-stages),
-  the first work item of the [v0.6.0 roadmap](../../roadmap/v0.6.0.md)
+  the first work item of the [v0.6.0 roadmap](../../releases/v0.6.0.md)
 
 ## TL;DR
 

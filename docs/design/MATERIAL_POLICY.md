@@ -438,5 +438,5 @@ moving a caster by pose is a value update that reuploads no geometry
 ([DESIGN_POLICY.md](DESIGN_POLICY.md) §11, §14).
 
 The cases and release condition belong to
-[v0.6.0](../roadmap/v0.6.0.md); the light, caster, view and resource
+[v0.6.0](../releases/v0.6.0.md); the light, caster, view and resource
 contracts are the [shadow policy](SHADOW_POLICY.md).

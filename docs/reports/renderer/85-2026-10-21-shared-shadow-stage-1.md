@@ -8,7 +8,7 @@
   `usd-vrm-plugins`' `vrmImaging` at the `lookdev` profile; `main`'s `toon`
   `hydra` package (`sha256:d247221c…`) as the baseline
 - Occasion: stage 1 of the [shadow policy](../../design/SHADOW_POLICY.md#9-stages),
-  the first work item of the [v0.6.0 roadmap](../../roadmap/v0.6.0.md)
+  the first work item of the [v0.6.0 roadmap](../../releases/v0.6.0.md)
 
 ## TL;DR
 

@@ -8,6 +8,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-21
+
 ### Added
 
 - Shared shadows, stage 1 of the shadow policy: the core's `ShadowFit`
