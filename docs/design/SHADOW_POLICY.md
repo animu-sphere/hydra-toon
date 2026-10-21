@@ -13,8 +13,8 @@ owner: hydra-toon
 > [§10](MATERIAL_POLICY.md#10-mmds-self-shadow); this page owns the light,
 > caster, view and resource contracts they read. Implementation status
 > belongs to the [capability matrix](../reference/CAPABILITY_MATRIX.md);
-> the milestone's work and acceptance belong to the
-> [v0.6.0 roadmap](../roadmap/v0.6.0.md).
+> the milestone's acceptance is recorded in the
+> [v0.6.0 release record](../releases/v0.6.0.md).
 
 ## 1. Purpose and decisions
 
@@ -219,7 +219,7 @@ Ambient lights are never shadowed.
 2. **More lights and controls.** Up to the measured count of directional
    and spot views; resolution, bias and filter settings; the debug views.
 3. **Acceptance.** The cross-family cases and done-when condition of the
-   [v0.6.0 roadmap](../roadmap/v0.6.0.md)
+   [v0.6.0 milestone](../releases/v0.6.0.md)
    ([report 87](../reports/renderer/87-2026-10-21-shared-shadow-acceptance.md)).
 
 ## 10. Outside this policy

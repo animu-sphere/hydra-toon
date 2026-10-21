@@ -11,7 +11,7 @@
   [50](50-2026-10-11-avatar-motion-provider.md)
 - Occasion: stage 3 of the [shadow policy](../../design/SHADOW_POLICY.md#9-stages),
   the remaining work and done-when condition of the
-  [v0.6.0 roadmap](../../roadmap/v0.6.0.md)
+  [v0.6.0 roadmap](../../releases/v0.6.0.md)
 
 ## TL;DR
 
