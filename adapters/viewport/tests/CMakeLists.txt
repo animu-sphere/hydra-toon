@@ -142,6 +142,24 @@ if(TOON_ENABLE_HYDRA2)
     LABELS "gpu;viewport;presentation;hydra"
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+  foreach(_toon_views IN ITEMS 1 4)
+    set(_toon_scene shadow-cost)
+    if(_toon_views EQUAL 4)
+      set(_toon_scene shadow-cost-4)
+    endif()
+    add_test(NAME toon-viewport-shadow-cost-${_toon_views}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"
+        "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/${_toon_scene}.usda"
+        "-DVIEWS=${_toon_views}"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${_toon_scene}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_shadow_cost.cmake")
+    set_tests_properties(toon-viewport-shadow-cost-${_toon_views} PROPERTIES
+      SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
+      LABELS "gpu;viewport;presentation;hydra"
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+  endforeach()
   set_tests_properties(toon-viewport-playback PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
     LABELS "gpu;viewport;presentation;hydra"
