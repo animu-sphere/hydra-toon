@@ -21,6 +21,18 @@ version has a record in [docs/releases/](docs/releases/README.md).
   control it; statistics, Hydra evidence and viewport telemetry count views,
   caster draws and the fit's CPU time
   ([renderer report 85](docs/reports/renderer/85-2026-10-21-shared-shadow-stage-1.md)).
+- Shared shadows, stage 2: up to four views, directional lights'
+  orthographic and spot lights' perspective (cones up to 80 degrees), drawn
+  into the layers of one D32 array image; further lights are counted.
+  `toon:shadowResolution`, `toon:shadowDepthBias`, `toon:shadowNormalBias`
+  and `toon:shadowFilterRadius` (viewport `--shadow-*` and a Shadow views
+  panel) set the resolution and the MToon and PreviewSurface receivers'
+  comparison, with defaults of 2,048, 1.5, 1.0 and 1.5 texels measured for
+  acne and lost thin-caster shadows. A shadow material view
+  (`--material-view shadow`) shows each receiver's visibility and the
+  viewport previews each view's depth; statistics report the views'
+  resolution, layers and memory
+  ([renderer report 86](docs/reports/renderer/86-2026-10-21-shared-shadow-stage-2.md)).
 
 ### Changed
 
@@ -29,6 +41,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
   while other families' casters now shadow MMD receivers. The `mmd_shadow`
   shader and `SceneShaders::mmd_shadow_*` are now `shadow` and
   `SceneShaders::shadow_*`.
+- MToon and PreviewSurface receivers move along their normal by 1.0 texel
+  rather than stage 1's provisional 1.5, which keeps more of thin casters'
+  shadows; `ShadowFit::Update` takes the resolution from the draw list.
 
 ## [0.5.0] - 2026-10-19
 
