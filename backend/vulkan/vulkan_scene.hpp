@@ -241,7 +241,8 @@ struct MmdShadowParameters {
   float parameters[4];
   // x how far a receiver's point moves along its normal before the map
   // is read, at most, in view-space units: three of the map's texels; y a
-  // texel's width in MMD units.
+  // texel's width in MMD units; z the map's layer of the shared views'
+  // image.
   float texel[4];
 };
 static_assert(sizeof(MmdShadowParameters) == 96);
@@ -252,16 +253,23 @@ static_assert(sizeof(MmdShadowParameters) == 96);
 struct ShadowViewParameters {
   // The view's clip space from view space, column-major.
   float clip_from_view[16];
-  // x its size in texels, y its depth range and z a texel's width, both in
-  // view-space units; w unused.
+  // x its size in texels, y its layer of the image, z 1 when it is
+  // perspective (a spot light's) and 0 when orthographic; w unused.
   float extent[4];
+  // In view-space units: x its depth range, y its near plane's distance
+  // when perspective, z a texel's width, at a distance of 1 when
+  // perspective; w unused.
+  float depth[4];
+  // The receivers' comparison, in the view's texels (ShadowSettings): x
+  // the depth bias, y the normal bias, z the filter radius; w unused.
+  float receiver[4];
 };
-static_assert(sizeof(ShadowViewParameters) == 80);
+static_assert(sizeof(ShadowViewParameters) == 112);
 
-// A shared shadow view's depth image, square: its texels go where the
-// camera sees a receiver, and a receiver reads them filtered (shadow
-// policy §5).
-constexpr std::uint32_t kShadowMapSize = 2048;
+// The shared shadow views' depth image: a two-dimensional array of square
+// layers, one per view, at the resolution ShadowSettings sets. Its texels
+// go where the camera sees a receiver, and a receiver reads them filtered
+// (shadow policy §5).
 constexpr VkFormat kShadowFormat = VK_FORMAT_D32_SFLOAT;
 
 // Vulkan 1.3 features the scene path uses: dynamic rendering (no render
@@ -392,11 +400,14 @@ struct DeviceImage {
   VkImageView view = VK_NULL_HANDLE;
 };
 
+// More than one layer, or `array`, gives the image a two-dimensional
+// array view of every layer.
 bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
     VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
     std::uint32_t width, std::uint32_t height, DeviceImage& image,
     std::string& detail, std::uint32_t mip_levels = 1,
-    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
+    std::uint32_t layers = 1, bool array = false);
 void DestroyDeviceImage(VkDevice device, DeviceImage& image);
 
 VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkImageAspectFlags aspect,
@@ -802,16 +813,19 @@ private:
 
 // The shared shadow views (shadow policy §5): each frame the core's
 // ShadowFit decides which views are drawn and from where, and each is
-// drawn before the scene by the shared caster pass into one depth image.
-// MMD's receivers read the view of the scene's first direct light as MMD's
-// self-shadow map (material policy §10). The image, MMD's parameters and
-// every view's sit in the material descriptor set, at bindings 5, 6 and 8.
+// drawn before the scene by the shared caster pass into its layer of one
+// depth image. MMD's receivers read the view of the scene's first direct
+// light as MMD's self-shadow map (material policy §10). The image, MMD's
+// parameters and every view's sit in the material descriptor set, at
+// bindings 5, 6 and 8.
 class ShadowMap {
 public:
   bool Initialize(VkPhysicalDevice physical_device, VkDevice device,
       VkDescriptorSet set, std::string& detail);
-  // Fit this frame's views, timing the fit. No frame that reads the
-  // parameters may be in flight.
+  // Fit this frame's views, timing the fit, and size the image for them:
+  // another resolution rebuilds it, and more views than it has layers
+  // grow it, keeping every other resource. No frame that reads the image
+  // or the parameters may be in flight.
   bool Update(const DrawList& draws, std::string& detail, double& fit_ms);
   // Record the views' passes, outside any other rendering. A frame that
   // draws no view records nothing, once the image has been readable since
@@ -825,11 +839,34 @@ public:
   // The last recorded frame's caster draws, every family's and MMD's.
   [[nodiscard]] std::uint32_t caster_draws() const { return caster_draws_; }
   [[nodiscard]] std::uint32_t mmd_draws() const { return mmd_draws_; }
+  // The image's texels on a side and its layers, its device memory, and
+  // a view of each layer, which reads as depth once Record has run; a
+  // rebuild changes them, and counts in `rebuilds`.
+  [[nodiscard]] std::uint32_t resolution() const { return resolution_; }
+  [[nodiscard]] std::uint32_t layers() const {
+    return static_cast<std::uint32_t>(layer_views_.size());
+  }
+  [[nodiscard]] VkDeviceSize memory_bytes() const { return memory_bytes_; }
+  [[nodiscard]] VkImageView layer_view(std::uint32_t layer) const {
+    return layer_views_[layer];
+  }
+  [[nodiscard]] std::uint64_t rebuilds() const { return rebuilds_; }
 
 private:
+  bool Build(std::uint32_t resolution, std::uint32_t layers,
+      std::string& detail);
+  void Release();
+
+  VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
   VkDevice device_ = VK_NULL_HANDLE;
+  VkDescriptorSet set_ = VK_NULL_HANDLE;
   ShadowFit fit_;
   DeviceImage image_;
+  // One two-dimensional view per layer, which a pass draws into.
+  std::vector<VkImageView> layer_views_;
+  std::uint32_t resolution_ = 0;
+  VkDeviceSize memory_bytes_ = 0;
+  std::uint64_t rebuilds_ = 0;
   HostBuffer buffer_;
   HostBuffer views_buffer_;
   std::uint32_t caster_draws_ = 0;

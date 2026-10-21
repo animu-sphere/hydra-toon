@@ -249,6 +249,10 @@ TF_DEFINE_PRIVATE_TOKENS(SettingTokens,
     ((backgroundMode, "toon:backgroundMode"))
     ((backgroundColor, "toon:backgroundColor"))
     ((shadows, "toon:shadows"))
+    ((shadowResolution, "toon:shadowResolution"))
+    ((shadowDepthBias, "toon:shadowDepthBias"))
+    ((shadowNormalBias, "toon:shadowNormalBias"))
+    ((shadowFilterRadius, "toon:shadowFilterRadius"))
     ((mmdSelfShadow, "toon:mmdSelfShadow"))
     ((mmdMorphTints, "toon:mmdMorphTints")));
 
@@ -313,6 +317,44 @@ bool RequestedShadows(const HdRenderDelegate& delegate) {
   const VtValue value =
       VtValue::Cast<bool>(delegate.GetRenderSetting(SettingTokens->shadows));
   return !value.IsHolding<bool>() || value.UncheckedGet<bool>();
+}
+
+// The shared shadow views' settings (shadow policy §3): each at its
+// default until a host sets it. A resolution that is not a power of two
+// from 512 to 4096 falls to the one at or below it, within that range; a
+// bias or radius that is negative, not finite or past its range keeps the
+// default; either way with a warning.
+Toon::ShadowSettings RequestedShadowSettings(const HdRenderDelegate& delegate) {
+  Toon::ShadowSettings settings;
+  const VtValue resolution = VtValue::Cast<int>(
+      delegate.GetRenderSetting(SettingTokens->shadowResolution));
+  if (resolution.IsHolding<int>()) {
+    const int requested = resolution.UncheckedGet<int>();
+    settings.resolution = Toon::ShadowResolution(
+        static_cast<std::uint32_t>(std::max(requested, 0)));
+    if (static_cast<int>(settings.resolution) != requested) {
+      TF_WARN("toon:shadowResolution %d is not a power of two from 512 to "
+              "4096; drawing %u",
+          requested, settings.resolution);
+    }
+  }
+  const auto scalar = [&](const TfToken& name, float limit, float& value) {
+    const VtValue cast = VtValue::Cast<float>(delegate.GetRenderSetting(name));
+    if (!cast.IsHolding<float>()) {
+      return;
+    }
+    const float requested = cast.UncheckedGet<float>();
+    if (!std::isfinite(requested) || requested < 0.0F || requested > limit) {
+      TF_WARN("%s must be in [0, %g]; keeping %g", name.GetText(),
+          static_cast<double>(limit), static_cast<double>(value));
+      return;
+    }
+    value = requested;
+  };
+  scalar(SettingTokens->shadowDepthBias, 16.0F, settings.depth_bias);
+  scalar(SettingTokens->shadowNormalBias, 16.0F, settings.normal_bias);
+  scalar(SettingTokens->shadowFilterRadius, 8.0F, settings.filter_radius);
+  return settings;
 }
 
 // Whether `toon:mmdSelfShadow` turns MMD's self-shadow on, as MMD's own
@@ -633,7 +675,8 @@ public:
 
   void Render(const HdRenderPassStateSharedPtr& pass_state,
       std::uint32_t samples, float meters_per_unit, double time_seconds,
-      bool shadows, bool mmd_self_shadow, bool mmd_morph_tints,
+      bool shadows, const Toon::ShadowSettings& shadow_settings,
+      bool mmd_self_shadow, bool mmd_morph_tints,
       const std::optional<Toon::BackgroundSettings>& background) {
     std::scoped_lock lock(mutex_);
     const HdRenderPassAovBindingVector& bindings =
@@ -670,6 +713,7 @@ public:
     world_.Commit(snapshot_);
     Toon::ExtractDrawList(snapshot_, draws_);
     draws_.shadows = shadows;
+    draws_.shadow_settings = shadow_settings;
     draws_.mmd_self_shadow = mmd_self_shadow;
     draws_.mmd_morph_tints = mmd_morph_tints;
     if (!renderer_->Render(draws_, width, height, color_, depth_, error)) {
@@ -2006,7 +2050,8 @@ private:
     const HdRenderDelegate& delegate = *GetRenderIndex()->GetRenderDelegate();
     state_->Render(render_pass_state, RequestedSamples(delegate),
         RequestedMetersPerUnit(delegate), RequestedTimeSeconds(delegate),
-        RequestedShadows(delegate), RequestedMmdSelfShadow(delegate),
+        RequestedShadows(delegate), RequestedShadowSettings(delegate),
+        RequestedMmdSelfShadow(delegate),
         RequestedMmdMorphTints(delegate),
         RequestedBackground(delegate));
   }
@@ -2368,6 +2413,14 @@ HdToonRenderDelegate::GetRenderSettingDescriptors() const {
       {"Background colour (linear RGBA)", SettingTokens->backgroundColor,
           VtValue(GfVec4f(0.05F, 0.10F, 0.15F, 1.0F))},
       {"Shared shadows", SettingTokens->shadows, VtValue(true)},
+      {"Shadow view resolution (512-4096)", SettingTokens->shadowResolution,
+          VtValue(static_cast<int>(Toon::ShadowSettings{}.resolution))},
+      {"Shadow depth bias (texels)", SettingTokens->shadowDepthBias,
+          VtValue(Toon::ShadowSettings{}.depth_bias)},
+      {"Shadow normal bias (texels)", SettingTokens->shadowNormalBias,
+          VtValue(Toon::ShadowSettings{}.normal_bias)},
+      {"Shadow filter radius (texels)", SettingTokens->shadowFilterRadius,
+          VtValue(Toon::ShadowSettings{}.filter_radius)},
       {"MMD self-shadow", SettingTokens->mmdSelfShadow, VtValue(true)},
       {"MMD morph tints", SettingTokens->mmdMorphTints, VtValue(false)}};
 }

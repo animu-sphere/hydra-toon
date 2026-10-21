@@ -168,6 +168,12 @@ struct OffscreenStatistics {
   std::uint32_t shadow_views = 0;
   std::uint32_t shadow_caster_draws = 0;
   std::uint32_t shadow_unviewed = 0;
+  // The views' image: texels on a side, layers, device memory in bytes,
+  // and the times it was built (shadow policy §5, §8).
+  std::uint32_t shadow_resolution = 0;
+  std::uint32_t shadow_layers = 0;
+  std::uint64_t shadow_memory_bytes = 0;
+  std::uint64_t shadow_rebuilds = 0;
   std::uint64_t frames_rendered = 0;
   // The last completed frame's timeline value.
   std::uint64_t completion = 0;

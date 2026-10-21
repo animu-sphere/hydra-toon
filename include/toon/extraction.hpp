@@ -11,11 +11,15 @@
 
 namespace Toon {
 
+// Shadow: what reaches a receiver past the shared shadow views, the mean
+// over the lights that have one, or past MMD's self-shadow; 1 elsewhere
+// (shadow policy §8).
 enum class MaterialDebug { Surface,
   BaseColor,
   Normal,
   DirectLight,
-  Ambient };
+  Ambient,
+  Shadow };
 
 // Evaluation controls: per-frame values, never edits to resident materials.
 struct LightingDebug {
@@ -25,6 +29,33 @@ struct LightingDebug {
   Float3 key_direction{0.25F, 0.5F, 1.0F}; // toward fallback key, view space
   MaterialDebug material = MaterialDebug::Surface;
 };
+
+// The shared shadow views' render settings (shadow policy §3): per-frame
+// values, never material or geometry edits. Bias and filter apply to the
+// receivers of every family but MMD, whose comparison and edge are its
+// own (material policy §10). The defaults were measured in renderer
+// report 86: no acne at 1,024 to 4,096 texels on its scenes and avatar,
+// few thin casters' shadows lost, and edges neither stepped nor grainy.
+struct ShadowSettings {
+  // `toon:shadowResolution`: texels on a side of every view, a power of
+  // two from 512 to 4096 (ShadowResolution).
+  std::uint32_t resolution = 2048;
+  // `toon:shadowDepthBias`: how far behind what a view saw a receiver
+  // must lie before it is shadowed, in the view's texels, before slope.
+  float depth_bias = 1.5F;
+  // `toon:shadowNormalBias`: how far a receiver moves along its normal
+  // as it turns from the light, at most, in the view's texels.
+  float normal_bias = 1.0F;
+  // `toon:shadowFilterRadius`: the radius of the PCF disc a receiver
+  // reads, in the view's texels; 0 reads one bilinear tap.
+  float filter_radius = 1.5F;
+
+  friend bool operator==(const ShadowSettings&, const ShadowSettings&) = default;
+};
+
+// The resolution a view is drawn at for a requested one: the power of two
+// at or below it, from 512 to 4096.
+[[nodiscard]] std::uint32_t ShadowResolution(std::uint32_t requested);
 
 // What a frame draws: every visible mesh whose topology its points can
 // satisfy, the materials they bind, and the camera they are seen through.
@@ -55,6 +86,7 @@ struct DrawList {
   // whenever a view is drawn, and its receivers follow `mmd_self_shadow`.
   // A per-frame value, like `outlines`.
   bool shadows = true;
+  ShadowSettings shadow_settings;
   // Whether MMD materials' texture, sphere and toon tints, which material
   // morphs set, draw as MikuMikuEffect's full.fx draws them. Off, as MMD
   // itself draws none (material policy MAT-Q6); the tints stay in the
@@ -151,10 +183,15 @@ struct ShadowRole {
 [[nodiscard]] const ToonMaterial* FindMaterial(const DrawList& draws,
     MaterialId id);
 
-// The views a frame draws shared shadows into (shadow policy §5): one,
-// the first shadowing directional light's or the fallback key's, until
-// more are measured.
-constexpr std::uint32_t kShadowViewCapacity = 1;
+// The views a frame draws shared shadows into (shadow policy §2, §5): the
+// shadowing directional and spot lights' in the light list's order, or the
+// fallback key's alone.
+constexpr std::uint32_t kShadowViewCapacity = 4;
+
+// The widest spot cone a view covers, as a half-angle in degrees; a wider
+// cone is a hemisphere's or a point light's, which a cube map would cover
+// (shadow policy §10), and its light is given no view.
+constexpr float kShadowSpotLimit = 80.0F;
 
 // One view of a shadowing light, backend-neutral.
 struct ShadowView {
@@ -162,10 +199,19 @@ struct ShadowView {
   LightId light = 0;
   // From the scene's space to the view's clip space: x and y in [-1, 1]
   // across it, y up, and z, the depth a caster writes and a receiver
-  // compares, in [0, 1] from its side nearest the light.
+  // compares, in [0, 1] from its side nearest the light. A directional
+  // light's view is orthographic; a spot light's is perspective, its w the
+  // distance along the light's axis.
   Matrix4 clip_from_world;
-  // Its depth range and the width of one of its texels, in scene units.
+  bool perspective = false;
+  // Its depth range in scene units: orthographic, from its near side to
+  // its far side; perspective, from `near_plane` to the far plane, both
+  // distances from the light along its axis.
   double depth = 0.0;
+  double near_plane = 0.0;
+  // The width of one of its texels in scene units: orthographic, anywhere;
+  // perspective, at a distance of one unit along the axis, growing in
+  // proportion to the distance.
   double texel = 0.0;
   // Whether MMD's receivers read it: it is the view of the scene's first
   // direct light and MMD's self-shadow is on (shadow policy §6).
@@ -178,13 +224,17 @@ struct ShadowView {
 // material policy §10 fits MMD's map, over every family's casters and
 // receivers: along the light, the box around them; across it, what the
 // camera sees of the receivers, in steps of an eighth of an octave and
-// whole texels. A light with nothing to receive its shadow has no view.
+// whole texels. A spot view is the light's perspective over its cone, its
+// near and far planes fitted to the same box. A light with nothing to
+// receive its shadow has no view.
 class ShadowFit {
 public:
-  void Update(const DrawList& draws, std::uint32_t resolution);
+  // Fits views of `draws.shadow_settings`' resolution.
+  void Update(const DrawList& draws);
   [[nodiscard]] const std::vector<ShadowView>& views() const { return views_; }
   // Shadowing lights given no view this frame: past the capacity, or spot
-  // lights, which no view draws yet. Reported, not silent.
+  // lights whose cone is wider than kShadowSpotLimit. Reported, not
+  // silent.
   [[nodiscard]] std::uint32_t unviewed() const { return unviewed_; }
 
   // Whether a draw of `role` draws into the frame's views, and whether it
@@ -198,11 +248,32 @@ private:
     OutlineBounds bounds;
     std::uint64_t generation = 0;
   };
+  // A drawn mesh as every view of the frame sees it, gathered once: the
+  // box around its posed points in the scene's space, whether it casts,
+  // whether it receives every view or only MMD's, and the corners of what
+  // the camera sees of it, a range of `seen_`.
+  struct Shadowed {
+    std::array<double, 3> low{};
+    std::array<double, 3> high{};
+    bool casts = false;
+    bool receives = false;
+    bool receives_mmd = false;
+    std::size_t first_seen = 0;
+    std::size_t seen_count = 0;
+    [[nodiscard]] bool ReceivesView(const ShadowView& view) const {
+      return receives || (receives_mmd && view.mmd);
+    }
+  };
+  void Gather(const DrawList& draws);
   bool Fit(const DrawList& draws, const Float3& travel, double size,
       ShadowView& view);
+  bool FitSpot(const DrawList& draws, const ToonLight& light, double size,
+      ShadowView& view) const;
 
   std::unordered_map<MeshId, Bounds> bounds_;
   std::vector<OutlineBounds::SceneBox> pieces_;
+  std::vector<Shadowed> shadowed_;
+  std::vector<std::array<double, 3>> seen_;
   std::vector<ShadowView> views_;
   std::uint64_t generation_ = 0;
   std::uint32_t unviewed_ = 0;

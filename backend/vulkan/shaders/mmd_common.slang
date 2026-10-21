@@ -59,7 +59,8 @@ struct MmdShadowParameters {
   float4 parameters;
   // x how far a receiver's point moves along its normal before the map is
   // read, at most, in view-space units: three of the map's texels; y a
-  // texel's width in MMD units.
+  // texel's width in MMD units; z the map's layer of the shared views'
+  // image.
   float4 texel;
 };
 
@@ -213,7 +214,7 @@ float SelfShadowLight(float3 view_position, float3 normal, float lambert) {
     // The four texels around the tap: w its own, z the next across, x the
     // next down, y both.
     const float4 seen = shadow_map.Gather(samplers[kClampSampler],
-        (base + 1.0) / size);
+        float3((base + 1.0) / size, shadow.texel.z));
     const float4 behind = max(depth + dot(plane, apart) -
                                   seen * shadow.parameters.y - allowance,
         0.0);
@@ -302,9 +303,12 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   const float highlight =
       power > 0.0 ? pow(max(dot(half_vector, normal), 0.0), power) : 1.0;
   const float3 specular = highlight * material.specular.rgb * light;
+  // What reaches the point past the self-shadow map, for the debug view
+  // too: 1 where the material does not receive it.
+  float visibility = 1.0;
   if (material.modes.z != 0 && mmd_shadow[0].parameters.x != 0.0) {
-    const float lit = min(saturate(lambert * kShadowToon),
-        SelfShadowLight(view_position, normal, lambert));
+    visibility = SelfShadowLight(view_position, normal, lambert);
+    const float lit = min(saturate(lambert * kShadowToon), visibility);
     color.rgb = lerp(color.rgb * toon_far.rgb, color.rgb + specular, lit);
   } else {
     color *= toon_texel;
@@ -312,7 +316,8 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   }
 
   // The material debug views, as MToon's: base colour, normal, direct
-  // light, and the ambient colour that stands in for MMD's ambient light.
+  // light, the ambient colour that stands in for MMD's ambient light, and
+  // the self-shadow's visibility, linear.
   const uint debug = uint(frame[0].z);
   if (debug == 1) color.rgb = material.diffuse.rgb * base_texel.rgb;
   if (debug == 2) color.rgb = normal * 0.5 + 0.5;
@@ -321,6 +326,7 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
 
   MmdSurface surface;
   surface.color = SrgbToLinear(saturate(color.rgb));
+  if (debug == kDebugShadow) surface.color = float3(visibility);
   surface.alpha = saturate(color.a);
   return surface;
 }

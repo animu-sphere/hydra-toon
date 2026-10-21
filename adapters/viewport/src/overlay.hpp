@@ -72,6 +72,7 @@ struct OverlayFrame {
   CompositeBackground background;
   bool outlines = true;
   bool shadows = true;
+  ShadowSettings shadow_settings;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints = false;
   LightingDebug lighting;
@@ -117,6 +118,8 @@ struct OverlayControls {
   bool outlines = true;
   bool shadows_changed = false;
   bool shadows = true;
+  bool shadow_settings_changed = false;
+  ShadowSettings shadow_settings;
   bool mmd_self_shadow_changed = false;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints_changed = false;

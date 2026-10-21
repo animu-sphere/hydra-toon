@@ -307,6 +307,10 @@ bool GpuNormals(const std::vector<Toon::FrameSnapshot>& frames,
         auto draws = Toon::ExtractDrawList(actual);
         auto expected = Toon::ExtractDrawList(reference.Commit());
         draws.outlines = expected.outlines = outlines;
+        // Shared shadows off: an ulp between GPU-morphed and placed points
+        // can flip a shadow tap where the surface meets its own shadow;
+        // renderer.shadow.receivers holds morphed casters to their place.
+        draws.shadows = expected.shadows = false;
         // A directional source across the morph's changing normal creates
         // a visible lit-surface difference, including the MToon ramp.
         draws.lighting.key_direction = expected.lighting.key_direction = {1, 0.25F, 0.2F};

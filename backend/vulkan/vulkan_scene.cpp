@@ -854,13 +854,13 @@ bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
     VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
     std::uint32_t width, std::uint32_t height, DeviceImage& image,
     std::string& detail, std::uint32_t mip_levels,
-    VkSampleCountFlagBits samples) {
+    VkSampleCountFlagBits samples, std::uint32_t layers, bool array) {
   VkImageCreateInfo create{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   create.imageType = VK_IMAGE_TYPE_2D;
   create.format = format;
   create.extent = {width, height, 1};
   create.mipLevels = mip_levels;
-  create.arrayLayers = 1;
+  create.arrayLayers = layers;
   create.samples = samples;
   create.tiling = VK_IMAGE_TILING_OPTIMAL;
   create.usage = usage;
@@ -890,11 +890,12 @@ bool CreateDeviceImage(VkPhysicalDevice physical_device, VkDevice device,
   }
   VkImageViewCreateInfo view_create{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   view_create.image = image.image;
-  view_create.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view_create.viewType = array || layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                             : VK_IMAGE_VIEW_TYPE_2D;
   view_create.format = format;
   view_create.subresourceRange.aspectMask = aspect;
   view_create.subresourceRange.levelCount = mip_levels;
-  view_create.subresourceRange.layerCount = 1;
+  view_create.subresourceRange.layerCount = layers;
   return VulkanOk(vkCreateImageView(device, &view_create, nullptr, &image.view),
       "vkCreateImageView", detail);
 }
@@ -923,7 +924,7 @@ VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkImageAspectFlags aspect,
   barrier.image = image;
   barrier.subresourceRange.aspectMask = aspect;
   barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
+  barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
   return barrier;
 }
 
@@ -2366,56 +2367,109 @@ bool MeshCache::Upload(HostBuffer& buffer, VkBufferUsageFlags usage,
 
 bool ShadowMap::Initialize(VkPhysicalDevice physical_device, VkDevice device,
     VkDescriptorSet set, std::string& detail) {
+  physical_device_ = physical_device;
   device_ = device;
-  if (!CreateDeviceImage(physical_device, device, kShadowFormat,
-          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-              VK_IMAGE_USAGE_SAMPLED_BIT,
-          VK_IMAGE_ASPECT_DEPTH_BIT, kShadowMapSize, kShadowMapSize, image_,
-          detail) ||
-      !CreateHostBuffer(physical_device, device, sizeof(MmdShadowParameters),
+  set_ = set;
+  if (!CreateHostBuffer(physical_device, device, sizeof(MmdShadowParameters),
           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, buffer_, detail) ||
       !CreateHostBuffer(physical_device, device,
           sizeof(ShadowViewParameters) * kShadowViewCapacity,
-          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, views_buffer_, detail)) {
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, views_buffer_, detail) ||
+      !Build(ShadowResolution(ShadowSettings{}.resolution), 1, detail)) {
     return false;
   }
   // Off until a frame draws the map.
   std::memset(buffer_.mapped, 0, sizeof(MmdShadowParameters));
   std::memset(views_buffer_.mapped, 0,
       sizeof(ShadowViewParameters) * kShadowViewCapacity);
-  VkDescriptorImageInfo image_info{};
-  image_info.imageView = image_.view;
-  image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   VkDescriptorBufferInfo buffer_info{buffer_.buffer, 0,
       sizeof(MmdShadowParameters)};
   VkDescriptorBufferInfo views_info{views_buffer_.buffer, 0,
       sizeof(ShadowViewParameters) * kShadowViewCapacity};
-  VkWriteDescriptorSet writes[3]{};
+  VkWriteDescriptorSet writes[2]{};
   writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writes[0].dstSet = set;
-  writes[0].dstBinding = 5;
+  writes[0].dstBinding = 6;
   writes[0].descriptorCount = 1;
-  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-  writes[0].pImageInfo = &image_info;
-  writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  writes[1].dstSet = set;
-  writes[1].dstBinding = 6;
-  writes[1].descriptorCount = 1;
-  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  writes[1].pBufferInfo = &buffer_info;
-  writes[2] = writes[1];
-  writes[2].dstBinding = 8;
-  writes[2].pBufferInfo = &views_info;
-  vkUpdateDescriptorSets(device_, 3, writes, 0, nullptr);
+  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  writes[0].pBufferInfo = &buffer_info;
+  writes[1] = writes[0];
+  writes[1].dstBinding = 8;
+  writes[1].pBufferInfo = &views_info;
+  vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
   return FlushIfNeeded(device_, buffer_, detail) &&
          FlushIfNeeded(device_, views_buffer_, detail);
+}
+
+// The image, its array view at binding 5 and a view of each layer.
+bool ShadowMap::Build(std::uint32_t resolution, std::uint32_t layers,
+    std::string& detail) {
+  Release();
+  if (!CreateDeviceImage(physical_device_, device_, kShadowFormat,
+          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+              VK_IMAGE_USAGE_SAMPLED_BIT,
+          VK_IMAGE_ASPECT_DEPTH_BIT, resolution, resolution, image_, detail,
+          1, VK_SAMPLE_COUNT_1_BIT, layers, true)) {
+    return false;
+  }
+  VkMemoryRequirements requirements{};
+  vkGetImageMemoryRequirements(device_, image_.image, &requirements);
+  memory_bytes_ = requirements.size;
+  resolution_ = resolution;
+  for (std::uint32_t layer = 0; layer < layers; ++layer) {
+    VkImageViewCreateInfo create{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    create.image = image_.image;
+    create.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    create.format = kShadowFormat;
+    create.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    create.subresourceRange.baseArrayLayer = layer;
+    create.subresourceRange.levelCount = 1;
+    create.subresourceRange.layerCount = 1;
+    VkImageView view = VK_NULL_HANDLE;
+    if (!VulkanOk(vkCreateImageView(device_, &create, nullptr, &view),
+            "vkCreateImageView(shadow layer)", detail)) {
+      return false;
+    }
+    layer_views_.push_back(view);
+  }
+  VkDescriptorImageInfo image_info{};
+  image_info.imageView = image_.view;
+  image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  write.dstSet = set_;
+  write.dstBinding = 5;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  write.pImageInfo = &image_info;
+  vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+  ++rebuilds_;
+  return true;
+}
+
+void ShadowMap::Release() {
+  for (VkImageView view : layer_views_) {
+    vkDestroyImageView(device_, view, nullptr);
+  }
+  layer_views_.clear();
+  DestroyDeviceImage(device_, image_);
+  memory_bytes_ = 0;
+  resolution_ = 0;
+  ready_ = false;
 }
 
 bool ShadowMap::Update(const DrawList& draws, std::string& detail,
     double& fit_ms) {
   const std::int64_t fit_start = SteadyNanoseconds();
-  fit_.Update(draws, kShadowMapSize);
+  fit_.Update(draws);
   fit_ms = static_cast<double>(SteadyNanoseconds() - fit_start) / 1e6;
+  const std::uint32_t resolution =
+      ShadowResolution(draws.shadow_settings.resolution);
+  const auto count = static_cast<std::uint32_t>(fit_.views().size());
+  if ((resolution != resolution_ || count > layers()) &&
+      !Build(resolution, std::max(count, layers()), detail)) {
+    return false;
+  }
+  const ShadowSettings& settings = draws.shadow_settings;
   MmdShadowParameters parameters{};
   auto* views = static_cast<ShadowViewParameters*>(views_buffer_.mapped);
   const Matrix4 world_from_view = AffineInverse(draws.view.view);
@@ -2426,10 +2480,18 @@ bool ShadowMap::Update(const DrawList& draws, std::string& detail,
     ShadowViewParameters& written = views[index];
     std::memcpy(written.clip_from_view, clip_from_view.m.data(),
         sizeof(written.clip_from_view));
-    written.extent[0] = static_cast<float>(kShadowMapSize);
-    written.extent[1] = static_cast<float>(view.depth);
-    written.extent[2] = static_cast<float>(view.texel);
+    written.extent[0] = static_cast<float>(resolution_);
+    written.extent[1] = static_cast<float>(index);
+    written.extent[2] = view.perspective ? 1.0F : 0.0F;
     written.extent[3] = 0.0F;
+    written.depth[0] = static_cast<float>(view.depth);
+    written.depth[1] = static_cast<float>(view.near_plane);
+    written.depth[2] = static_cast<float>(view.texel);
+    written.depth[3] = 0.0F;
+    written.receiver[0] = std::clamp(settings.depth_bias, 0.0F, 16.0F);
+    written.receiver[1] = std::clamp(settings.normal_bias, 0.0F, 16.0F);
+    written.receiver[2] = std::clamp(settings.filter_radius, 0.0F, 8.0F);
+    written.receiver[3] = 0.0F;
     if (!view.mmd) {
       continue;
     }
@@ -2439,10 +2501,11 @@ bool ShadowMap::Update(const DrawList& draws, std::string& detail,
     parameters.parameters[0] = 1.0F;
     parameters.parameters[1] = static_cast<float>(
         view.depth * draws.meters_per_unit / kMetersPerMmdUnit);
-    parameters.parameters[2] = static_cast<float>(kShadowMapSize);
+    parameters.parameters[2] = static_cast<float>(resolution_);
     parameters.texel[0] = static_cast<float>(3.0 * view.texel);
     parameters.texel[1] = static_cast<float>(
         view.texel * draws.meters_per_unit / kMetersPerMmdUnit);
+    parameters.texel[2] = static_cast<float>(index);
   }
   parameters.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
   std::memcpy(buffer_.mapped, &parameters, sizeof(parameters));
@@ -2459,8 +2522,8 @@ void ShadowMap::Record(VkCommandBuffer command,
   if (!active && ready_) {
     return;
   }
-  // The view is drawn whole each time, so what it held is not kept; the
-  // last frame that read it has completed.
+  // Each view is drawn whole each time, so what the image held is not
+  // kept; the last frame that read it has completed.
   Barrier(command, ImageBarrier(image_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_NONE,
                        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
@@ -2469,29 +2532,30 @@ void ShadowMap::Record(VkCommandBuffer command,
                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                        VK_IMAGE_LAYOUT_UNDEFINED,
                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
-  VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-  depth.imageView = image_.view;
-  depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-  depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  depth.clearValue.depthStencil = {1.0F, 0};
-  const VkExtent2D extent{kShadowMapSize, kShadowMapSize};
-  VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
-  rendering.renderArea.extent = extent;
-  rendering.layerCount = 1;
-  rendering.pDepthAttachment = &depth;
-  vkCmdBeginRendering(command, &rendering);
-  // One view until more are measured (kShadowViewCapacity).
-  for (const ShadowView& view : fit_.views()) {
-    const VkViewport viewport{0.0F, 0.0F, static_cast<float>(extent.width),
-        static_cast<float>(extent.height), 0.0F, 1.0F};
-    const VkRect2D scissor{{0, 0}, extent};
+  const VkExtent2D extent{resolution_, resolution_};
+  const VkViewport viewport{0.0F, 0.0F, static_cast<float>(extent.width),
+      static_cast<float>(extent.height), 0.0F, 1.0F};
+  const VkRect2D scissor{{0, 0}, extent};
+  // A layer no view draws this frame is left undefined: no light entry
+  // names it, and MMD's parameters read none.
+  for (std::uint32_t layer = 0; layer < fit_.views().size(); ++layer) {
+    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depth.imageView = layer_views_[layer];
+    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depth.clearValue.depthStencil = {1.0F, 0};
+    VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    rendering.renderArea.extent = extent;
+    rendering.layerCount = 1;
+    rendering.pDepthAttachment = &depth;
+    vkCmdBeginRendering(command, &rendering);
     vkCmdSetViewport(command, 0, 1, &viewport);
     vkCmdSetScissor(command, 0, 1, &scissor);
     meshes.RecordShadowCasters(command, pipelines, materials, draws,
-        view.clip_from_world, caster_draws_, mmd_draws_);
+        fit_.views()[layer].clip_from_world, caster_draws_, mmd_draws_);
+    vkCmdEndRendering(command);
   }
-  vkCmdEndRendering(command);
   Barrier(command, ImageBarrier(image_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -2503,10 +2567,9 @@ void ShadowMap::Record(VkCommandBuffer command,
 }
 
 void ShadowMap::Destroy() {
-  DestroyDeviceImage(device_, image_);
+  Release();
   DestroyHostBuffer(device_, buffer_);
   DestroyHostBuffer(device_, views_buffer_);
-  ready_ = false;
 }
 
 } // namespace Toon::vulkan_internal

@@ -119,6 +119,15 @@ struct PresentStatistics {
   std::uint64_t morph_weight_writes = 0;
   // Overlay textures uploaded: one per new texture or pixel change.
   std::uint64_t overlay_texture_uploads = 0;
+  // The shared shadow views, as OffscreenStatistics counts them: drawn in
+  // the last frame and lights given none; the image's texels on a side,
+  // layers, device memory in bytes and builds.
+  std::uint32_t shadow_views = 0;
+  std::uint32_t shadow_unviewed = 0;
+  std::uint32_t shadow_resolution = 0;
+  std::uint32_t shadow_layers = 0;
+  std::uint64_t shadow_memory_bytes = 0;
+  std::uint64_t shadow_rebuilds = 0;
   // The last frame RenderFrame recorded.
   PresentDrawCounts draws;
   // The CPU's time in the last RenderFrame that presented, in milliseconds:

@@ -18,6 +18,7 @@ struct Arguments {
   bool overlay = true;
   bool outlines = true;
   bool shadows = true;
+  Toon::ShadowSettings shadow_settings;
   bool mmd_self_shadow = true;
   bool mmd_morph_tints = false;
   bool outline_culling = true;

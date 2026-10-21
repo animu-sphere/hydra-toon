@@ -50,9 +50,12 @@ v0.6.0 (cube maps are outside the milestone).
 | Fallback key | the camera key used when a scene has no supported light, or scene lights are off for debugging | casts, directional |
 
 Shadowing lights are taken in the draw list's light order up to a fixed
-count, provisionally four; the rest light without shadows. The count is a
-backend capacity, settled by measurement in the second stage (§9), and
-the overflow is reported, not silent. MMD keeps reading only the scene's
+count, four (`kShadowViewCapacity`); the rest light without shadows. The
+count is a backend capacity, measured in the second stage (§9,
+[report 86](../reports/renderer/86-2026-10-21-shared-shadow-stage-2.md)),
+and the overflow is reported, not silent. So is a spot light whose cone
+is wider than 80 degrees from its axis, which one perspective view
+cannot cover and a cube map would (§10). MMD keeps reading only the scene's
 first direct light and casts only when that light is directional, as
 material policy §10 says; when that light's shadow is off, MMD's receivers
 are not shadowed either.
@@ -67,8 +70,15 @@ never material or geometry edits. The viewport carries the same controls.
 | `toon:shadows` | `true` | non-MMD casters draw into the shared views and non-MMD materials receive |
 | `toon:mmdSelfShadow` | `true` | unchanged: MMD materials receive by material policy §10; MMD casters with `castSelfShadow` draw into the views whenever a view is drawn |
 | `toon:shadowResolution` | `2048` | texels on a side of every view, a power of two from 512 to 4096 |
-| `toon:shadowDepthBias`, `toon:shadowNormalBias` | measured in stage 2 | in texels of the view, for MToon and PreviewSurface receivers |
-| `toon:shadowFilterRadius` | measured in stage 2 | PCF radius in texels, for MToon and PreviewSurface receivers |
+| `toon:shadowDepthBias` | `1.5` | how far behind the view a receiver must lie, in texels of the view, times one plus its slope from the light (at most 4); 0 to 16 |
+| `toon:shadowNormalBias` | `1.0` | how far a receiver moves along its normal as it turns from the light, in texels of the view; 0 to 16 |
+| `toon:shadowFilterRadius` | `1.5` | the radius of the 16-tap PCF disc, in texels of the view; 0 to 8 |
+
+The bias and filter defaults were measured in stage 2
+([report 86](../reports/renderer/86-2026-10-21-shared-shadow-stage-2.md)):
+no acne at 1,024 to 4,096 texels on its measurement scenes and avatar,
+most of a thin caster's shadow kept from about six texels above its
+receiver under grazing light, and edges neither stepped nor grainy.
 
 MMD receivers ignore the bias and filter settings: their depth window,
 slope allowance and six-texel disc are MMD's fitted semantics
@@ -110,12 +120,13 @@ Ownership follows design policy §35: the core decides, the backend draws.
   its light, its clip-from-world transform (depth in [0, 1] from the
   light, y up), its depth range in scene units and its texel size in
   scene units.
-- **Backend**. A D32 image at the set resolution, a two-dimensional array
-  of one layer per view once more than one view is drawn; the caster
+- **Backend**. A D32 two-dimensional array image at the set resolution,
+  one layer per view, which grows when a frame draws more views than it
+  has layers and is rebuilt alone when the resolution changes; the caster
   pipeline; the caster pass, recorded once per frame before the scene for
-  every view that has a receiver; the view parameter buffer; barriers.
-  Each light entry in the frame's light buffer names its view or none. A
-  resolution change rebuilds the image alone.
+  every view that has a receiver, each into its layer; the view parameter
+  buffer; barriers. Each light entry in the frame's light buffer names its
+  view or none.
 - **Adapters**. The Hydra and fast adapters supply lights, their shadow
   enable and the settings as scene data and own no shadow resource or pass.
 
@@ -125,13 +136,18 @@ around every caster and receiver; across it, what the camera sees of the
 receivers' posed pieces, cut to the frustum, in steps of an eighth of an
 octave and moving in whole texels, so edges hold still as the camera
 moves; with no receiver in view it spans the whole box. A spot view is the
-light's own perspective over its cone, its near and far planes fitted to
-the same boxes. A view with no receiver is not drawn. An atlas follows only
+light's own perspective over its cone, padded as a directional view is,
+its near and far planes fitted to the same boxes and the near plane no
+closer than a thousandth of the far one, so the depth keeps its
+precision. A view with no receiver is not drawn. An atlas follows only
 measured need.
 
 Each receiver keeps the units its comparison is defined in: MMD converts
 the view's scene-unit depth into MMD units as it does now; MToon and
-PreviewSurface compare in texels of the view.
+PreviewSurface compare in texels of the view where the point is, a spot
+view's growing with the distance from the light. MMD's six-texel edge is
+in texels of its view, so another resolution changes its width, as a
+mixed scene's wider fit does (§6).
 
 ## 6. MAT-Q7 and MMD's migration
 
@@ -188,8 +204,10 @@ Ambient lights are never shadowed.
 - **Looks.** MMD's representative frames must not change. MToon's
   representative avatar frames are recorded again with shadows on as the
   new reference, beside their shadows-off frames, which must not change.
-- **Debug.** A material debug view of each receiver's visibility and a
-  viewport preview of the views, neither writing material slots.
+- **Debug.** A material debug view of each receiver's visibility
+  (`MaterialDebug::Shadow`: the mean over the lights that have a view, or
+  MMD's self-shadow, 1 elsewhere) and a viewport preview of each view's
+  depth, neither writing material slots.
 
 ## 9. Stages
 

@@ -31,20 +31,36 @@ Toon::MeshId Square(Toon::RenderWorld& world, float half, float z,
   return id;
 }
 
-// Where `view` puts a point: x and y across it, z its depth.
-std::array<double, 3> Project(const Toon::ShadowView& view, double x, double y,
+// Where `view` puts a point: x and y across it, z its depth, w 1 for an
+// orthographic view and the distance along the light for a perspective one.
+std::array<double, 4> Clip(const Toon::ShadowView& view, double x, double y,
     double z) {
   const auto& m = view.clip_from_world.m;
-  std::array<double, 3> result{};
-  for (std::size_t row = 0; row < 3; ++row) {
+  std::array<double, 4> result{};
+  for (std::size_t row = 0; row < 4; ++row) {
     result[row] = m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row];
   }
   return result;
 }
 
+// The same, divided by w.
+std::array<double, 3> Project(const Toon::ShadowView& view, double x, double y,
+    double z) {
+  const std::array<double, 4> clip = Clip(view, x, y, z);
+  return {clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3]};
+}
+
 } // namespace
 
 int main() {
+  if (!Check(Toon::ShadowResolution(0) == 512 &&
+                 Toon::ShadowResolution(1023) == 512 &&
+                 Toon::ShadowResolution(1024) == 1024 &&
+                 Toon::ShadowResolution(3000) == 2048 &&
+                 Toon::ShadowResolution(100000) == 4096,
+          "a requested resolution must fall to a power of two in 512-4096"))
+    return 1;
+
   // Roles, before a frame's settings.
   Toon::ToonMaterial mmd;
   mmd.model = Toon::ToonShadingModel::MMD;
@@ -107,7 +123,7 @@ int main() {
     return 1;
 
   Toon::ShadowFit fit;
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().size() == 1 && fit.views()[0].light == sun &&
                  fit.views()[0].mmd && fit.unviewed() == 0,
           "an MMD scene must draw one view of its directional light for MMD"))
@@ -124,13 +140,20 @@ int main() {
                    corner[1] < 1,
             "a view whose camera sees the whole box must span the box") ||
         !Check(Near(view.texel, 2.0 * 1.02 / 2048, 1e-6) &&
-                   Near(view.depth, 0.5 * 1.04, 1e-6),
+                   Near(view.depth, 0.5 * 1.04, 1e-6) && !view.perspective,
             "the view must state its texel and depth in scene units"))
       return 1;
   }
+  draws.shadow_settings.resolution = 1000;
+  fit.Update(draws);
+  if (!Check(fit.views().size() == 1 &&
+                 Near(fit.views()[0].texel, 2.0 * 1.02 / 512, 1e-6),
+          "the resolution setting must size the view's texels"))
+    return 1;
+  draws.shadow_settings = {};
 
   draws.mmd_self_shadow = false;
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().empty(),
           "with MMD's self-shadow off an MMD scene has nothing to receive"))
     return 1;
@@ -141,7 +164,7 @@ int main() {
   draws.view.projection.m[0] = 4.0F;
   draws.view.projection.m[5] = 4.0F;
   draws.view.projection.m[12] = -0.4F;
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   {
     const Toon::ShadowView& view = fit.views()[0];
     const double across = 2.0 / view.clip_from_world.m[0];
@@ -159,24 +182,24 @@ int main() {
   Toon::ToonMaterial toon_wall = mtoon;
   world.SetMaterial(wall_material, toon_wall);
   draws = Toon::ExtractDrawList(world.Commit());
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().size() == 1, "an MToon receiver must have a view"))
     return 1;
   draws.shadows = false;
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().empty(),
           "with shared shadows off an MToon receiver has no view"))
     return 1;
   draws.shadows = true;
   world.SetMaterial(wall_material, unlit);
   draws = Toon::ExtractDrawList(world.Commit());
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().empty(), "an unlit scene receives nothing"))
     return 1;
   world.SetMaterial(wall_material, toon_wall);
 
-  // Lights: the first shadowing directional light has the view; MMD reads
-  // it only when it is the first direct light.
+  // Lights: every shadowing directional and spot light has a view, up to
+  // the capacity; MMD reads the first only when it is directional.
   const Toon::LightId spot = world.CreateLight();
   Toon::ToonLight spot_values;
   spot_values.type = Toon::ToonLightType::Spot;
@@ -186,10 +209,44 @@ int main() {
   const Toon::LightId second = world.CreateLight();
   world.SetLight(second, sun_values);
   draws = Toon::ExtractDrawList(world.Commit());
-  fit.Update(draws, 2048);
+  fit.Update(draws);
+  if (!Check(fit.views().size() == 2 && fit.views()[0].light == spot &&
+                 fit.views()[0].perspective && !fit.views()[0].mmd &&
+                 fit.views()[1].light == second && !fit.views()[1].perspective &&
+                 !fit.views()[1].mmd && fit.unviewed() == 0,
+          "a spot light first must have a view and leave MMD unshadowed"))
+    return 1;
+  {
+    // The spot looks down -z from z = 3 over its 45 degree cone, padded by
+    // 16 texels; its planes span the wall at 3 and the caster at 2.5.
+    const Toon::ShadowView& view = fit.views()[0];
+    const double spread = 1.0 + 16.0 / 2048.0;
+    const auto center = Clip(view, 0, 0, 0);
+    const auto caster = Project(view, 0, 0, 0.5);
+    const auto aside = Project(view, 0.5, 0, 0);
+    const auto above = Project(view, 0, 0.5, 0);
+    if (!Check(Near(center[3], 3.0) && Near(center[0], 0) &&
+                   Near(center[1], 0) && center[2] / center[3] > 0 &&
+                   center[2] / center[3] < 1 && caster[2] > 0 &&
+                   caster[2] < center[2] / center[3],
+            "a spot view must look down its axis, the caster nearer") ||
+        !Check(Near(std::abs(aside[0]), 0.5 / 3.0 / spread) &&
+                   Near(aside[1], 0) &&
+                   Near(std::abs(above[1]), 0.5 / 3.0 / spread),
+            "a spot view must span its cone") ||
+        !Check(Near(view.near_plane, 2.49) && Near(view.depth, 0.52) &&
+                   Near(view.texel, 2.0 * spread / 2048, 1e-7),
+            "a spot view must state its planes and texel at unit distance"))
+      return 1;
+  }
+  Toon::ToonLight wide = spot_values;
+  wide.cone_angle = 85.0F;
+  world.SetLight(spot, wide);
+  draws = Toon::ExtractDrawList(world.Commit());
+  fit.Update(draws);
   if (!Check(fit.views().size() == 1 && fit.views()[0].light == second &&
                  !fit.views()[0].mmd && fit.unviewed() == 1,
-          "a spot light first must leave MMD unshadowed and be reported"))
+          "a spot cone wider than the limit must be reported, not viewed"))
     return 1;
   Toon::ToonLight off = sun_values;
   off.shadow = false;
@@ -200,24 +257,44 @@ int main() {
     return point;
   }());
   draws = Toon::ExtractDrawList(world.Commit());
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().empty() && fit.unviewed() == 0,
           "a light whose shadow is off, or a point light, draws no view"))
     return 1;
   world.SetLight(second, sun_values);
-  const Toon::LightId third = world.CreateLight();
-  world.SetLight(third, sun_values);
+  Toon::ToonLight slanted = sun_values;
+  slanted.direction = {0.3F, 0.0F, -1.0F};
+  std::vector<Toon::LightId> more;
+  for (int index = 0; index < 4; ++index) {
+    more.push_back(world.CreateLight());
+    world.SetLight(more.back(), slanted);
+  }
   draws = Toon::ExtractDrawList(world.Commit());
-  fit.Update(draws, 2048);
-  if (!Check(fit.views().size() == 1 && fit.views()[0].light == second &&
+  fit.Update(draws);
+  if (!Check(fit.views().size() == Toon::kShadowViewCapacity &&
+                 fit.views()[0].light == second &&
+                 fit.views()[1].light == more[0] &&
                  fit.unviewed() == 1,
           "lights past the capacity must be reported"))
     return 1;
+  {
+    // Each view looks down its own light.
+    const auto straight = Project(fit.views()[0], 0, 0, 0.5);
+    const auto slant = Project(fit.views()[1], 0, 0, 0.5);
+    const auto slant_base = Project(fit.views()[1], 0, 0, 0);
+    if (!Check(Near(straight[0], 0) && !Near(slant[0], slant_base[0], 1e-3),
+            "every view must look down its own light"))
+      return 1;
+  }
+  for (std::size_t index = 1; index < more.size(); ++index) {
+    world.RemoveLight(more[index]);
+  }
+  const Toon::LightId third = more[0];
 
   // The fallback key, with no rig or with scene lights off, casts and is
   // MMD's light.
   draws.lighting.scene_lights = false;
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(fit.views().size() == 1 && fit.views()[0].light == 0 &&
                  fit.views()[0].mmd,
           "the fallback key must cast as MMD's light"))
@@ -236,7 +313,7 @@ int main() {
   pose.joints.resize(1);
   world.SetMeshSkinPose(wall, pose);
   draws = Toon::ExtractDrawList(world.Commit());
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   const double before = Project(fit.views()[0], 0, 0, 0)[0];
   pose.joints[0].m[12] = 0.5F;
   world.SetMeshSkinPose(wall, pose);
@@ -245,7 +322,7 @@ int main() {
           "a pose must not change the rest points"))
     return 1;
   draws = Toon::ExtractDrawList(posed);
-  fit.Update(draws, 2048);
+  fit.Update(draws);
   if (!Check(Project(fit.views()[0], 0, 0, 0)[0] < before - 0.1,
           "a pose must move the view with the posed receiver"))
     return 1;

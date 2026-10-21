@@ -243,7 +243,10 @@ public:
   // anti-aliasing off. `toon:metersPerUnit`: the stage's metersPerUnit,
   // which Hydra does not carry, 1 by default: it turns a world-coordinates
   // outline's width in metres into the stage's units. `toon:shadows`:
-  // shared shadows across material families, on by default.
+  // shared shadows across material families, on by default;
+  // `toon:shadowResolution`, `toon:shadowDepthBias`,
+  // `toon:shadowNormalBias` and `toon:shadowFilterRadius` their views'
+  // texels on a side and their receivers' comparison, in texels.
   // `toon:mmdSelfShadow`: MMD's self-shadow, on by default, as MMD's own
   // switch is.
   // `toon:mmdMorphTints`: MMD material morphs' texture, sphere and toon

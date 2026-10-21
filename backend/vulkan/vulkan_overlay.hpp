@@ -27,6 +27,8 @@ struct OverlayConstants {
 static_assert(sizeof(OverlayConstants) == 32);
 
 constexpr std::uint32_t kOverlayLinearize = 1U;
+// The texture is a shadow view's depth: drawn as grey.
+constexpr std::uint32_t kOverlayDepth = 2U;
 
 // Overlay textures resident at once. Dear ImGui keeps one, and two for the
 // frame its font atlas grows.
@@ -49,10 +51,15 @@ public:
   bool Update(const OverlayDrawList& overlay, std::string& detail);
   // Record this frame's texture uploads; call before rendering starts.
   void RecordUploads(VkCommandBuffer command);
+  // Point a set at each layer of the shared shadow views' image, when
+  // `shadow` has rebuilt it since; after ShadowMap::Update, with no frame
+  // that reads the sets in flight.
+  bool UpdateShadowViews(const ShadowMap& shadow, std::string& detail);
   // Draw `overlay` into the rendering under way, which covers `extent`;
-  // returns the draws recorded.
+  // returns the draws recorded. Of the shadow views, the first
+  // `shadow_views`, which this frame drew, are drawn.
   std::uint32_t Record(VkCommandBuffer command, const OverlayDrawList& overlay,
-      VkExtent2D extent) const;
+      VkExtent2D extent, std::uint32_t shadow_views = 0) const;
   void Destroy();
 
   [[nodiscard]] std::uint64_t texture_uploads() const {
@@ -83,6 +90,12 @@ private:
   VkDevice device_ = VK_NULL_HANDLE;
   bool linearize_ = false;
   VkSampler sampler_ = VK_NULL_HANDLE;
+  // A depth image's texels need not filter linearly.
+  VkSampler nearest_sampler_ = VK_NULL_HANDLE;
+  // One set per layer of the shadow views' image, and the rebuild they
+  // point at.
+  std::vector<VkDescriptorSet> shadow_sets_;
+  std::uint64_t shadow_rebuilds_ = 0;
   VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
