@@ -39,6 +39,7 @@ validation:
     - renderer.shadow.shared_casters
     - renderer.shadow.receivers
     - renderer.shadow.views
+    - renderer.shadow.cross_family
     - renderer.antialiasing.msaa
     - renderer.skinning.gpu
     - renderer.install_tree

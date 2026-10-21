@@ -3500,6 +3500,252 @@ Check ShadowViewsCheck(const Toon::SceneShaders& shaders) {
       "target"};
 }
 
+// The cross-family cases of the v0.6.0 roadmap (shadow policy §9 stage 3),
+// on ShadowReceiversCheck's wall at z 0 and square raised 0.4 to its left
+// under a light travelling along (1, 0, -1). Every receiving family, MToon,
+// MMD, PreviewSurface and unbound display colour, under every casting one,
+// with the square static, skinned into place by its pose and morphed into
+// place by its weight, its rest points out of the light's path. The shadow
+// debug view reads each receiver's visibility: 0 at the centre, in the
+// square's shadow, and 255 beside it, wherever policy §3 and §4 say the
+// pair shadows with shared shadows and MMD's self-shadow each on or off;
+// MMD receives only while its self-shadow is on, from MMD casters always
+// and from the others while shared shadows are on, and the others receive
+// from every family while shared shadows are on. The shaded frame darkens
+// in the shadow by at least 40 levels. A wall with its own raised flap, one
+// mesh of each family, shadows itself. After the first frame the whole
+// matrix writes poses, weights and materials and uploads no geometry.
+Check CrossFamilyShadowCheck(const Toon::SceneShaders& shaders) {
+  const std::string id = "renderer.shadow.cross_family";
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string detail;
+  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  if (renderer == nullptr) {
+    return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
+  }
+
+  Toon::RenderWorld world;
+  SetOrthographicView(world);
+  const auto add_square = [&](float bottom, float top) {
+    const Toon::MeshId mesh = world.CreateMesh();
+    world.SetMeshPoints(mesh, {{-0.6F, bottom, 0.4F}, {-0.2F, bottom, 0.4F},
+                                  {-0.2F, top, 0.4F}, {-0.6F, top, 0.4F}});
+    world.SetMeshTopology(mesh, {0, 1, 2, 0, 2, 3});
+    return mesh;
+  };
+  const Toon::MeshId wall = world.CreateMesh();
+  world.SetMeshPoints(wall, {{-0.9F, -0.9F, 0.0F}, {0.9F, -0.9F, 0.0F},
+                                {0.9F, 0.9F, 0.0F}, {-0.9F, 0.9F, 0.0F}});
+  world.SetMeshTopology(wall, {0, 1, 2, 0, 2, 3});
+  // White, so an unbound wall's lit response is wide enough to read.
+  world.SetMeshColor(wall, {1.0F, 1.0F, 1.0F});
+  // The static square, and two whose rest points lie 1.5 above it.
+  const Toon::MeshId still = add_square(-0.3F, 0.3F);
+  const Toon::MeshId skinned = add_square(1.2F, 1.8F);
+  const Toon::MeshId morphed = add_square(1.2F, 1.8F);
+  Toon::ToonSkin skin;
+  skin.influences_per_point = 1;
+  skin.constant = true;
+  skin.influences = {{0, 1.0F}};
+  world.SetMeshSkin(skinned, skin);
+  Toon::ToonSkinPose pose;
+  pose.joints.resize(1);
+  pose.joints[0].m[13] = -1.5F;
+  world.SetMeshSkinPose(skinned, pose);
+  Toon::ToonMorph morph;
+  for (std::uint32_t point = 0; point < 4U; ++point) {
+    morph.offsets.push_back({{0.0F, -1.5F, 0.0F}, 0, {}, 0});
+    morph.ranges.push_back({point, 1});
+  }
+  world.SetMeshMorph(morphed, morph);
+  world.SetMeshMorphWeights(morphed, {1.0F});
+  // A wall with a flap raised 0.4 over its left, one mesh, for the
+  // self-shadow cases.
+  const Toon::MeshId folded = world.CreateMesh();
+  world.SetMeshPoints(folded, {{-0.9F, -0.9F, 0.0F}, {0.9F, -0.9F, 0.0F},
+                                  {0.9F, 0.9F, 0.0F}, {-0.9F, 0.9F, 0.0F},
+                                  {-0.6F, -0.3F, 0.4F}, {-0.2F, -0.3F, 0.4F},
+                                  {-0.2F, 0.3F, 0.4F}, {-0.6F, 0.3F, 0.4F}});
+  world.SetMeshTopology(folded, {0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7});
+  const Toon::LightId key = world.CreateLight();
+  Toon::ToonLight light;
+  light.direction = {1.0F, 0.0F, -1.0F};
+  world.SetLight(key, light);
+
+  enum class Family { MToon, MMD, Preview, Unbound };
+  const std::array<Family, 4> families{
+      Family::MToon, Family::MMD, Family::Preview, Family::Unbound};
+  const auto name_of = [](Family family) -> std::string {
+    switch (family) {
+    case Family::MToon:
+      return "MToon";
+    case Family::MMD:
+      return "MMD";
+    case Family::Preview:
+      return "PreviewSurface";
+    case Family::Unbound:
+      return "unbound";
+    }
+    return "";
+  };
+  // Each family's values, as a receiver and as a caster: MToon white lit
+  // and 0.2 shade; MMD as MmdSelfShadowCheck's wall, casting and
+  // receiving; PreviewSurface rough.
+  std::array<Toon::MaterialId, 3> materials{};
+  {
+    Toon::ToonMaterial mtoon;
+    mtoon.model = Toon::ToonShadingModel::MToon;
+    mtoon.mtoon.shade_color = {0.2F, 0.2F, 0.2F};
+    Toon::ToonMaterial mmd;
+    mmd.model = Toon::ToonShadingModel::MMD;
+    mmd.base_color = {0.0F, 0.0F, 0.0F};
+    mmd.mmd.ambient_color = {1.0F, 1.0F, 1.0F};
+    mmd.mmd.toon_source = Toon::ToonRampSource::Shared;
+    mmd.mmd.shared_toon_index = 0;
+    mmd.mmd.cast_self_shadow = true;
+    mmd.mmd.receive_self_shadow = true;
+    Toon::ToonMaterial preview;
+    preview.preview.enabled = true;
+    preview.preview.roughness = 1.0F;
+    const std::array<Toon::ToonMaterial, 3> values{mtoon, mmd, preview};
+    for (std::size_t index = 0; index < values.size(); ++index) {
+      materials[index] = world.CreateMaterial();
+      world.SetMaterial(materials[index], values[index]);
+    }
+  }
+  // A material per mesh, so the matrix switches bindings, never values.
+  const auto bind = [&](Toon::MeshId mesh, Family family) {
+    world.SetMeshMaterial(mesh, family == Family::Unbound
+            ? Toon::MaterialId{0}
+            : materials[static_cast<std::size_t>(family)]);
+  };
+
+  Toon::ColorProduct color;
+  Toon::DepthProduct depth;
+  int center = 0;
+  int lit = 0;
+  const auto render = [&](bool shadows, bool mmd_self_shadow,
+                          Toon::MaterialDebug debug) {
+    auto draws = Toon::ExtractDrawList(world.Commit());
+    draws.shadows = shadows;
+    draws.mmd_self_shadow = mmd_self_shadow;
+    draws.lighting.material = debug;
+    if (!renderer->Render(draws, 64, 64, color, depth, detail)) {
+      return false;
+    }
+    center = CenterPixel(color)[0];
+    // x 0.6 on the centre row: the wall, outside the shadow.
+    lit = PixelAt(color, 51U, 32U)[0];
+    return true;
+  };
+  const auto near = [](int value, int expected) {
+    return std::abs(value - expected) <= 2;
+  };
+  const auto receives = [](Family receiver, Family caster, bool shadows,
+                           bool mmd_self_shadow) {
+    if (receiver == Family::MMD) {
+      return mmd_self_shadow && (caster == Family::MMD || shadows);
+    }
+    return shadows;
+  };
+
+  // A mesh out of the case is moved 10 up, out of the view and the
+  // light's path, by its transform: hiding it would release its geometry.
+  Toon::Matrix4 aside;
+  aside.m[13] = 10.0F;
+  const auto use = [&](Toon::MeshId mesh, bool used) {
+    world.SetMeshTransform(mesh, used ? Toon::Matrix4{} : aside);
+  };
+  use(folded, false);
+  if (!render(true, true, Toon::MaterialDebug::Shadow)) {
+    return {id, "fail", detail};
+  }
+  const Toon::OffscreenStatistics first = renderer->statistics();
+
+  const std::array<std::pair<Toon::MeshId, const char*>, 3> squares{
+      std::pair<Toon::MeshId, const char*>{still, "static"},
+      {skinned, "skinned"}, {morphed, "morphed"}};
+  std::size_t cases = 0;
+  for (const auto& [square, deformation] : squares) {
+    for (const auto& [other, ignored] : squares) {
+      use(other, other == square);
+    }
+    for (const Family receiver : families) {
+      for (const Family caster : families) {
+        bind(wall, receiver);
+        bind(square, caster);
+        const std::string pair = name_of(caster) + " " + deformation +
+            " caster on an " + name_of(receiver) + " receiver";
+        for (const auto& [shadows, mmd_self_shadow] :
+            {std::pair{true, true}, {false, true}, {true, false}, {false, false}}) {
+          const bool expected = receives(receiver, caster, shadows, mmd_self_shadow);
+          if (!render(shadows, mmd_self_shadow, Toon::MaterialDebug::Shadow)) {
+            return {id, "fail", detail};
+          }
+          ++cases;
+          if (!near(lit, 255) || !near(center, expected ? 0 : 255)) {
+            return {id, "fail",
+                pair + ", shared shadows " + (shadows ? "on" : "off") +
+                    ", MMD's self-shadow " + (mmd_self_shadow ? "on" : "off") +
+                    ": visibility at the centre " + std::to_string(center) +
+                    ", beside it " + std::to_string(lit) + ", expected " +
+                    (expected ? "0" : "255")};
+          }
+        }
+        if (!render(true, true, Toon::MaterialDebug::Surface)) {
+          return {id, "fail", detail};
+        }
+        const int shaded = center;
+        if (!render(false, false, Toon::MaterialDebug::Surface)) {
+          return {id, "fail", detail};
+        }
+        if (center - shaded < 40) {
+          return {id, "fail",
+              pair + " must darken the shaded wall: " + std::to_string(shaded) +
+                  " shadowed against " + std::to_string(center) + " lit"};
+        }
+      }
+    }
+  }
+
+  for (const auto& [square, ignored] : squares) {
+    use(square, false);
+  }
+  use(wall, false);
+  use(folded, true);
+  for (const Family family : families) {
+    bind(folded, family);
+    if (!render(true, true, Toon::MaterialDebug::Shadow) || !near(center, 0) ||
+        !near(lit, 255)) {
+      return {id, "fail",
+          "an " + name_of(family) + " wall must shadow itself under its own "
+              "flap: centre " + std::to_string(center) + ", beside it " +
+              std::to_string(lit)};
+    }
+  }
+
+  const Toon::OffscreenStatistics& last = renderer->statistics();
+  if (last.point_uploads != first.point_uploads ||
+      last.topology_uploads != first.topology_uploads ||
+      last.skin_uploads != first.skin_uploads ||
+      last.morph_uploads != first.morph_uploads) {
+    return {id, "fail",
+        "the matrix must upload no geometry after its first frame: points " +
+            std::to_string(last.point_uploads - first.point_uploads) +
+            ", topology " +
+            std::to_string(last.topology_uploads - first.topology_uploads) +
+            ", skins " + std::to_string(last.skin_uploads - first.skin_uploads) +
+            ", morphs " + std::to_string(last.morph_uploads - first.morph_uploads)};
+  }
+  if (last.validation_message_count != 0) {
+    return {id, "fail", last.validation_detail};
+  }
+  return {id, "pass",
+      std::to_string(cases) + " receiver, caster, deformation and setting "
+      "cases and four self-shadowing walls on a 64x64 target, no geometry "
+      "uploaded after the first frame"};
+}
+
 // Multisample anti-aliasing, by a renderer asked for 1 sample and one given
 // the default, 4, through SetOrthographicView. The first scene is
 // AddOctahedron's diamond in unlit red under an unlit green world outline
@@ -3947,6 +4193,7 @@ int main(int argc, char** argv) {
     checks.push_back(SharedCastersCheck(shaders));
     checks.push_back(ShadowReceiversCheck(shaders));
     checks.push_back(ShadowViewsCheck(shaders));
+    checks.push_back(CrossFamilyShadowCheck(shaders));
     checks.push_back(AntiAliasingCheck(shaders));
     checks.push_back(SkinningCheck(shaders));
   } else {
@@ -3973,6 +4220,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.shadow.shared_casters", "skip", dependent});
     checks.push_back({"renderer.shadow.receivers", "skip", dependent});
     checks.push_back({"renderer.shadow.views", "skip", dependent});
+    checks.push_back({"renderer.shadow.cross_family", "skip", dependent});
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }

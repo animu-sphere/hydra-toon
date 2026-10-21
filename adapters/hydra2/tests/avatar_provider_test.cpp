@@ -19,7 +19,9 @@
 // until the replacement is matched and bound in a new epoch. With --shaders, both are also
 // drawn on the same Vulkan configuration and their colour and depth must
 // agree within the tolerances `Images` declares, while the fast renderer
-// uploads no static resource after its first frame.
+// uploads no static resource after its first frame. The avatar has no
+// light, so the camera key casts: both draw the same shared shadow views
+// with the same casters (shadow policy §8).
 #include "avatar_binding.hpp"
 
 #include <avatarMotion/ClipPoseAdapter.h>
@@ -755,6 +757,19 @@ public:
               error)) {
         return false;
       }
+      const auto& fast = fast_->statistics();
+      const auto& oracle = oracle_->statistics();
+      if (!Check(fast.shadow_views > 0 && fast.shadow_views == oracle.shadow_views &&
+                  fast.shadow_caster_draws == oracle.shadow_caster_draws,
+              label + ": both paths must draw the same shadow views, " +
+                  std::to_string(fast.shadow_views) + " and " +
+                  std::to_string(oracle.shadow_views) + ", with the same casters, " +
+                  std::to_string(fast.shadow_caster_draws) + " and " +
+                  std::to_string(oracle.shadow_caster_draws))) {
+        return false;
+      }
+      shadow_views_ += fast.shadow_views;
+      shadow_caster_draws_ = fast.shadow_caster_draws;
       // Per pixel: a colour channel more than one step apart, or depth
       // more than 1e-4 apart, flips that pixel.
       const std::size_t pixels = depth_.payload.size();
@@ -809,7 +824,9 @@ public:
     std::cout << "  images: " << frames_ << " results drawn from two sides at 256x256, "
               << "largest colour step " << largest_ << ", depth " << depth_error_ << " ("
               << deep_ << " depth samples over 1e-6), " << flipped_
-              << " flipped pixels (at most " << most_flipped_ << " in a view); " << changed_
+              << " flipped pixels (at most " << most_flipped_ << " in a view); "
+              << shadow_views_ << " shadow views drawn by both, " << shadow_caster_draws_
+              << " caster draws each; " << changed_
               << " fast results differ from the rest images; after the first, "
               << stats.pose_writes - first_.pose_writes << " joint, "
               << stats.morph_weight_writes - first_.morph_weight_writes << " weight and "
@@ -830,6 +847,8 @@ private:
   float depth_error_ = 0.0F;
   std::size_t deep_ = 0;
   std::size_t flipped_ = 0, most_flipped_ = 0;
+  std::size_t shadow_views_ = 0;
+  std::uint32_t shadow_caster_draws_ = 0;
   static constexpr std::size_t kFlips = 16;
 };
 

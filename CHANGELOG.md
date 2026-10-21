@@ -33,6 +33,17 @@ version has a record in [docs/releases/](docs/releases/README.md).
   viewport previews each view's depth; statistics report the views'
   resolution, layers and memory
   ([renderer report 86](docs/reports/renderer/86-2026-10-21-shared-shadow-stage-2.md)).
+- Shared shadows, stage 3 (acceptance): `renderer.shadow.cross_family`
+  checks every receiving family (MToon, MMD, PreviewSurface, unbound) under
+  every casting one, static, skinned and morphed, with shared shadows and
+  MMD's self-shadow on and off, and each family's self-shadow; the avatar
+  provider host requires the Hydra and fast paths to draw the same shadow
+  views and casters; the original `shadow-cost.usda` and
+  `shadow-cost-4.usda` fixtures (`toon-viewport-shadow-cost-1`, `-4`) record
+  the GPU shadow pass, GPU work, CPU fit and submit with p95/p99 and the
+  views' memory. MMD's frames are unchanged and MToon's shadows-on frames
+  are its new reference
+  ([renderer report 87](docs/reports/renderer/87-2026-10-21-shared-shadow-acceptance.md)).
 
 ### Changed
 
