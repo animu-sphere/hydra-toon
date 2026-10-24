@@ -289,9 +289,10 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   const std::uint64_t bytes = static_cast<std::uint64_t>(CopyPitch(width_)) * height_;
   if (!WaitForQueue(gpu_, error) || !MapForRead(gpu_, color_readback_.get(), bytes, error) ||
       !MapForRead(gpu_, depth_readback_.get(), bytes, error)) {
-    if (gpu_.events->errors != 0 && error.find("WebGPU") == std::string::npos) {
-      error += ": " + gpu_.events->first_error;
-    }
+    // Neither stays mapped for the next frame's copy.
+    wgpuBufferUnmap(color_readback_.get());
+    wgpuBufferUnmap(depth_readback_.get());
+    if (gpu_.events->errors != 0) error += ": " + gpu_.events->first_error;
     return false;
   }
   const auto* color_rows = static_cast<const std::uint8_t*>(

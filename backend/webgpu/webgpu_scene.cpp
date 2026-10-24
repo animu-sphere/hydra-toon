@@ -411,6 +411,7 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
         return false;
       }
       resident.view.reset(wgpuTextureCreateView(resident.texture.get(), nullptr));
+      resident.serial = ++serial_;
       resident.width = texture.width;
       resident.height = texture.height;
       resident.format = format;
@@ -479,6 +480,11 @@ WGPUTextureView TextureCache::ViewOf(TextureId texture) const {
 std::uint32_t TextureCache::Entry(TextureId texture) const {
   const auto found = textures_.find(texture);
   return found != textures_.end() && found->second.view ? 1U : 0U;
+}
+
+std::uint64_t TextureCache::SerialOf(TextureId texture) const {
+  const auto found = textures_.find(texture);
+  return found == textures_.end() || !found->second.view ? 0U : found->second.serial;
 }
 
 bool MaterialCache::Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
@@ -598,7 +604,6 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
   }
 
   ++generation_;
-  bool written = false;
   for (const MaterialSnapshot& material : draws.materials) {
     auto found = entries_.find(material.id);
     if (found == entries_.end()) {
@@ -621,11 +626,13 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
     std::array<std::uint32_t, kPreviewRoles> entries{};
     std::array<WGPUTextureView, kTextureRoles> views;
     views.fill(white_);
+    std::array<std::uint64_t, kTextureRoles> serials{};
     std::array<std::uint32_t, kTextureRoles> samplers{};
     if (values.model == ToonShadingModel::PreviewSurface) {
       for (std::uint32_t role = 0; role < kPreviewRoles; ++role) {
         entries[role] = textures.Entry(refs[role]->texture);
         views[role] = textures.ViewOf(refs[role]->texture);
+        serials[role] = textures.SerialOf(refs[role]->texture);
         samplers[role] = SamplerIndex(*refs[role]);
       }
     }
@@ -680,16 +687,16 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
       entry.queue = RenderQueue(values);
       entry.depth_write = WritesDepth(values);
       ++writes_;
-      written = true;
       parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
     }
     // A bind group holds views and samplers, so a texture that becomes
     // resident, leaves or is reallocated, a wrap edit, or a grown buffer
-    // rebuilds it; a value edit does not.
-    if (!entry.group || entry.views != views || entry.samplers != samplers ||
+    // rebuilds it; a value edit does not. Views are compared by serial: a
+    // reallocated texture's new view may reuse the old one's address.
+    if (!entry.group || entry.views != serials || entry.samplers != samplers ||
         entry.buffer_generation != buffer_generation_) {
       entry.group = MaterialGroup(views, samplers);
-      entry.views = views;
+      entry.views = serials;
       entry.samplers = samplers;
       entry.buffer_generation = buffer_generation_;
       if (!entry.group) {
@@ -707,7 +714,6 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
       ++entry;
     }
   }
-  (void)written;
   return true;
 }
 

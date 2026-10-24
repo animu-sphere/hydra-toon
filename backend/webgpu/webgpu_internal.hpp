@@ -78,13 +78,14 @@ struct DeviceEvents {
 };
 
 // The instance, Dawn's adapter of the requested kind and its device, which
-// requests the WebGPU defaults (WebGPU policy §4).
+// requests the WebGPU defaults (WebGPU policy §4). `events` is declared
+// first so it outlives the device, whose callbacks write it.
 struct Gpu {
+  std::unique_ptr<DeviceEvents> events = std::make_unique<DeviceEvents>();
   Instance instance;
   Adapter adapter;
   Device device;
   Queue queue;
-  std::unique_ptr<DeviceEvents> events = std::make_unique<DeviceEvents>();
   std::string device_name;
   std::string backend_name;
   std::string driver;
@@ -286,6 +287,10 @@ public:
   [[nodiscard]] WGPUTextureView ViewOf(TextureId texture) const;
   // Nonzero when the texture is resident, the role's "has a texture" flag.
   [[nodiscard]] std::uint32_t Entry(TextureId texture) const;
+  // Which view ViewOf returns, as a number no other view has had: 0 the
+  // white, a new one each time a texture's image is created. A bind group
+  // holding an older number holds an older view.
+  [[nodiscard]] std::uint64_t SerialOf(TextureId texture) const;
   [[nodiscard]] std::uint64_t uploads() const { return uploads_; }
 
 private:
@@ -296,6 +301,7 @@ private:
     std::uint32_t height = 0;
     std::uint32_t mip_levels = 1;
     WGPUTextureFormat format = WGPUTextureFormat_Undefined;
+    std::uint64_t serial = 0;
     std::uint64_t revision = 0;
     std::uint64_t generation = 0;
   };
@@ -319,6 +325,7 @@ private:
   std::unordered_map<TextureId, Resident> textures_;
   std::vector<Mipmaps> pending_;
   std::uint64_t generation_ = 0;
+  std::uint64_t serial_ = 0;
   std::uint64_t uploads_ = 0;
 };
 
@@ -341,7 +348,7 @@ public:
     bool transparent = false;
     std::int32_t queue = 0;
     bool depth_write = true;
-    std::array<WGPUTextureView, kTextureRoles> views{};
+    std::array<std::uint64_t, kTextureRoles> views{};
     std::array<std::uint32_t, kTextureRoles> samplers{};
     std::uint64_t buffer_generation = 0;
     BindGroup group;

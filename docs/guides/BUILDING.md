@@ -50,6 +50,37 @@ has run `toon-renderer-install-tree`, which installs the project, runs the
 installed `toon-headless --install-tree` and merges its verdict into the
 report.
 
+## The WebGPU backend
+
+The `webgpu` intent builds the WebGPU backend on Dawn
+([WebGPU policy](../design/WEBGPU_POLICY.md)), Windows only, without OpenUSD:
+
+```sh
+ost build --intent webgpu --jobs auto
+ost test --intent webgpu
+```
+
+Configuring downloads two pinned releases into the build tree, about 150 MB:
+Dawn's Windows archive, which provides the static library and the `tint`
+that checks every generated WGSL module during the build, and DXC, whose
+`dxcompiler.dll` is copied beside each executable that links the backend.
+`FETCHCONTENT_SOURCE_DIR_DAWN` and `FETCHCONTENT_SOURCE_DIR_DXC` may name
+extracted copies of the same archives. Plain CMake takes
+`-DTOON_ENABLE_WEBGPU=ON`. The build still writes the Vulkan report; the
+WebGPU evidence run is
+
+```sh
+build/cy2026-windows-x86_64-py313-core--webgpu/adapters/headless/toon-headless --backend webgpu --report webgpu-report.json
+```
+
+with `--webgpu-adapter vulkan` for Dawn's Vulkan adapter instead of
+Direct3D 12. Its report names the adapter in `device.api_version`. The
+CTests `toon-headless-webgpu`, `toon-preview-surface-webgpu` and
+`toon-webgpu-parity` run the evidence, the PreviewSurface GPU checks and the
+Vulkan/WebGPU parity scenes; the last writes
+`validation/webgpu-parity.json` and, under `validation/webgpu-parity/`, each
+scene's two images and their difference.
+
 ## The Hydra adapter
 
 The adapter needs a real OpenUSD imaging runtime. This repository is measured
