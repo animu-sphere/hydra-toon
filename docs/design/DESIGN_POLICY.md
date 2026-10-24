@@ -207,8 +207,8 @@ ToonSkeleton  ToonTexture  ToonLight  DrawPacket  RenderGraph
 ```
 
 The core's public headers carry no OpenUSD, Hydra, Vulkan or WebGPU type; the
-scaffold enforces that for OpenUSD, Hydra and Vulkan with a CTest boundary
-check. Where each candidate lives is
+scaffold enforces that for OpenUSD, Hydra, Vulkan, WebGPU and Dawn with a
+CTest boundary check. Where each candidate lives is
 [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) §3.
 
 ## 8. Material architecture

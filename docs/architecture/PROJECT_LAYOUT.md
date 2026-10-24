@@ -68,7 +68,7 @@ placement rule; it does not say the component exists.
 | Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/src/` | `toon-viewport` |
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
-| Public headers — core (`render_world.hpp`, `extraction.hpp`) and backend (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
+| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
 
 The viewport keeps private implementation and headers in `adapters/viewport/src/`;
 fixtures, test executables and CMake/Python check drivers live in `tests/`,
@@ -349,7 +349,7 @@ palette/weight counts, material structure and textures must match. Camera,
 pose, signed weights, material parameters and lights must be finite.
 Structural changes remain ordinary extraction work.
 
-Both Vulkan sessions expose `LateFrameSource` in `vulkan_backend.hpp`.
+Both Vulkan sessions expose `LateFrameSource` in `backend.hpp`.
 After frame/acquire waits, structural resource preparation and overlay
 uploads, they call the host once, validate its complete `FrameSnapshot`,
 then write fast buffers and record commands using the selected values. A
@@ -401,8 +401,14 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
 2. Public core headers contain no OpenUSD, Hydra, Vulkan, WebGPU, windowing or
    DCC type. Backend headers share `include/toon/` but expose no Vulkan type
    either: the backend hands out plain C++ results, and Vulkan stays in its
-   `.cpp` files. `validation/check-core-boundary.cmake.in` enforces it for the
-   headers it lists; **a new public core header is added to that list in the
+   `.cpp` files. `backend.hpp` declares what every backend implements —
+   `OffscreenRenderer`, `PresentSession`, `LateFrameSource`, the products,
+   options and statistics — and a backend's own header includes it and adds
+   only its factories and the inputs only it consumes: SPIR-V paths
+   (`SceneShaders`) and `PresentSurfaceProvider` for Vulkan.
+   `validation/check-core-boundary.cmake.in` enforces the boundary, WebGPU
+   and Dawn includes among the forbidden ones, for the core and backend
+   headers it lists; **a new public header is added to that list in the
    same change.**
 3. A backend depends on `core/`, never on an adapter or on another backend.
 4. OpenUSD appears only under `adapters/hydra2/` and in the viewport's optional

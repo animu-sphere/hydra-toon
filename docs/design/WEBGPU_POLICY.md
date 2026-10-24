@@ -72,14 +72,13 @@ the project on 2026-10-24 and shape the rest:
 - `backend/webgpu/` builds `toon-render-webgpu` (`Toon::WebGPU`). It links
   `Toon::RenderExtraction` and consumes the same `DrawList`, `FrameSnapshot`
   revisions, `ShadowFit` views and late-frame source as the Vulkan backend.
-- The backend-neutral public types now declared in `vulkan_backend.hpp` and
-  `vulkan_present.hpp` — `OffscreenRenderer`, `PresentSession`,
+- The backend-neutral public types — `OffscreenRenderer`, `PresentSession`,
   `LateFrameSource`, `FrameLatency`, `RenderOptions`, `BackgroundSettings`,
-  `ColorProduct`, `DepthProduct` and the statistics — move to a shared
-  `include/toon/backend.hpp`, with the Vulkan headers including it so
-  existing consumers keep compiling. Each backend keeps its own factory
-  header (`webgpu_backend.hpp`). That move is a structural change and lands
-  in PROJECT_LAYOUT first, in its own pull request.
+  `ColorProduct`, `DepthProduct` and the statistics — are declared in the
+  shared `include/toon/backend.hpp`, which the Vulkan headers include, as
+  [PROJECT_LAYOUT §4](../architecture/PROJECT_LAYOUT.md#4-dependency-directions)
+  places them. Each backend keeps its own factory header
+  (`webgpu_backend.hpp`).
 - No `webgpu.h` or Dawn type crosses a public header, as no Vulkan type does;
   the core boundary check gains WebGPU and Dawn includes. Surfaces cross as
   an opaque native-window provider, as `PresentSurfaceProvider` does for

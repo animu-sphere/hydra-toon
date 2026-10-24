@@ -3,7 +3,6 @@
 
 #include <cstring>
 #include <cmath>
-#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -18,11 +17,6 @@
 #endif
 
 namespace Toon {
-
-std::int64_t SteadyNanoseconds() {
-  return std::chrono::duration_cast<std::chrono::nanoseconds>(
-      std::chrono::steady_clock::now().time_since_epoch()).count();
-}
 
 SceneShaders SceneShadersIn(const std::string& directory) {
   const std::filesystem::path root(directory);
