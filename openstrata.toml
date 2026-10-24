@@ -18,3 +18,9 @@ cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true } }
 # which builds the same adapters in a tree of its own (docs/guides/BUILDING.md).
 [build.intents.viewport-usd]
 cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true }, TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true } }
+
+# The WebGPU backend on Dawn (docs/design/WEBGPU_POLICY.md), Windows only:
+# `ost build --intent webgpu` adds `toon-headless --backend webgpu` and its
+# CTests. The Dawn release is a pinned download; nothing else links it.
+[build.intents.webgpu]
+cache = { TOON_ENABLE_WEBGPU = { type = "BOOL", value = true } }

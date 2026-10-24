@@ -15,6 +15,18 @@ function(toon_install_renderer)
     install(FILES ${TOON_SHADER_SPVS}
       DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders")
   endif()
+  # The WebGPU backend is linked into the headless runner alone, never
+  # exported; its WGSL, DXC's dxcompiler.dll and their licences install
+  # with it.
+  if(TOON_ENABLE_WEBGPU)
+    install(FILES ${TOON_SHADER_WGSLS}
+      DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders")
+    install(FILES "${TOON_DXC_COMPILER}" DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/third_party/dawn/"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/licenses/dawn")
+    install(FILES ${TOON_DXC_LICENSES}
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/licenses/dxc")
+  endif()
   install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" PATTERN "fast" EXCLUDE)
 

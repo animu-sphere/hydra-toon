@@ -37,6 +37,10 @@ option(TOON_ENABLE_HYDRA2 "Build the optional co-built OpenUSD Hydra 2 adapter"
   OFF)
 option(TOON_ENABLE_VIEWPORT "Build the optional GLFW/Vulkan viewport adapter"
   OFF)
+# The WebGPU backend on Dawn (WebGPU policy §2), Windows only; the headless
+# runner offers it with --backend webgpu. Off by default: no other intent,
+# and not the published package, links Dawn.
+option(TOON_ENABLE_WEBGPU "Build the optional WebGPU backend on Dawn" OFF)
 option(TOON_ENABLE_AVATAR_STATE "Build the optional avatar runtime state consumer" OFF)
 option(TOON_AVATAR_RUNTIME_PROVIDERS
   "Build the Hydra host check over real usd-avatar-runtime VRM providers" OFF)
@@ -63,6 +67,9 @@ toon_configure_dependencies()
 add_subdirectory(core/render-world)
 add_subdirectory(core/render-extraction)
 add_subdirectory(backend/vulkan)
+if(TOON_ENABLE_WEBGPU)
+  add_subdirectory(backend/webgpu)
+endif()
 if(TOON_ENABLE_AVATAR_STATE)
   add_subdirectory(adapters/fast)
 endif()

@@ -41,7 +41,7 @@ function(toon_add_shader_library target)
             -entry "${_stage}_main" -stage "${_stage}" -target wgsl
             -matrix-layout-column-major -warnings-as-errors all
             -o "${_output}.unchecked"
-          COMMAND "${TOON_TINT_EXECUTABLE}" --format wgsl -o NUL
+          COMMAND "${TOON_TINT_EXECUTABLE}" --input-format wgsl --format wgsl -o NUL
             "${_output}.unchecked"
           COMMAND "${CMAKE_COMMAND}" -E rename "${_output}.unchecked"
             "${_output}"
