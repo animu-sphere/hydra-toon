@@ -18,9 +18,11 @@ owner: hydra-toon
 > The toolchain measurements behind this page are
 > [report 90](../reports/renderer/90-2026-10-24-webgpu-toolchain-probe.md);
 > stage 1 and the settled WGPU-Q1 and WGPU-Q2 are
-> [report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md), and
+> [report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md),
 > stage 2 and WGPU-Q1's multisampled classes
-> [report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md).
+> [report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md), and
+> stage 3, shadows and presentation,
+> [report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md).
 
 ## 1. Purpose and decisions
 
@@ -66,7 +68,9 @@ the project on 2026-10-24 and shape the rest:
   adapter. Dawn's Vulkan adapter may be selected for diagnosis; parity
   evidence names which one ran. The Direct3D 11 and null adapters are not
   used. Dawn's toggles stay at their defaults except where a report names a
-  measured reason.
+  measured reason: a device that times passes disables
+  `timestamp_quantization`, which rounds timestamps to 2^16 ns
+  ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)).
 - **Licences.** Dawn is BSD-3-Clause; its licence and third-party notices
   install with any executable that links it, as `third_party` code already
   does. `third_party/dawn/README.md` lists what the static library carries
@@ -111,11 +115,16 @@ backend's layout is grouped by update frequency:
 
 | Group | Contents | Changes |
 | --- | --- | --- |
-| 0, frame | the frame buffer (lights, camera), the shadow array, shadow views, the shadow comparison/gather sampler | once per frame |
+| 0, frame | the frame buffer (lights, camera), the shadow array, shadow views, the shadow comparison/gather sampler | once per frame; rebound when the shadow array is rebuilt |
 | 1, material | the model's parameter record, its role textures and their samplers | per material; rebuilt only on a texture or sampler edit |
 | 2, deformation | influences, joints, morph offsets, ranges and weights | per resident mesh; rebound only when buffers are reallocated |
 | 3, draw | `DrawConstants` at a dynamic offset in one per-frame uniform ring | per draw, by offset only |
 
+- **Caster pass.** A pass drawing into a layer of the shadow array cannot
+  bind that array, so the caster pipeline's group 0 holds the frame buffer
+  alone. Casters draw with the view's y flipped, so each layer holds the
+  rows the Vulkan backend's does and the receivers read both alike
+  ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)).
 - **Draw constants.** The Vulkan push-constant block becomes a dynamic-offset
   uniform binding with 256-byte alignment. Its fields and meanings do not
   change; the ring is written once per frame with the fast values (§6).
@@ -207,7 +216,12 @@ The Vulkan backend's descriptor layout does not change for WebGPU's sake
   `DepthProduct`, origin top left, rows repacked to the products' pitch.
 - **Timing.** GPU pass times use the `timestamp-query` feature where the
   adapter offers it; without it the timings report as unavailable, never as
-  zero.
+  zero. Core WebGPU writes timestamps only as a pass begins and ends, and
+  neither of Dawn's adapters offers its experimental timestamps inside
+  passes with the default toggles, so the present session times uploads, shadow views, the
+  scene pass whole, composite, capture and overlay; the scene's parts and
+  the image wait report as unmeasured (`PresentStatistics::gpu_parts_timed`)
+  ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)).
 - **Device loss** fails the frame with Dawn's reason; recreating the device
   is host-integration work ([later](../roadmap/later.md#host-and-compositor-integration-v080-scale)).
 
@@ -246,10 +260,14 @@ background modes, and resolve before readback or presentation.
   GLFW window's `HWND` and presents through the same composite and display
   transfer as Vulkan
   ([render output policy §5](RENDER_OUTPUT_POLICY.md#5-hydra-and-viewport-boundaries)).
-  Present modes map as FIFO for vsync and mailbox or immediate otherwise,
-  where the surface offers them; the overlay uses Dear ImGui's WebGPU
-  backend at the same pinned version. Captures and foreground PNG export go
-  through the same `capture.*` path.
+  Present modes map as FIFO for vsync and immediate or mailbox otherwise,
+  where the surface offers them. The surface takes its sRGB form as a view
+  format where it offers only the UNORM one. The overlay is the host's
+  `OverlayDrawList`, shadow-view previews included, which the backend draws
+  with its own pass as the Vulkan backend does, so no Dear ImGui renderer
+  backend is compiled (corrected in
+  [report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)).
+  Captures and foreground PNG export go through the same `capture.*` path.
 - **Headless.** `toon-headless --backend webgpu` renders the same evidence
   run through `CreateWebGpuOffscreenRenderer`.
 - **Choosing.** The Vulkan backend stays the default everywhere. The
@@ -305,7 +323,7 @@ large gap is reported with its pass.
 
 | ID | Question | Proposal |
 | --- | --- | --- |
-| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class is measured against these and gets a limit of its own only with a report that explains the difference. MToon and MMD hold them at 1x and 4x ([report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md)) but for two multisampled classes and the hulls' depth: at 4x a scene with outline hulls at most two steps on at most 2e-4 of its pixels, a sample at a thin hull's edge falling on its other side; MToon Mask at most one sample (64 steps) on at most 2e-4 of its pixels, a share on a coverage threshold, coverage identical; a hull's depth within 5e-6, its bias's slope term being the driver's. Shadows are measured in stage 3 |
+| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class is measured against these and gets a limit of its own only with a report that explains the difference. MToon and MMD hold them at 1x and 4x ([report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md)) but for two multisampled classes and the hulls' depth: at 4x a scene with outline hulls at most two steps on at most 2e-4 of its pixels, a sample at a thin hull's edge falling on its other side; MToon Mask at most one sample (64 steps) on at most 2e-4 of its pixels, a share on a coverage threshold, coverage identical; a hull's depth within 5e-6, its bias's slope term being the driver's. Shadows measured in stage 3 ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)): six scenes of one to four views across every family, a Mask caster and a skinned one, identical at 1x through either adapter and at 4x within one step, depth within 1.8e-7, but for the Mask class, whose share on a threshold can keep sample 0, the second kept, so that class lets sample 0's coverage differ on at most 2e-4 of its pixels |
 | WGPU-Q2 | Whether the bindings module is selected by a preprocessor define or by Slang link-time modules | Settled 2026-10-24: the `TOON_WEBGPU` preprocessor define selects `bindings_webgpu.slang`; `slangc` stays one invocation per entry point, and nothing needed link-time modules |
 | WGPU-Q3 | How often the Dawn pin moves | Only for a fix or feature the backend needs, each with a parity rerun report; no tracking of Dawn's daily releases |
 

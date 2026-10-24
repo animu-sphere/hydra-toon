@@ -81,6 +81,17 @@ Vulkan/WebGPU parity scenes; the last writes
 `validation/webgpu-parity.json` and, under `validation/webgpu-parity/`, each
 scene's two images and their difference.
 
+The intent also builds the viewport, which presents through the WebGPU
+backend when asked:
+
+```sh
+build/cy2026-windows-x86_64-py313-core--webgpu/adapters/viewport/toon-viewport --backend webgpu
+```
+
+`--webgpu-adapter vulkan` selects Dawn's Vulkan adapter here too. Without
+Hydra in the intent it draws the bootstrap scene; the `toon-viewport-webgpu-*`
+CTests present, capture and compare its image with the Vulkan session's.
+
 ## The Hydra adapter
 
 The adapter needs a real OpenUSD imaging runtime. This repository is measured

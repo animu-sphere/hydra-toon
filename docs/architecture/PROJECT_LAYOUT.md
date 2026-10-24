@@ -34,7 +34,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `core/render-world/` | `toon-render-world` | `Toon::RenderWorld` | host-neutral scene state |
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
 | `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline; compiles the Slang shaders to SPIR-V |
-| `backend/webgpu/` | `toon-render-webgpu` | `Toon::WebGPU` | WebGPU backend on Dawn ([WebGPU policy](../design/WEBGPU_POLICY.md)): persistent offscreen renderer; compiles the shaders it uses to Tint-validated WGSL; optional (`TOON_ENABLE_WEBGPU`), Windows only, linked into the headless runner and its tests, never exported |
+| `backend/webgpu/` | `toon-render-webgpu` | `Toon::WebGPU` | WebGPU backend on Dawn ([WebGPU policy](../design/WEBGPU_POLICY.md)): persistent offscreen renderer and present session; compiles the shaders it uses to Tint-validated WGSL; optional (`TOON_ENABLE_WEBGPU`), Windows only, linked into the headless runner, the viewport and their tests, never exported |
 | `backend/shared/` | `toon-render-backend-shared` | `Toon::BackendShared` | what both backends share below their GPU APIs (§3): the shader contract's records and flags in C++, and the CPU code that fills them; no GPU API type, no public header |
 | `shaders/` | `toon-renderer-shaders`, `toon-renderer-wgsl` | — | the Slang shading source both backends compile, by role (§3) |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
@@ -72,7 +72,7 @@ placement rule; it does not say the component exists.
 | Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/src/` | `toon-viewport` |
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
-| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `webgpu_backend.hpp`) | `include/toon/` | — |
+| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `webgpu_backend.hpp`, `webgpu_present.hpp`) | `include/toon/` | — |
 
 The viewport keeps private implementation and headers in `adapters/viewport/src/`;
 fixtures, test executables and CMake/Python check drivers live in `tests/`,
@@ -516,9 +516,10 @@ backend/webgpu ──┘
 
 The `hydra` intent (`TOON_ENABLE_HYDRA2=ON`), the `viewport-usd` intent
 (`TOON_ENABLE_HYDRA2=ON`, `TOON_ENABLE_VIEWPORT=ON`) and the `webgpu` intent
-(`TOON_ENABLE_WEBGPU=ON`) are declared in `openstrata.toml`. The `webgpu`
-intent downloads the pinned Dawn and DXC releases at configure time and adds
-`toon-headless --backend webgpu` and the WebGPU CTests; no other intent and
+(`TOON_ENABLE_WEBGPU=ON`, `TOON_ENABLE_VIEWPORT=ON`) are declared in
+`openstrata.toml`. The `webgpu` intent downloads the pinned Dawn and DXC
+releases at configure time and adds `toon-headless --backend webgpu`,
+`toon-viewport --backend webgpu` and the WebGPU CTests; no other intent and
 not the published package links Dawn. `ost renderer view` and `ost renderer viewport` request
 their adapter through `OST_RENDERER_ADAPTERS` (`hydra2`, `viewport`); the
 project reads that list as adapters to add to what the intent's options
