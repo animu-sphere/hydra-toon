@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <toon/vulkan_backend.hpp>
+#if defined(TOON_HAS_WEBGPU)
+#include <toon/webgpu_backend.hpp>
+#endif
 #include "../adapters/viewport/src/telemetry.hpp"
 
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -10,6 +14,11 @@
 #include <string_view>
 
 namespace {
+// A backend's offscreen renderer, so the same checks run on Vulkan and on
+// WebGPU (WebGPU policy §9).
+using Factory = std::function<std::unique_ptr<Toon::OffscreenRenderer>(
+    Toon::FrameStatus&, std::string&, const Toon::RenderOptions&)>;
+
 void Require(bool condition, const char* why) { if (!condition) throw std::runtime_error(why); }
 
 struct Scene {
@@ -129,13 +138,13 @@ void State() {
       "telemetry misrepresents display endpoint");
 }
 
-bool Gpu(const char* directory) {
+bool Gpu(const Factory& create) {
   Toon::FrameStatus status;
   std::string error;
-  auto renderer = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(directory), status, error, {4});
+  auto renderer = create(status, error, {4});
   if (status == Toon::FrameStatus::Skip) { std::cout << error << '\n'; return false; }
   Require(renderer != nullptr, error.c_str());
-  auto oracle = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(directory), status, error, {4});
+  auto oracle = create(status, error, {4});
   Require(oracle != nullptr, error.c_str());
   Scene s;
   const auto stale = Toon::ExtractDrawList(s.world.Commit());
@@ -171,7 +180,7 @@ bool Gpu(const char* directory) {
         after.latency.latched <= after.latency.buffers_written &&
         after.latency.buffers_written <= after.latency.submitted && after.latency.present_returned == 0,
         "late telemetry endpoints out of order");
-    Require(after.validation_message_count == 0, "late Vulkan validation message");
+    Require(after.validation_message_count == 0, "late validation message");
     if (i == 0) continue;
     Require(after.point_uploads == before.point_uploads && after.topology_uploads == before.topology_uploads &&
         after.skin_uploads == before.skin_uploads && after.morph_uploads == before.morph_uploads &&
@@ -196,7 +205,27 @@ bool Gpu(const char* directory) {
 int main(int argc, char** argv) {
   try {
     State();
-    if (argc == 2 && !Gpu(argv[1])) return 77;
+    if (argc == 4 && std::string_view(argv[2]) == "--backend" &&
+        std::string_view(argv[3]) == "webgpu") {
+#if defined(TOON_HAS_WEBGPU)
+      const auto shaders = Toon::WebGpuShadersIn(argv[1]);
+      return Gpu([&](Toon::FrameStatus& status, std::string& error,
+                     const Toon::RenderOptions& options) {
+        return Toon::CreateWebGpuOffscreenRenderer(shaders, status, error, options);
+      }) ? 0 : 77;
+#else
+      return 2;
+#endif
+    }
+    if (argc == 2) {
+      const auto shaders = Toon::SceneShadersIn(argv[1]);
+      if (!Gpu([&](Toon::FrameStatus& status, std::string& error,
+                   const Toon::RenderOptions& options) {
+            return Toon::CreateOffscreenRenderer(shaders, status, error, options);
+          })) {
+        return 77;
+      }
+    }
     return 0;
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

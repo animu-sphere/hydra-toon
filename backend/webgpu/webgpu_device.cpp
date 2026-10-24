@@ -238,12 +238,34 @@ bool LoadWgsl(const std::string& path, std::string& source, std::string& detail)
 
 bool LoadShaders(const WebGpuShaders& shaders, ShaderSources& sources,
     std::string& detail) {
-  return LoadWgsl(shaders.mesh_vertex, sources.mesh_vertex, detail) &&
-         LoadWgsl(shaders.mesh_fragment, sources.mesh_fragment, detail) &&
-         LoadWgsl(shaders.preview_vertex, sources.preview_vertex, detail) &&
-         LoadWgsl(shaders.preview_fragment, sources.preview_fragment, detail) &&
-         LoadWgsl(shaders.mipmap_vertex, sources.mipmap_vertex, detail) &&
-         LoadWgsl(shaders.mipmap_fragment, sources.mipmap_fragment, detail);
+  const std::pair<const std::string*, std::string*> stages[] = {
+      {&shaders.mesh_vertex, &sources.mesh_vertex},
+      {&shaders.mesh_fragment, &sources.mesh_fragment},
+      {&shaders.preview_vertex, &sources.preview_vertex},
+      {&shaders.preview_fragment, &sources.preview_fragment},
+      {&shaders.mtoon_vertex, &sources.mtoon_vertex},
+      {&shaders.mtoon_fragment, &sources.mtoon_fragment},
+      {&shaders.mtoon_transparent_vertex, &sources.mtoon_transparent_vertex},
+      {&shaders.mtoon_transparent_fragment, &sources.mtoon_transparent_fragment},
+      {&shaders.mtoon_outline_vertex, &sources.mtoon_outline_vertex},
+      {&shaders.mtoon_outline_fragment, &sources.mtoon_outline_fragment},
+      {&shaders.mtoon_coverage_vertex, &sources.mtoon_coverage_vertex},
+      {&shaders.mtoon_coverage_fragment, &sources.mtoon_coverage_fragment},
+      {&shaders.mmd_vertex, &sources.mmd_vertex},
+      {&shaders.mmd_fragment, &sources.mmd_fragment},
+      {&shaders.mmd_transparent_vertex, &sources.mmd_transparent_vertex},
+      {&shaders.mmd_transparent_fragment, &sources.mmd_transparent_fragment},
+      {&shaders.mmd_outline_vertex, &sources.mmd_outline_vertex},
+      {&shaders.mmd_outline_fragment, &sources.mmd_outline_fragment},
+      {&shaders.mipmap_vertex, &sources.mipmap_vertex},
+      {&shaders.mipmap_fragment, &sources.mipmap_fragment},
+      {&shaders.depth_resolve_vertex, &sources.depth_resolve_vertex},
+      {&shaders.depth_resolve_fragment, &sources.depth_resolve_fragment},
+  };
+  for (const auto& [path, source] : stages) {
+    if (!LoadWgsl(*path, *source, detail)) return false;
+  }
+  return true;
 }
 
 Matrix4 WebGpuClipFromWorld(const ToonView& view) {

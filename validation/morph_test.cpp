@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sparse GPU morphs against independently CPU-deformed rest geometry.
 #include <toon/vulkan_backend.hpp>
+#if defined(TOON_HAS_WEBGPU)
+#include <toon/webgpu_backend.hpp>
+#endif
 
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
+// A backend's offscreen renderer, so the same checks run on Vulkan and on
+// WebGPU (WebGPU policy §9).
+using Factory = std::function<std::unique_ptr<Toon::OffscreenRenderer>(
+    Toon::FrameStatus&, std::string&, const Toon::RenderOptions&)>;
+
 void Require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -83,16 +93,16 @@ void Core() {
   Require(!Toon::IsMorphed(world.Commit().meshes[0]), "short ranges enabled an invalid draw");
 }
 
-bool Gpu(const Toon::SceneShaders& shaders, bool skin, int mode) {
+bool Gpu(const Factory& create, bool skin, int mode) {
   Toon::FrameStatus status;
   std::string error;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, error, {1});
+  auto renderer = create(status, error, {1});
   if (status == Toon::FrameStatus::Skip) {
     std::cout << error << '\n';
     return false;
   }
   Require(renderer != nullptr, error.c_str());
-  auto reference = Toon::CreateOffscreenRenderer(shaders, status, error, {1});
+  auto reference = create(status, error, {1});
   Require(reference != nullptr, error.c_str());
   Toon::RenderWorld world, oracle;
   const auto mesh = Setup(world, skin), ref = Setup(oracle, skin);
@@ -142,7 +152,7 @@ bool Gpu(const Toon::SceneShaders& shaders, bool skin, int mode) {
     for (std::size_t i = 0; i < depth.payload.size(); ++i)
       Require(std::abs(depth.payload[i] - expected_depth.payload[i]) <= 1e-6F, "GPU morph depth differs from oracle");
     const auto& stats = renderer->statistics();
-    Require(stats.validation_message_count == 0, "Vulkan validation reported an error");
+    Require(stats.validation_message_count == 0, "validation reported an error");
     if (frame != 0) {
       Require(stats.point_uploads == before.point_uploads && stats.topology_uploads == before.topology_uploads &&
           stats.skin_uploads == before.skin_uploads && stats.pose_writes == before.pose_writes &&
@@ -164,11 +174,31 @@ bool Gpu(const Toon::SceneShaders& shaders, bool skin, int mode) {
 int main(int argc, char** argv) {
   try {
     Core();
+    if (argc == 4 && std::string_view(argv[2]) == "--backend" &&
+        std::string_view(argv[3]) == "webgpu") {
+#if defined(TOON_HAS_WEBGPU)
+      const auto shaders = Toon::WebGpuShadersIn(argv[1]);
+      const Factory create = [&](Toon::FrameStatus& status, std::string& error,
+                                 const Toon::RenderOptions& options) {
+        return Toon::CreateWebGpuOffscreenRenderer(shaders, status, error, options);
+      };
+      for (bool skin : {false, true}) for (int mode = 0; mode < 4; ++mode)
+        if (!Gpu(create, skin, mode)) return 77;
+      return 0;
+#else
+      return 2;
+#endif
+    }
     if (argc == 2) {
       const auto capability = Toon::ProbeVulkanBackend();
       if (!capability.available) { std::cout << capability.detail << '\n'; return 77; }
+      const auto shaders = Toon::SceneShadersIn(argv[1]);
+      const Factory create = [&](Toon::FrameStatus& status, std::string& error,
+                                 const Toon::RenderOptions& options) {
+        return Toon::CreateOffscreenRenderer(shaders, status, error, options);
+      };
       for (bool skin : {false, true}) for (int mode = 0; mode < 4; ++mode)
-        if (!Gpu(Toon::SceneShadersIn(argv[1]), skin, mode)) return 77;
+        if (!Gpu(create, skin, mode)) return 77;
     }
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

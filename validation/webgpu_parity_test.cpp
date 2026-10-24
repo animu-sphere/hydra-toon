@@ -19,6 +19,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -47,10 +48,27 @@ constexpr Limits kTexturedLimits{1, 0.0};
 // Depth is the same rasterization of the same clip positions.
 constexpr double kDepthLimit = 1e-6;
 
+// The multisampled classes measured with stage 2 (report 92). At 4x a
+// sample at the edge of an outline hull, which is thin, can fall on the
+// other side of it when the two compilers place its vertices a last bit
+// apart: such a pixel moves by a quarter of the hull's difference from the
+// surface, two steps on the measured scenes, and no more than a few pixels
+// do. MToon's Mask keeps each pixel's samples as the reference driver does,
+// but a share that falls on a threshold keeps one sample more or less.
+constexpr Limits kHullEdgeLimits{2, 2e-4};
+constexpr Limits kMaskCoverageLimits{64, 2e-4};
+// A hull's depth is biased by its slope, which Vulkan lets a driver take as
+// the larger of the two screen slopes or their length and Direct3D 12 takes
+// as the larger: 1.2e-7 apart without the slope term, 2.4e-6 with it.
+constexpr double kHullDepthLimit = 5e-6;
+
 struct Scene {
   std::string name;
   Limits limits;
   std::function<void(Toon::RenderWorld&, Toon::DrawList*)> build;
+  // At 4x, when it differs from `limits`.
+  std::optional<Limits> multisampled = std::nullopt;
+  double depth_limit = kDepthLimit;
 };
 
 Toon::Matrix4 Perspective(float fov_y, float aspect, float near, float far) {
@@ -193,6 +211,23 @@ Toon::ToonMaterial Preview(Toon::Float3 base, float metallic, float roughness) {
   return material;
 }
 
+Toon::ToonMaterial MToon(Toon::Float3 base, Toon::Float3 shade) {
+  Toon::ToonMaterial material;
+  material.model = Toon::ToonShadingModel::MToon;
+  material.base_color = base;
+  material.mtoon.shade_color = shade;
+  return material;
+}
+
+// MMD's colours, as stored: diffuse and ambient.
+Toon::ToonMaterial Mmd(Toon::Float3 diffuse, Toon::Float3 ambient) {
+  Toon::ToonMaterial material;
+  material.model = Toon::ToonShadingModel::MMD;
+  material.base_color = diffuse;
+  material.mmd.ambient_color = ambient;
+  return material;
+}
+
 void Bind(Toon::RenderWorld& world, Toon::MeshId mesh, const Toon::ToonMaterial& values) {
   const Toon::MaterialId material = world.CreateMaterial();
   world.SetMaterial(material, values);
@@ -308,6 +343,135 @@ std::vector<Scene> Scenes() {
     veil.emissive = {0.1F, 0.1F, 0.1F};
     Bind(world, AddSphere(world, 0.6F, {0.2F, 0.3F, 1.4F}), veil);
   }});
+
+  // Stage 2: MToon and MMD on per-material bind groups, their outlines,
+  // and deformation (WebGPU policy §10).
+  scenes.push_back({"mtoon-lit-outline", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0.5F, 1, 4});
+    auto material = MToon({0.9F, 0.55F, 0.4F}, {0.45F, 0.2F, 0.25F});
+    material.mtoon.rim_color = {0.3F, 0.35F, 0.5F};
+    material.mtoon.rim_fresnel_power = 3;
+    material.mtoon.rim_lift = 0.1F;
+    material.outline = true;
+    material.outline_width = 0.04F;
+    material.outline_color = {0.15F, 0.05F, 0.1F};
+    material.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+    material.mtoon.outline_lighting_mix = 0.5F;
+    Bind(world, AddSphere(world, 1.1F, {0, 0, 0}), material);
+    Toon::ToonLight key;
+    key.type = Toon::ToonLightType::Directional;
+    key.color = {1, 0.95F, 0.9F};
+    key.direction = {-0.5F, -0.7F, -0.5F};
+    key.shadow = false;
+    world.SetLight(world.CreateLight(), key);
+  }, kHullEdgeLimits, kHullDepthLimit});
+  scenes.push_back({"mtoon-textured", kTexturedLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 1, 4});
+    auto material = MToon({1, 1, 1}, {0.6F, 0.5F, 0.6F});
+    material.base_texture.texture = AddChecker(world, Toon::ToonTextureEncoding::Srgb, 64, 8, false);
+    material.base_texture.scale = {3, 3};
+    material.mtoon.shade_texture.texture =
+        AddChecker(world, Toon::ToonTextureEncoding::Srgb, 32, 4, false);
+    material.normal_texture.texture = AddBumps(world, 128);
+    material.mtoon.matcap_texture.texture =
+        AddChecker(world, Toon::ToonTextureEncoding::Srgb, 16, 4, false);
+    material.mtoon.matcap = {0.3F, 0.3F, 0.3F};
+    material.outline = true;
+    material.outline_width = 0.006F;
+    material.outline_color = {0.1F, 0.1F, 0.2F};
+    material.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::Screen;
+    Bind(world, AddSphere(world, 1.2F, {0, 0, 0}), material);
+  }, kHullEdgeLimits, kHullDepthLimit});
+  scenes.push_back({"mtoon-mask", kTexturedLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 2.5F, 3});
+    auto material = MToon({1, 1, 1}, {0.5F, 0.5F, 0.6F});
+    material.base_texture.texture = AddChecker(world, Toon::ToonTextureEncoding::Srgb, 32, 4, true);
+    material.alpha_mode = Toon::ToonAlphaMode::Mask;
+    material.alpha_cutoff = 0.5F;
+    material.double_sided = true;
+    Bind(world, AddGround(world, 3), material);
+  }, kMaskCoverageLimits});
+  scenes.push_back({"mtoon-blend-outline", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 0.5F, 4.5F});
+    Bind(world, AddSphere(world, 0.9F, {-0.5F, 0, -0.6F}), MToon({0.3F, 0.6F, 0.9F}, {0.1F, 0.2F, 0.4F}));
+    auto glass = MToon({0.95F, 0.5F, 0.3F}, {0.5F, 0.2F, 0.2F});
+    glass.alpha_mode = Toon::ToonAlphaMode::Blend;
+    glass.alpha = 0.5F;
+    glass.double_sided = true;
+    glass.outline = true;
+    glass.outline_width = 0.03F;
+    glass.outline_color = {0.2F, 0.05F, 0.05F};
+    glass.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+    Bind(world, AddSphere(world, 0.9F, {0.5F, 0, 0.4F}), glass);
+  }, kHullEdgeLimits, kHullDepthLimit});
+  scenes.push_back({"mmd-shared-toon-edge", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 1, 4});
+    auto material = Mmd({0.8F, 0.6F, 0.5F}, {0.3F, 0.25F, 0.2F});
+    material.mmd.specular_color = {0.4F, 0.4F, 0.4F};
+    material.mmd.specular_power = 12;
+    material.mmd.toon_source = Toon::ToonRampSource::Shared;
+    material.mmd.shared_toon_index = 2;
+    material.outline = true;
+    material.outline_width = 1;
+    material.outline_color = {0.1F, 0.05F, 0.05F};
+    material.mmd.edge_alpha = 1;
+    const auto sphere = AddSphere(world, 1.1F, {0, 0, 0});
+    world.SetMeshEdgeScales(sphere, std::vector<float>(25U * 49U, 1.5F));
+    Bind(world, sphere, material);
+  }, kHullEdgeLimits, kHullDepthLimit});
+  scenes.push_back({"mmd-sphere-transparent", kTexturedLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 0.5F, 4.5F});
+    auto back = Mmd({0.4F, 0.7F, 0.5F}, {0.2F, 0.3F, 0.2F});
+    back.base_texture.texture = AddChecker(world, Toon::ToonTextureEncoding::Srgb, 32, 4, false);
+    back.mmd.sphere_texture.texture = AddChecker(world, Toon::ToonTextureEncoding::Srgb, 16, 8, false);
+    back.mmd.sphere_mode = Toon::ToonSphereMode::Add;
+    Bind(world, AddSphere(world, 0.9F, {-0.5F, 0, -0.6F}), back);
+    auto front = Mmd({0.9F, 0.5F, 0.4F}, {0.3F, 0.2F, 0.2F});
+    front.alpha = 0.55F;
+    front.mmd.sphere_texture.texture = AddChecker(world, Toon::ToonTextureEncoding::Srgb, 16, 4, false);
+    front.mmd.sphere_mode = Toon::ToonSphereMode::Multiply;
+    front.outline = true;
+    front.outline_width = 1;
+    front.outline_color = {0.2F, 0.1F, 0.1F};
+    front.mmd.edge_alpha = 0.6F;
+    Bind(world, AddSphere(world, 0.9F, {0.5F, 0, 0.4F}), front);
+  }, kHullEdgeLimits, kHullDepthLimit});
+  scenes.push_back({"mtoon-skinned-morphed", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 1, 4});
+    const auto sphere = AddSphere(world, 1, {0, 0, 0});
+    // Two joints split at the equator, the upper one turned and raised; a
+    // morph pushes the upper half's points out along +x.
+    const std::uint32_t points = 25U * 49U;
+    Toon::ToonSkin skin;
+    skin.influences_per_point = 2;
+    Toon::ToonMorph morph;
+    for (std::uint32_t point = 0; point < points; ++point) {
+      const bool upper = point / 49U < 12U;
+      const float weight = upper ? 0.8F : 0.2F;
+      skin.influences.push_back({1, weight});
+      skin.influences.push_back({0, 1 - weight});
+      const auto first = static_cast<std::uint32_t>(morph.offsets.size());
+      if (upper) morph.offsets.push_back({{0.3F, 0, 0}, 0, {0.2F, 0, 0}, 0});
+      morph.ranges.push_back({first, upper ? 1U : 0U});
+    }
+    world.SetMeshSkin(sphere, skin);
+    Toon::Matrix4 turned;
+    const float angle = 0.5F;
+    turned.m[0] = std::cos(angle);
+    turned.m[1] = std::sin(angle);
+    turned.m[4] = -std::sin(angle);
+    turned.m[5] = std::cos(angle);
+    turned.m[13] = 0.2F;
+    world.SetMeshSkinPose(sphere, {{Toon::Matrix4{}, turned}, {}});
+    world.SetMeshMorph(sphere, morph);
+    world.SetMeshMorphWeights(sphere, {0.7F});
+    auto material = MToon({0.8F, 0.7F, 0.5F}, {0.4F, 0.3F, 0.3F});
+    material.outline = true;
+    material.outline_width = 0.03F;
+    material.outline_color = {0.1F, 0.1F, 0.1F};
+    material.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
+    Bind(world, sphere, material);
+  }, kHullEdgeLimits, kHullDepthLimit});
   return scenes;
 }
 
@@ -366,6 +530,70 @@ Toon::ColorProduct Difference(const Toon::ColorProduct& a, const Toon::ColorProd
   return difference;
 }
 
+// MToon's Mask coverage at 4x, exactly (WebGPU policy §7, §9). A quad of
+// constant alpha, whose fwidth is 0, keeps 0.5 + (alpha - cutoff) * 1e4 of
+// its samples (MaskCoverage), so each share is one alpha; its unlit
+// emission is white, so a pixel's resolved alpha is the samples it kept.
+// Shares in whole 255ths lie half a step from every threshold of the
+// reference driver's alpha to coverage (renderer report 92), so each pixel
+// of a 2 x 2 dither block must keep as many samples on both backends, and
+// its depth product, sample 0, must be covered alike.
+bool CoverageProbe(std::unique_ptr<Toon::OffscreenRenderer>& vulkan,
+    std::unique_ptr<Toon::OffscreenRenderer>& webgpu, std::ostream& summary) {
+  Toon::RenderWorld world;
+  SetCamera(world, {0, 0, 3});
+  const auto quad = world.CreateMesh();
+  world.SetMeshPoints(quad, {{-1, -1, 0}, {1, -1, 0}, {1, 1, 0}, {-1, 1, 0}});
+  world.SetMeshTopology(quad, {0, 1, 2, 0, 2, 3});
+  world.SetMeshNormals(quad, std::vector<Toon::Float3>(4, {0, 0, 1}));
+  const Toon::MaterialId material = world.CreateMaterial();
+  world.SetMeshMaterial(quad, material);
+  std::string error;
+  Toon::BackgroundSettings background;
+  background.mode = Toon::BackgroundMode::Transparent;
+  if (!vulkan->SetBackground(background, error) || !webgpu->SetBackground(background, error)) {
+    throw std::runtime_error(error);
+  }
+  std::uint32_t mismatches = 0;
+  std::uint32_t partial = 0;
+  for (int share = 0; share <= 255; ++share) {
+    const float coverage = static_cast<float>(share) / 255.0F;
+    auto values = MToon({0, 0, 0}, {0, 0, 0});
+    values.emissive = {1, 1, 1};
+    values.alpha_mode = Toon::ToonAlphaMode::Mask;
+    values.alpha_cutoff = 0.5F;
+    values.alpha = 0.5F + (coverage - 0.5F) * 1e-4F;
+    world.SetMaterial(material, values);
+    Toon::DrawList draws = Toon::ExtractDrawList(world.Commit());
+    draws.shadows = false;
+    draws.lighting.direct_scale = draws.lighting.ambient_scale = 0;
+    Toon::ColorProduct vc, wc;
+    Toon::DepthProduct vd, wd;
+    if (!vulkan->Render(draws, kExtent, kExtent, vc, vd, error) ||
+        !webgpu->Render(draws, kExtent, kExtent, wc, wd, error)) {
+      throw std::runtime_error("coverage probe: " + error);
+    }
+    for (std::uint32_t y = kExtent / 2U; y < kExtent / 2U + 2U; ++y) {
+      for (std::uint32_t x = kExtent / 2U; x < kExtent / 2U + 2U; ++x) {
+        const std::size_t pixel = static_cast<std::size_t>(y) * kExtent + x;
+        const int va = vc.payload[pixel * 4 + 3];
+        const int wa = wc.payload[pixel * 4 + 3];
+        partial += va > 0 && va < 255 ? 1U : 0U;
+        if (std::abs(va - wa) > 1 || (vd.payload[pixel] < 1.0F) != (wd.payload[pixel] < 1.0F)) {
+          ++mismatches;
+          std::cout << "coverage " << share << "/255 at " << x << ',' << y << ": vulkan alpha "
+                    << va << ", webgpu alpha " << wa << "  FAIL\n";
+        }
+      }
+    }
+  }
+  summary << ",\n  \"coverage_probe\": {\"shares\": 256, \"pixels\": 4, \"partial\": " << partial
+          << ", \"mismatches\": " << mismatches << "}";
+  std::cout << "coverage probe: 256 shares x 4 pixels, " << partial << " partial, " << mismatches
+            << " mismatches\n";
+  return mismatches == 0 && partial > 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -397,38 +625,43 @@ int main(int argc, char** argv) {
     std::string error;
     // A renderer per scene: each scene's world numbers its meshes,
     // materials and revisions from 1, which a renderer that had drawn
-    // another scene would take for resident ones. One sample on both: the
-    // WebGPU backend's stage 1 renders at one.
+    // another scene would take for resident ones. Each scene renders at one
+    // sample and at four, the counts core WebGPU has.
     std::unique_ptr<Toon::OffscreenRenderer> vulkan;
     std::unique_ptr<Toon::OffscreenRenderer> webgpu;
-    const auto create = [&]() {
-      vulkan = Toon::CreateOffscreenRenderer(vulkan_shaders, status, error, {1});
+    const auto create = [&](std::uint32_t samples) {
+      vulkan = Toon::CreateOffscreenRenderer(vulkan_shaders, status, error, {samples});
       if (status == Toon::FrameStatus::Skip) {
         std::cout << "Vulkan: " << error << '\n';
         return false;
       }
       if (!vulkan) throw std::runtime_error(error);
-      webgpu = Toon::CreateWebGpuOffscreenRenderer(webgpu_shaders, status, error, {1}, adapter);
+      webgpu = Toon::CreateWebGpuOffscreenRenderer(webgpu_shaders, status, error, {samples},
+          adapter);
       if (status == Toon::FrameStatus::Skip) {
         std::cout << "WebGPU: " << error << '\n';
         return false;
       }
       if (!webgpu) throw std::runtime_error(error);
+      if (vulkan->statistics().samples != samples || webgpu->statistics().samples != samples) {
+        std::cout << samples << " samples unavailable\n";
+        return false;
+      }
       return true;
     };
-    if (!create()) return 77;
+    if (!create(1)) return 77;
 
     std::ofstream summary(summary_path, std::ios::binary | std::ios::trunc);
     summary << "{\n  \"vulkan_device\": \"" << vulkan->statistics().device_name
             << "\",\n  \"webgpu\": \"" << webgpu->statistics().api_version << " on "
             << webgpu->statistics().device_name << "\",\n  \"extent\": " << kExtent
-            << ",\n  \"samples\": 1,\n  \"scenes\": [\n";
+            << ",\n  \"samples\": [1, 4],\n  \"scenes\": [\n";
     bool passed = true;
     bool first = true;
     std::uint32_t validation_messages = 0;
     std::string validation_detail;
-    for (const Scene& scene : Scenes()) {
-      if (!first && !create()) return 77;
+    for (const std::uint32_t samples : {1U, 4U}) for (const Scene& scene : Scenes()) {
+      if (!first && !create(samples)) return 77;
       for (const Toon::BackgroundMode mode :
           {Toon::BackgroundMode::Opaque, Toon::BackgroundMode::Transparent}) {
         Toon::RenderWorld world;
@@ -451,21 +684,26 @@ int main(int argc, char** argv) {
           throw std::runtime_error("WebGPU " + scene.name + ": " + error);
         }
         const Comparison c = Compare(vc, wc, vd, wd);
-        const bool ok = c.max_difference <= scene.limits.max_difference &&
-                        c.above_one <= scene.limits.above_one && c.coverage_mismatch == 0 &&
-                        c.max_depth <= kDepthLimit && c.covered > 0;
+        const Limits& limits =
+            samples > 1 && scene.multisampled ? *scene.multisampled : scene.limits;
+        const bool ok = c.max_difference <= limits.max_difference &&
+                        c.above_one <= limits.above_one && c.coverage_mismatch == 0 &&
+                        c.max_depth <= scene.depth_limit && c.covered > 0;
         passed = passed && ok;
         const std::string label = scene.name +
-            (mode == Toon::BackgroundMode::Opaque ? "-opaque" : "-transparent");
+            (mode == Toon::BackgroundMode::Opaque ? "-opaque" : "-transparent") +
+            (samples == 1 ? "" : "-4x");
         summary << (first ? "" : ",\n") << "    {\"scene\": \"" << label
-                << "\", \"max_difference\": " << c.max_difference
+                << "\", \"samples\": " << samples
+                << ", \"max_difference\": " << c.max_difference
                 << ", \"mean_difference\": " << c.mean_difference
                 << ", \"above_one\": " << c.above_one
                 << ", \"covered\": " << c.covered
                 << ", \"coverage_mismatch\": " << c.coverage_mismatch
                 << ", \"max_depth_difference\": " << c.max_depth
-                << ", \"limit_max\": " << scene.limits.max_difference
-                << ", \"limit_above_one\": " << scene.limits.above_one
+                << ", \"limit_max\": " << limits.max_difference
+                << ", \"limit_above_one\": " << limits.above_one
+                << ", \"limit_depth\": " << scene.depth_limit
                 << ", \"pass\": " << (ok ? "true" : "false") << "}";
         first = false;
         std::cout << label << ": max " << c.max_difference << " mean " << c.mean_difference
@@ -484,7 +722,14 @@ int main(int argc, char** argv) {
         if (validation_detail.empty()) validation_detail = renderer->statistics().validation_detail;
       }
     }
-    summary << "\n  ],\n  \"validation_messages\": " << validation_messages
+    summary << "\n  ]";
+    if (!create(4)) return 77;
+    passed = CoverageProbe(vulkan, webgpu, summary) && passed;
+    for (const auto* renderer : {vulkan.get(), webgpu.get()}) {
+      validation_messages += renderer->statistics().validation_message_count;
+      if (validation_detail.empty()) validation_detail = renderer->statistics().validation_detail;
+    }
+    summary << ",\n  \"validation_messages\": " << validation_messages
             << ",\n  \"pass\": " << (passed ? "true" : "false") << "\n}\n";
     if (validation_messages != 0) {
       std::cerr << "validation messages: " << validation_detail << '\n';

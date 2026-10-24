@@ -126,8 +126,24 @@ struct ShaderSources {
   std::string mesh_fragment;
   std::string preview_vertex;
   std::string preview_fragment;
+  std::string mtoon_vertex;
+  std::string mtoon_fragment;
+  std::string mtoon_transparent_vertex;
+  std::string mtoon_transparent_fragment;
+  std::string mtoon_outline_vertex;
+  std::string mtoon_outline_fragment;
+  std::string mtoon_coverage_vertex;
+  std::string mtoon_coverage_fragment;
+  std::string mmd_vertex;
+  std::string mmd_fragment;
+  std::string mmd_transparent_vertex;
+  std::string mmd_transparent_fragment;
+  std::string mmd_outline_vertex;
+  std::string mmd_outline_fragment;
   std::string mipmap_vertex;
   std::string mipmap_fragment;
+  std::string depth_resolve_vertex;
+  std::string depth_resolve_fragment;
 };
 bool LoadShaders(const WebGpuShaders& shaders, ShaderSources& sources,
     std::string& detail);
@@ -143,11 +159,44 @@ constexpr std::uint32_t kDrawBindingSize = sizeof(SurfaceDrawConstants);
 constexpr std::uint32_t kTextureRoles = 9;
 constexpr std::uint32_t kFirstRoleTexture = 3;
 constexpr std::uint32_t kFirstRoleSampler = 12;
+// Each model's parameter buffer in the material group.
+constexpr std::uint32_t kMToonMaterialsBinding = 0;
+constexpr std::uint32_t kMmdMaterialsBinding = 1;
 constexpr std::uint32_t kPreviewMaterialsBinding = 2;
 
 // PreviewSurface's roles are its inputs, in PreviewParameters' order
 // (kPreview* in shaders/preview/preview_common.slang).
 constexpr std::uint32_t kPreviewRoles = 6;
+
+// Must match kMToon* in shaders/mtoon/mtoon_common.slang.
+enum MToonRole : std::uint32_t {
+  kMToonBase,
+  kMToonShade,
+  kMToonNormal,
+  kMToonEmissive,
+  kMToonRim,
+  kMToonMatcap,
+  kMToonOutlineWidth,
+  kMToonMask,
+  kMToonShift,
+};
+
+// Must match kMmd* in shaders/mmd/mmd_common.slang.
+enum MmdRole : std::uint32_t {
+  kMmdBase,
+  kMmdSphere,
+  kMmdToon,
+};
+
+// The sampler that clamps both axes, which MMD's toon ramp is read
+// through (kClampSampler in shaders/common/surface_common.slang).
+constexpr std::uint32_t kClampSampler = 4;
+
+// MMD's shared toon ramps, SharedToonRamp(0) to (9).
+constexpr std::uint32_t kSharedToonRamps = 10;
+
+// The multisampled count core WebGPU renders besides one (WebGPU policy §7).
+constexpr std::uint32_t kMultisampleCount = 4;
 
 constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;
 constexpr WGPUTextureFormat kDepthFormat = WGPUTextureFormat_Depth32Float;
@@ -162,18 +211,37 @@ Matrix4 WebGpuClipFromWorld(const ToonView& view);
 // has no dynamic cull mode, front face, depth writes or vertex strides, so
 // each combination a draw needs is its own pipeline, created the first time
 // a draw needs it and kept for the renderer's life.
+//
+// The kinds are the Vulkan backend's pipelines, with its blending, depth
+// tests and outline bias: the unlit mesh; PreviewSurface; mtoon_opaque,
+// which multisampled is MToonCoverage; mtoon_transparent and mtoon_outline;
+// mmd_opaque, mmd_transparent and mmd_outline. Every surface kind shares
+// one layout, frame, material, deformation and draw, and reads four
+// streams: position, normal, UV and a fourth, the tangent frame,
+// MMD's sub-texture UV or its edge scale.
 class ScenePipelines {
 public:
-  enum class Kind : std::uint8_t { Mesh, Preview };
+  enum class Kind : std::uint8_t {
+    Mesh,
+    Preview,
+    MToon,
+    MToonCoverage,
+    MToonTransparent,
+    MToonOutline,
+    Mmd,
+    MmdTransparent,
+    MmdOutline,
+  };
+  static constexpr std::size_t kKinds = 9;
   struct Key {
     Kind kind = Kind::Mesh;
     WGPUCullMode cull = WGPUCullMode_None;
     WGPUFrontFace front = WGPUFrontFace_CCW;
     bool depth_write = true;
-    // Strides of the UV and tangent streams: 0 binds a single zero element
-    // for a mesh without them.
+    // Strides of the UV and fourth streams: 0 binds a single element for a
+    // mesh without them, zero or, for an edge scale, one.
     bool uvs = true;
-    bool tangents = true;
+    bool fourth = true;
     friend bool operator==(const Key&, const Key&) = default;
   };
 
@@ -193,28 +261,52 @@ public:
   [[nodiscard]] std::uint32_t samples() const { return samples_; }
 
 private:
+  struct Stages {
+    ShaderModule vertex;
+    ShaderModule fragment;
+  };
+
   WGPUDevice device_ = nullptr;
   std::uint32_t samples_ = 1;
-  ShaderModule mesh_vertex_;
-  ShaderModule mesh_fragment_;
-  ShaderModule preview_vertex_;
-  ShaderModule preview_fragment_;
+  std::array<Stages, kKinds> stages_;
   BindGroupLayout frame_layout_;
   BindGroupLayout material_layout_;
   BindGroupLayout empty_layout_;
   BindGroupLayout deformation_layout_;
   BindGroupLayout draw_layout_;
   PipelineLayout mesh_layout_;
-  PipelineLayout preview_layout_;
+  PipelineLayout surface_layout_;
   std::array<Sampler, kSamplerCount> samplers_;
   Sampler shadow_sampler_;
   std::vector<std::pair<Key, RenderPipeline>> pipelines_;
   std::uint32_t created_ = 0;
 };
 
+// A multisampled frame's depth resolve (WebGPU policy §7): a pass that
+// writes each pixel's sample 0 of the scene's depth into the single-sampled
+// depth product, as the Vulkan backend's sample-zero resolve does.
+class DepthResolve {
+public:
+  bool Initialize(WGPUDevice device, const ShaderSources& sources, std::string& detail);
+  // Record the resolve of `samples`, a multisampled depth view, into
+  // `target`, outside any other pass.
+  bool Record(WGPUCommandEncoder encoder, WGPUTextureView samples,
+      WGPUTextureView target, std::string& detail) const;
+
+private:
+  WGPUDevice device_ = nullptr;
+  ShaderModule vertex_;
+  ShaderModule fragment_;
+  BindGroupLayout layout_;
+  PipelineLayout pipeline_layout_;
+  RenderPipeline pipeline_;
+};
+
 // GPU copies of textures, keyed by texture id, uploaded by queue writes
 // when their revision changes; each level below the first is drawn from
-// the one above in the frame that uploads it (WebGPU policy §6).
+// the one above in the frame that uploads it (WebGPU policy §6). MMD's
+// shared toon ramps are the renderer's own, uploaded with the white and
+// resident for the cache's life, as the Vulkan backend's.
 class TextureCache {
 public:
   bool Initialize(const Gpu& gpu, const ShaderSources& sources,
@@ -233,6 +325,14 @@ public:
   // white, a new one each time a texture's image is created. A bind group
   // holding an older number holds an older view.
   [[nodiscard]] std::uint64_t SerialOf(TextureId texture) const;
+  // MMD's shared toon ramp `index`, 0-9, and its serial; outside them, the
+  // white and 0.
+  [[nodiscard]] WGPUTextureView RampView(std::int32_t index) const;
+  [[nodiscard]] std::uint64_t RampSerial(std::int32_t index) const;
+  // True only for a resident image whose entire G channel is zero.
+  [[nodiscard]] bool ZeroGreen(TextureId texture) const;
+  // True only for a resident image with an alpha below 1 anywhere.
+  [[nodiscard]] bool Translucent(TextureId texture) const;
   [[nodiscard]] std::uint64_t uploads() const { return uploads_; }
 
 private:
@@ -246,6 +346,13 @@ private:
     std::uint64_t serial = 0;
     std::uint64_t revision = 0;
     std::uint64_t generation = 0;
+    bool zero_green = false;
+    bool translucent = false;
+  };
+  struct Ramp {
+    Texture texture;
+    TextureView view;
+    std::uint64_t serial = 0;
   };
   struct Mipmaps {
     WGPUTexture texture = nullptr;
@@ -264,6 +371,7 @@ private:
   RenderPipeline mip_srgb_;
   RenderPipeline mip_linear_;
   Sampler mip_sampler_;
+  std::array<Ramp, kSharedToonRamps> ramps_;
   std::unordered_map<TextureId, Resident> textures_;
   std::vector<Mipmaps> pending_;
   std::uint64_t generation_ = 0;
@@ -271,12 +379,14 @@ private:
   std::uint64_t uploads_ = 0;
 };
 
-// One PreviewSurface parameter slot per material in one storage buffer,
-// the frame buffer, and each material's bind group (group 1): the buffer and
-// a texture view and sampler per role (WebGPU policy §4). A slot is
+// One parameter slot per material in its model's storage buffer, MToon's,
+// MMD's or PreviewSurface's, one slot number in all three, as the Vulkan
+// backend's; the frame buffer and MMD's shadow parameters (group 0); and
+// each material's bind group (group 1): the three buffers and a texture
+// view and sampler per role of its model (WebGPU policy §4). A slot is
 // rewritten when its parameters revision changes or a texture it samples
 // becomes resident or leaves; a bind group is rebuilt only when a role's
-// view or sampler, or the buffer, changes.
+// view or sampler, or a buffer, changes.
 class MaterialCache {
 public:
   struct Entry {
@@ -287,9 +397,22 @@ public:
     bool preview_enabled = false;
     Float3 unlit_color;
     bool double_sided = false;
+    // As the Vulkan backend's Entry: whether a draw also draws an outline
+    // hull, its width and mode for the hull's culling, and whether the
+    // width texture is zero throughout.
+    bool outline = false;
+    float outline_width = 0;
+    ToonOutlineWidthMode outline_width_mode = ToonOutlineWidthMode::None;
+    bool zero_width_texture = false;
+    // Whether its draws are transparent, in `queue` order after every
+    // opaque draw, and whether they write depth; an MMD material is
+    // transparent when it can blend, decided every frame.
     bool transparent = false;
     std::int32_t queue = 0;
     bool depth_write = true;
+    // MMD's material-table index and whether its diffuse alpha is below 1.
+    std::int32_t draw_order = 0;
+    bool mmd_translucent = false;
     std::array<std::uint64_t, kTextureRoles> views{};
     std::array<std::uint32_t, kTextureRoles> samplers{};
     std::uint64_t buffer_generation = 0;
@@ -320,13 +443,18 @@ private:
   WGPUQueue queue_ = nullptr;
   const ScenePipelines* pipelines_ = nullptr;
   WGPUTextureView white_ = nullptr;
+  Buffer mtoon_buffer_;
+  Buffer mmd_buffer_;
   Buffer preview_buffer_;
   std::uint64_t buffer_generation_ = 0;
+  std::vector<MToonParameters> mtoon_slots_;
+  std::vector<MmdParameters> mmd_slots_;
   std::vector<PreviewParameters> preview_slots_;
   Buffer frame_buffer_;
   Texture shadow_map_;
   TextureView shadow_view_;
   Buffer shadow_views_;
+  Buffer mmd_shadow_;
   BindGroup frame_group_;
   BindGroup display_group_;
   std::uint32_t capacity_ = 0;
@@ -338,9 +466,12 @@ private:
   double parameter_write_ms_ = 0;
 };
 
-// What MeshCache::Record drew.
+// What MeshCache::Record drew, counted as the Vulkan backend counts it.
 struct SceneRecord {
+  // All recorded hulls, including those in the transparent part.
+  std::uint32_t hulls = 0;
   std::uint32_t unlit = 0;
+  std::uint32_t outline = 0;
   std::uint32_t opaque = 0;
   std::uint32_t transparent = 0;
   std::uint64_t triangles = 0;
@@ -356,21 +487,22 @@ public:
   bool Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
       std::string& detail);
   bool Update(const DrawList& draws, std::string& detail, bool fast_values = true);
-  // The most draws Record can make of `draws`: one per part.
+  // The most draws Record can make of `draws`: three per part, a
+  // double-sided transparent MToon part's back, front and hull.
   [[nodiscard]] static std::size_t DrawBound(const DrawList& draws);
-  // Fails a draw list this stage cannot draw yet, naming why.
-  [[nodiscard]] static bool Supported(const DrawList& draws,
-      const MaterialCache& materials, std::string& detail);
-  // Unlit draws first, then the opaque PreviewSurface draws, then the
-  // transparent ones by render queue and then as `draws` and each mesh's
-  // parts list them, as the Vulkan backend orders them (material policy
-  // §6). The draw constants of the frame go into `constants`, a draw's at
-  // kDrawStride times its index, which the caller writes to `ring` before
-  // the pass is submitted.
+  // The Vulkan backend's order (its MeshCache::Record; material policy
+  // §6): unlit draws; the hull of every opaque MToon draw that asks for
+  // one; every opaque surface, MToon's multisampled through MToonCoverage;
+  // the transparent draws by render queue, then as `draws` and each mesh's
+  // parts list them, an MMD mesh's parts in MMD's material order, an MToon
+  // surface followed by its hull; then MMD's edges. The draw constants of
+  // the frame go into `constants`, a draw's at kDrawStride times its index,
+  // which the caller writes to `ring` before the pass is submitted.
+  // `width` and `height` are the target's, for the hulls' occlusion test.
   bool Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws,
-      WGPUBindGroup ring, std::vector<std::uint8_t>& constants,
-      SceneRecord& record, std::string& detail);
+      std::uint32_t width, std::uint32_t height, WGPUBindGroup ring,
+      std::vector<std::uint8_t>& constants, SceneRecord& record, std::string& detail);
 
   [[nodiscard]] std::uint64_t topology_uploads() const { return topology_uploads_; }
   [[nodiscard]] std::uint64_t point_uploads() const { return point_uploads_; }
@@ -388,9 +520,12 @@ private:
   };
   struct Entry {
     Stream vertices;
+    OutlineBounds outline_bounds;
     Stream normals;
     Stream uvs;
     Stream tangents;
+    Stream edge_scales;
+    Stream sub_texture_uvs;
     Stream indices;
     Stream influences;
     Stream joints;
@@ -402,14 +537,20 @@ private:
     std::uint64_t normals_revision = 0;
     std::uint64_t uvs_revision = 0;
     std::uint64_t tangents_revision = 0;
+    std::uint64_t edge_scales_revision = 0;
+    std::uint64_t sub_texture_uvs_revision = 0;
     std::uint64_t topology_revision = 0;
     std::uint64_t skin_revision = 0;
     std::uint64_t pose_revision = 0;
     std::uint64_t morph_revision = 0;
     std::uint64_t morph_weights_revision = 0;
     std::uint32_t index_count = 0;
+    // Whether each optional stream holds a value for every vertex the
+    // indices reach.
     bool has_uvs = false;
     bool has_tangents = false;
+    bool has_edge_scales = false;
+    bool has_sub_texture_uvs = false;
     bool skinned = false;
     bool morphed = false;
     std::uint32_t skin_flags = 0;
@@ -429,11 +570,14 @@ private:
   const ScenePipelines* pipelines_ = nullptr;
   Buffer zero_uv_;
   Buffer zero_tangent_;
+  // Bound with stride 0 in place of a mesh's missing edge scales: 1.
+  Buffer unit_edge_scale_;
   Buffer zero_skin_;
   BindGroup undeformed_;
   BindGroup empty_group_;
   std::vector<Matrix4> joint_scratch_;
   std::vector<std::pair<std::size_t, std::size_t>> transparent_scratch_;
+  OutlineOcclusion outline_occlusion_;
   std::unordered_map<MeshId, Entry> entries_;
   std::uint64_t generation_ = 0;
   std::uint64_t topology_uploads_ = 0;

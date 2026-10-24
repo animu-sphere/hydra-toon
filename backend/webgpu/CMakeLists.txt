@@ -18,10 +18,19 @@ include(ToonShaders)
 toon_add_shader_library(toon-renderer-wgsl WGSL
   scene/mesh.slang
   preview/preview_surface.slang
+  mtoon/mtoon.slang
+  mtoon/mtoon_transparent.slang
+  mtoon/mtoon_outline.slang
+  mmd/mmd.slang
+  mmd/mmd_transparent.slang
+  mmd/mmd_outline.slang
+  webgpu/mtoon_coverage.slang
   webgpu/mipmap.slang
+  webgpu/depth_resolve.slang
   INCLUDES bindings/bindings.slang bindings/bindings_vulkan.slang
     bindings/bindings_webgpu.slang common/skinning.slang
-    common/surface_common.slang preview/preview_common.slang)
+    common/surface_common.slang preview/preview_common.slang
+    mtoon/mtoon_common.slang mmd/mmd_common.slang)
 add_dependencies(toon-render-webgpu toon-renderer-wgsl)
 set(TOON_SHADER_WGSLS "${TOON_SHADER_WGSLS}" PARENT_SCOPE)
 set(TOON_TINT_EXECUTABLE "${TOON_TINT_EXECUTABLE}" PARENT_SCOPE)

@@ -52,6 +52,17 @@ if(TOON_WITH_VULKAN)
   add_dependencies(toon-late-frame-test toon-renderer-shaders)
   add_test(NAME toon-late-frame-gpu COMMAND toon-late-frame-test "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-late-frame-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+  # The late latch on the WebGPU backend (WebGPU policy §6).
+  if(TOON_ENABLE_WEBGPU)
+    target_link_libraries(toon-late-frame-test PRIVATE Toon::WebGPU)
+    target_compile_definitions(toon-late-frame-test PRIVATE TOON_HAS_WEBGPU=1)
+    add_dependencies(toon-late-frame-test toon-renderer-wgsl)
+    toon_copy_webgpu_runtime(toon-late-frame-test)
+    add_test(NAME toon-late-frame-webgpu COMMAND toon-late-frame-test
+      "${CMAKE_BINARY_DIR}/backend/webgpu/shaders" --backend webgpu)
+    set_tests_properties(toon-late-frame-webgpu PROPERTIES
+      SKIP_RETURN_CODE 77 LABELS "gpu;webgpu")
+  endif()
 endif()
 
 add_executable(toon-morph-test morph_test.cpp)
@@ -73,6 +84,17 @@ if(TOON_WITH_VULKAN)
   add_test(NAME toon-morph-gpu COMMAND toon-morph-test
     "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-morph-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+  # Morphs and skinning on the WebGPU backend, against the same oracle.
+  if(TOON_ENABLE_WEBGPU)
+    target_link_libraries(toon-morph-test PRIVATE Toon::WebGPU)
+    target_compile_definitions(toon-morph-test PRIVATE TOON_HAS_WEBGPU=1)
+    add_dependencies(toon-morph-test toon-renderer-wgsl)
+    toon_copy_webgpu_runtime(toon-morph-test)
+    add_test(NAME toon-morph-webgpu COMMAND toon-morph-test
+      "${CMAKE_BINARY_DIR}/backend/webgpu/shaders" --backend webgpu)
+    set_tests_properties(toon-morph-webgpu PROPERTIES
+      SKIP_RETURN_CODE 77 LABELS "gpu;webgpu")
+  endif()
 endif()
 
 if(TOON_WITH_VULKAN)
@@ -107,6 +129,18 @@ if(TOON_WITH_VULKAN)
   add_test(NAME toon-rgba-output-gpu COMMAND toon-rgba-output-test
     "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-rgba-output-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+  # The same output semantics on the WebGPU backend at 1x and 4x, its
+  # sample-mask Mask coverage included (WebGPU policy §7).
+  if(TOON_ENABLE_WEBGPU)
+    target_link_libraries(toon-rgba-output-test PRIVATE Toon::WebGPU)
+    target_compile_definitions(toon-rgba-output-test PRIVATE TOON_HAS_WEBGPU=1)
+    add_dependencies(toon-rgba-output-test toon-renderer-wgsl)
+    toon_copy_webgpu_runtime(toon-rgba-output-test)
+    add_test(NAME toon-rgba-output-webgpu COMMAND toon-rgba-output-test
+      "${CMAKE_BINARY_DIR}/backend/webgpu/shaders" --backend webgpu)
+    set_tests_properties(toon-rgba-output-webgpu PROPERTIES
+      SKIP_RETURN_CODE 77 LABELS "gpu;webgpu")
+  endif()
   add_executable(toon-rgba-fixture-test rgba_fixture_test.cpp
     ../adapters/viewport/src/capture.cpp)
   toon_configure_warnings(toon-rgba-fixture-test)

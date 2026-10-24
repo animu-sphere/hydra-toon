@@ -7,6 +7,7 @@
 #include <cstring>
 #include <span>
 #include <tuple>
+#include <type_traits>
 
 namespace Toon::webgpu_internal {
 namespace {
@@ -123,39 +124,138 @@ std::uint32_t MipLevels(std::uint32_t width, std::uint32_t height) {
 
 constexpr WGPUShaderStage kBothStages = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 
+// What a material's bind group holds per role of its model (WebGPU policy
+// §4): each texture's view, the serial that tells a rebuilt view from an
+// old one, and its sampler; and the slot's entries, 1 for a texture the
+// role has. A role its model does not declare binds the white.
+struct Roles {
+  MaterialEntries entries;
+  std::array<WGPUTextureView, kTextureRoles> views{};
+  std::array<std::uint64_t, kTextureRoles> serials{};
+  std::array<std::uint32_t, kTextureRoles> samplers{};
+};
+
+Roles RolesOf(const ToonMaterial& values, const TextureCache& textures,
+    WGPUTextureView white) {
+  Roles roles;
+  roles.views.fill(white);
+  MaterialEntries& entries = roles.entries;
+  const auto bind = [&](std::uint32_t role, const ToonTextureRef& texture,
+                        std::uint32_t& entry) {
+    entry = textures.Entry(texture.texture);
+    roles.views[role] = textures.ViewOf(texture.texture);
+    roles.serials[role] = textures.SerialOf(texture.texture);
+    roles.samplers[role] = SamplerIndex(texture);
+  };
+  switch (values.model) {
+  case ToonShadingModel::MToon:
+    bind(kMToonBase, values.base_texture, entries.base);
+    bind(kMToonShade, values.mtoon.shade_texture, entries.shade);
+    bind(kMToonNormal, values.normal_texture, entries.normal);
+    bind(kMToonEmissive, values.emissive_texture, entries.emissive);
+    bind(kMToonRim, values.mtoon.rim_multiply_texture, entries.rim);
+    bind(kMToonMatcap, values.mtoon.matcap_texture, entries.matcap);
+    bind(kMToonOutlineWidth, values.mtoon.outline_width_texture, entries.outline);
+    bind(kMToonMask, values.mtoon.uv_animation_mask_texture, entries.mask);
+    bind(kMToonShift, values.mtoon.shading_shift_texture, entries.shift);
+    break;
+  case ToonShadingModel::MMD:
+    bind(kMmdBase, values.base_texture, entries.base);
+    bind(kMmdSphere, values.mmd.sphere_texture, entries.sphere);
+    // The ramp is its own texture or the renderer's shared one, read
+    // through the clamp sampler whatever the texture's wrap; a material
+    // without one samples white.
+    if (values.mmd.toon_source == ToonRampSource::Individual) {
+      bind(kMmdToon, values.mmd.toon_texture, entries.toon);
+    } else if (values.mmd.toon_source == ToonRampSource::Shared) {
+      roles.views[kMmdToon] = textures.RampView(values.mmd.shared_toon_index);
+      roles.serials[kMmdToon] = textures.RampSerial(values.mmd.shared_toon_index);
+      entries.toon = roles.serials[kMmdToon] != 0 ? 1U : 0U;
+    }
+    roles.samplers[kMmdToon] = kClampSampler;
+    break;
+  case ToonShadingModel::PreviewSurface: {
+    const ToonTextureRef* inputs[kPreviewRoles] = {&values.base_texture,
+        &values.emissive_texture, &values.preview.metallic_texture,
+        &values.preview.roughness_texture, &values.preview.opacity_texture,
+        &values.normal_texture};
+    std::uint32_t* input_entries[kPreviewRoles] = {&entries.base, &entries.emissive,
+        &entries.metallic, &entries.roughness, &entries.opacity, &entries.normal};
+    for (std::uint32_t role = 0; role < kPreviewRoles; ++role) {
+      bind(role, *inputs[role], *input_entries[role]);
+    }
+    break;
+  }
+  }
+  return roles;
+}
+
 } // namespace
 
 bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
     std::uint32_t samples, std::string& detail) {
   device_ = device;
   samples_ = samples;
-  mesh_vertex_ = CreateShader(device, sources.mesh_vertex, "mesh.vert");
-  mesh_fragment_ = CreateShader(device, sources.mesh_fragment, "mesh.frag");
-  preview_vertex_ = CreateShader(device, sources.preview_vertex, "preview_surface.vert");
-  preview_fragment_ = CreateShader(device, sources.preview_fragment, "preview_surface.frag");
+  const struct {
+    Kind kind;
+    const std::string* vertex;
+    const std::string* fragment;
+    const char* label;
+  } modules[] = {
+      {Kind::Mesh, &sources.mesh_vertex, &sources.mesh_fragment, "mesh"},
+      {Kind::Preview, &sources.preview_vertex, &sources.preview_fragment, "preview_surface"},
+      {Kind::MToon, &sources.mtoon_vertex, &sources.mtoon_fragment, "mtoon"},
+      {Kind::MToonCoverage, &sources.mtoon_coverage_vertex, &sources.mtoon_coverage_fragment,
+          "mtoon_coverage"},
+      {Kind::MToonTransparent, &sources.mtoon_transparent_vertex,
+          &sources.mtoon_transparent_fragment, "mtoon_transparent"},
+      {Kind::MToonOutline, &sources.mtoon_outline_vertex, &sources.mtoon_outline_fragment,
+          "mtoon_outline"},
+      {Kind::Mmd, &sources.mmd_vertex, &sources.mmd_fragment, "mmd"},
+      {Kind::MmdTransparent, &sources.mmd_transparent_vertex,
+          &sources.mmd_transparent_fragment, "mmd_transparent"},
+      {Kind::MmdOutline, &sources.mmd_outline_vertex, &sources.mmd_outline_fragment,
+          "mmd_outline"},
+  };
+  bool shaders = true;
+  for (const auto& module : modules) {
+    Stages& stages = stages_[static_cast<std::size_t>(module.kind)];
+    stages.vertex = CreateShader(device, *module.vertex, module.label);
+    stages.fragment = CreateShader(device, *module.fragment, module.label);
+    shaders = shaders && stages.vertex && stages.fragment;
+  }
 
   // Group 0, the frame: its buffer, the shadow views' image, their
-  // parameters and the gather sampler (WebGPU policy §4). The image is
-  // depth32float, which WGSL reads as an unfilterable float.
+  // parameters, the gather sampler and MMD's reading of the views (WebGPU
+  // policy §4). The image is depth32float, which WGSL reads as an
+  // unfilterable float. Only the frame buffer is the vertex stage's, for
+  // mmd_outline's metres per unit: core WebGPU gives a stage eight storage
+  // buffers, and the frame's, two models' and five deformation buffers are
+  // the vertex stage's eight.
   frame_layout_ = CreateLayout(device,
       {BufferEntry(0, kBothStages, WGPUBufferBindingType_ReadOnlyStorage),
           TextureEntry(1, WGPUShaderStage_Fragment, WGPUTextureSampleType_UnfilterableFloat,
               WGPUTextureViewDimension_2DArray),
-          BufferEntry(2, kBothStages, WGPUBufferBindingType_ReadOnlyStorage),
-          SamplerEntry(3, WGPUShaderStage_Fragment, WGPUSamplerBindingType_NonFiltering)},
+          BufferEntry(2, WGPUShaderStage_Fragment, WGPUBufferBindingType_ReadOnlyStorage),
+          SamplerEntry(3, WGPUShaderStage_Fragment, WGPUSamplerBindingType_NonFiltering),
+          BufferEntry(4, WGPUShaderStage_Fragment, WGPUBufferBindingType_ReadOnlyStorage)},
       "frame");
-  // Group 1, a PreviewSurface material: its model's buffer and a texture
-  // and sampler per role.
-  std::vector<WGPUBindGroupLayoutEntry> material{BufferEntry(
-      kPreviewMaterialsBinding, WGPUShaderStage_Fragment,
-      WGPUBufferBindingType_ReadOnlyStorage)};
+  // Group 1, a material: every model's buffer and a texture and sampler
+  // per role. mtoon_outline's vertex stage reads its MToon slot and two of
+  // its roles, and mmd_outline's its MMD slot; PreviewSurface is read by
+  // fragments alone.
+  std::vector<WGPUBindGroupLayoutEntry> material{
+      BufferEntry(kMToonMaterialsBinding, kBothStages, WGPUBufferBindingType_ReadOnlyStorage),
+      BufferEntry(kMmdMaterialsBinding, kBothStages, WGPUBufferBindingType_ReadOnlyStorage),
+      BufferEntry(kPreviewMaterialsBinding, WGPUShaderStage_Fragment,
+          WGPUBufferBindingType_ReadOnlyStorage)};
   for (std::uint32_t role = 0; role < kTextureRoles; ++role) {
-    material.push_back(TextureEntry(kFirstRoleTexture + role, WGPUShaderStage_Fragment,
+    material.push_back(TextureEntry(kFirstRoleTexture + role, kBothStages,
         WGPUTextureSampleType_Float, WGPUTextureViewDimension_2D));
-    material.push_back(SamplerEntry(kFirstRoleSampler + role, WGPUShaderStage_Fragment,
+    material.push_back(SamplerEntry(kFirstRoleSampler + role, kBothStages,
         WGPUSamplerBindingType_Filtering));
   }
-  material_layout_ = CreateLayout(device, material, "preview material");
+  material_layout_ = CreateLayout(device, material, "material");
   empty_layout_ = CreateLayout(device, {}, "empty");
   // Group 2, a mesh's deformation: influences, joints, morph offsets,
   // ranges and weights, read by the vertex stage.
@@ -171,10 +271,10 @@ bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
   mesh_layout_ = CreatePipelineLayout(device,
       {empty_layout_.get(), empty_layout_.get(), deformation_layout_.get(), draw_layout_.get()},
       "mesh");
-  preview_layout_ = CreatePipelineLayout(device,
+  surface_layout_ = CreatePipelineLayout(device,
       {frame_layout_.get(), material_layout_.get(), deformation_layout_.get(),
           draw_layout_.get()},
-      "preview_surface");
+      "surface");
 
   // Trilinear, one sampler per wrap pair, as the Vulkan backend's.
   for (std::uint32_t index = 0; index < kSamplerCount; ++index) {
@@ -192,9 +292,8 @@ bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
   shadow.addressModeV = WGPUAddressMode_ClampToEdge;
   shadow_sampler_.reset(wgpuDeviceCreateSampler(device, &shadow));
 
-  if (!mesh_vertex_ || !mesh_fragment_ || !preview_vertex_ || !preview_fragment_ ||
-      !frame_layout_ || !material_layout_ || !deformation_layout_ || !draw_layout_ ||
-      !mesh_layout_ || !preview_layout_ || !shadow_sampler_) {
+  if (!shaders || !frame_layout_ || !material_layout_ || !deformation_layout_ ||
+      !draw_layout_ || !mesh_layout_ || !surface_layout_ || !shadow_sampler_) {
     detail = "creating the WebGPU scene layouts or shader modules failed";
     return false;
   }
@@ -205,18 +304,30 @@ WGPURenderPipeline ScenePipelines::Get(const Key& key, std::string& detail) {
   for (const auto& [existing, pipeline] : pipelines_) {
     if (existing == key) return pipeline.get();
   }
-  const bool preview = key.kind == Kind::Preview;
-  // Position, normal, UV and tangent, as the Vulkan pipelines' streams; the
+  const Kind kind = key.kind;
+  const bool mesh = kind == Kind::Mesh;
+  const bool outline = kind == Kind::MToonOutline || kind == Kind::MmdOutline;
+  // Position, normal, UV and a fourth stream, as the Vulkan pipelines'
+  // streams: the tangent frame, MMD's sub-texture UV or its edge scale. The
   // unlit mesh reads the position alone.
+  WGPUVertexFormat fourth_format = WGPUVertexFormat_Float32x4;
+  std::uint64_t fourth_stride = sizeof(Float4);
+  if (kind == Kind::Mmd || kind == Kind::MmdTransparent) {
+    fourth_format = WGPUVertexFormat_Float32x2;
+    fourth_stride = sizeof(Float2);
+  } else if (kind == Kind::MmdOutline) {
+    fourth_format = WGPUVertexFormat_Float32;
+    fourth_stride = sizeof(float);
+  }
   const WGPUVertexAttribute attributes[4] = {
       {nullptr, WGPUVertexFormat_Float32x3, 0, 0},
       {nullptr, WGPUVertexFormat_Float32x3, 0, 1},
       {nullptr, WGPUVertexFormat_Float32x2, 0, 2},
-      {nullptr, WGPUVertexFormat_Float32x4, 0, 3},
+      {nullptr, fourth_format, 0, 3},
   };
   WGPUVertexBufferLayout buffers[4]{};
   const std::uint64_t strides[4] = {sizeof(Float3), sizeof(Float3),
-      key.uvs ? sizeof(Float2) : 0U, key.tangents ? sizeof(Float4) : 0U};
+      key.uvs ? sizeof(Float2) : 0U, key.fourth ? fourth_stride : 0U};
   for (std::uint32_t stream = 0; stream < 4; ++stream) {
     buffers[stream].stepMode = WGPUVertexStepMode_Vertex;
     buffers[stream].arrayStride = strides[stream];
@@ -224,19 +335,24 @@ WGPURenderPipeline ScenePipelines::Get(const Key& key, std::string& detail) {
     buffers[stream].attributes = &attributes[stream];
   }
 
+  // Source over: the fragment's alpha blends it over the target, so one
+  // that returns 1 draws as an opaque one would. One fixed PreviewSurface
+  // pipeline blends, its Opaque and Mask returning 1; MToon's and MMD's
+  // opaque surfaces blend nothing, as the Vulkan backend's.
   WGPUBlendState blend{};
   blend.color = {WGPUBlendOperation_Add, WGPUBlendFactor_SrcAlpha,
       WGPUBlendFactor_OneMinusSrcAlpha};
   blend.alpha = {WGPUBlendOperation_Add, WGPUBlendFactor_One,
       WGPUBlendFactor_OneMinusSrcAlpha};
+  const bool blends = kind == Kind::Preview || kind == Kind::MToonTransparent || outline ||
+                      kind == Kind::MmdTransparent;
   WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
   target.format = kColorFormat;
-  // One fixed PreviewSurface pipeline blends: Opaque and Mask return alpha
-  // one, as the Vulkan backend's.
-  target.blend = preview ? &blend : nullptr;
+  target.blend = blends ? &blend : nullptr;
   target.writeMask = WGPUColorWriteMask_All;
+  const Stages& stages = stages_[static_cast<std::size_t>(kind)];
   WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-  fragment.module = preview ? preview_fragment_.get() : mesh_fragment_.get();
+  fragment.module = stages.fragment.get();
   fragment.entryPoint = View("fragment_main");
   fragment.targetCount = 1;
   fragment.targets = &target;
@@ -244,14 +360,25 @@ WGPURenderPipeline ScenePipelines::Get(const Key& key, std::string& detail) {
   WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
   depth.format = kDepthFormat;
   depth.depthWriteEnabled = key.depth_write ? WGPUOptionalBool_True : WGPUOptionalBool_False;
-  depth.depthCompare = WGPUCompareFunction_Less;
+  // MMD's surfaces pass a fragment at the depth already written, as
+  // Direct3D 9's LESSEQUAL, which MMD draws with, does: a model layers its
+  // decals on its face's own vertices.
+  depth.depthCompare = kind == Kind::Mmd || kind == Kind::MmdTransparent
+                           ? WGPUCompareFunction_LessEqual
+                           : WGPUCompareFunction_Less;
+  // A hull is pushed away from the camera by a depth resolution step and
+  // the slope's worth of one, so its surface wins a tie, as on Vulkan.
+  if (outline) {
+    depth.depthBias = 1;
+    depth.depthBiasSlopeScale = 1.0F;
+  }
 
   WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-  descriptor.label = View(preview ? "preview_surface" : "mesh");
-  descriptor.layout = preview ? preview_layout_.get() : mesh_layout_.get();
-  descriptor.vertex.module = preview ? preview_vertex_.get() : mesh_vertex_.get();
+  descriptor.label = View("scene");
+  descriptor.layout = mesh ? mesh_layout_.get() : surface_layout_.get();
+  descriptor.vertex.module = stages.vertex.get();
   descriptor.vertex.entryPoint = View("vertex_main");
-  descriptor.vertex.bufferCount = preview ? 4U : 1U;
+  descriptor.vertex.bufferCount = mesh ? 1U : 4U;
   descriptor.vertex.buffers = buffers;
   descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
   descriptor.primitive.frontFace = key.front;
@@ -267,6 +394,65 @@ WGPURenderPipeline ScenePipelines::Get(const Key& key, std::string& detail) {
   ++created_;
   pipelines_.emplace_back(key, std::move(pipeline));
   return pipelines_.back().second.get();
+}
+
+bool DepthResolve::Initialize(WGPUDevice device, const ShaderSources& sources,
+    std::string& detail) {
+  device_ = device;
+  vertex_ = CreateShader(device, sources.depth_resolve_vertex, "depth_resolve.vert");
+  fragment_ = CreateShader(device, sources.depth_resolve_fragment, "depth_resolve.frag");
+  // Depth32float samples, read by texel as an unfilterable float.
+  WGPUBindGroupLayoutEntry samples = TextureEntry(0, WGPUShaderStage_Fragment,
+      WGPUTextureSampleType_UnfilterableFloat, WGPUTextureViewDimension_2D);
+  samples.texture.multisampled = true;
+  layout_ = CreateLayout(device, {samples}, "depth resolve");
+  pipeline_layout_ = CreatePipelineLayout(device, {layout_.get()}, "depth resolve");
+  WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
+  depth.format = kDepthFormat;
+  depth.depthWriteEnabled = WGPUOptionalBool_True;
+  depth.depthCompare = WGPUCompareFunction_Always;
+  WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+  fragment.module = fragment_.get();
+  fragment.entryPoint = View("fragment_main");
+  WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+  descriptor.label = View("depth resolve");
+  descriptor.layout = pipeline_layout_.get();
+  descriptor.vertex.module = vertex_.get();
+  descriptor.vertex.entryPoint = View("vertex_main");
+  descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+  descriptor.depthStencil = &depth;
+  descriptor.fragment = &fragment;
+  if (vertex_ && fragment_ && layout_ && pipeline_layout_) {
+    pipeline_.reset(wgpuDeviceCreateRenderPipeline(device, &descriptor));
+  }
+  if (!pipeline_) {
+    detail = "creating the WebGPU depth resolve failed";
+    return false;
+  }
+  return true;
+}
+
+bool DepthResolve::Record(WGPUCommandEncoder encoder, WGPUTextureView samples,
+    WGPUTextureView target, std::string& detail) const {
+  BindGroup group = CreateGroup(device_, layout_.get(), {ViewBinding(0, samples)},
+      "depth resolve");
+  if (!group) {
+    detail = "creating the WebGPU depth resolve bind group failed";
+    return false;
+  }
+  WGPURenderPassDepthStencilAttachment depth = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+  depth.view = target;
+  depth.depthLoadOp = WGPULoadOp_Clear;
+  depth.depthStoreOp = WGPUStoreOp_Store;
+  depth.depthClearValue = 1.0F;
+  WGPURenderPassDescriptor pass_descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+  pass_descriptor.depthStencilAttachment = &depth;
+  RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder, &pass_descriptor));
+  wgpuRenderPassEncoderSetPipeline(pass.get(), pipeline_.get());
+  wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, group.get(), 0, nullptr);
+  wgpuRenderPassEncoderDraw(pass.get(), 3, 1, 0, 0);
+  wgpuRenderPassEncoderEnd(pass.get());
+  return true;
 }
 
 bool TextureCache::Initialize(const Gpu& gpu, const ShaderSources& sources,
@@ -294,6 +480,27 @@ bool TextureCache::Initialize(const Gpu& gpu, const ShaderSources& sources,
   layout.rowsPerImage = 1;
   const WGPUExtent3D extent{1, 1, 1};
   wgpuQueueWriteTexture(queue_, &destination, white, sizeof(white), &layout, &extent);
+  // MMD's shared ramps, sampled as stored, as every MMD texture is; their
+  // rows grade in 32 steps, so they take no mipmaps.
+  for (std::uint32_t index = 0; index < kSharedToonRamps; ++index) {
+    const ToonTexture ramp = SharedToonRamp(static_cast<std::int32_t>(index));
+    descriptor.label = View("toon ramp");
+    descriptor.size = {ramp.width, ramp.height, 1};
+    Ramp& resident = ramps_[index];
+    resident.texture.reset(wgpuDeviceCreateTexture(device_, &descriptor));
+    if (!resident.texture) {
+      detail = "creating a shared toon ramp failed";
+      return false;
+    }
+    resident.view.reset(wgpuTextureCreateView(resident.texture.get(), nullptr));
+    resident.serial = ++serial_;
+    destination.texture = resident.texture.get();
+    layout.bytesPerRow = ramp.width * 4U;
+    layout.rowsPerImage = ramp.height;
+    const WGPUExtent3D ramp_extent{ramp.width, ramp.height, 1};
+    wgpuQueueWriteTexture(queue_, &destination, ramp.pixels->data(), ramp.pixels->size(),
+        &layout, &ramp_extent);
+  }
 
   mip_vertex_ = CreateShader(device_, sources.mipmap_vertex, "mipmap.vert");
   mip_fragment_ = CreateShader(device_, sources.mipmap_fragment, "mipmap.frag");
@@ -385,6 +592,21 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
         static_cast<std::size_t>(texture.width) * texture.height * 4U, &layout, &extent);
     if (levels > 1) pending_.push_back({resident.texture.get(), format, levels});
     resident.revision = snapshot.revision;
+    const std::vector<std::uint8_t>& pixels = *texture.pixels;
+    resident.zero_green = true;
+    for (std::size_t pixel = 1; pixel < pixels.size(); pixel += 4) {
+      if (pixels[pixel] != 0) {
+        resident.zero_green = false;
+        break;
+      }
+    }
+    resident.translucent = false;
+    for (std::size_t pixel = 3; pixel < pixels.size(); pixel += 4) {
+      if (pixels[pixel] != 255) {
+        resident.translucent = true;
+        break;
+      }
+    }
     ++uploads_;
   }
   for (auto texture = textures_.begin(); texture != textures_.end();) {
@@ -445,6 +667,28 @@ std::uint64_t TextureCache::SerialOf(TextureId texture) const {
   return found == textures_.end() || !found->second.view ? 0U : found->second.serial;
 }
 
+WGPUTextureView TextureCache::RampView(std::int32_t index) const {
+  return index >= 0 && index < static_cast<std::int32_t>(kSharedToonRamps)
+             ? ramps_[static_cast<std::size_t>(index)].view.get()
+             : white_view_.get();
+}
+
+std::uint64_t TextureCache::RampSerial(std::int32_t index) const {
+  return index >= 0 && index < static_cast<std::int32_t>(kSharedToonRamps)
+             ? ramps_[static_cast<std::size_t>(index)].serial
+             : 0U;
+}
+
+bool TextureCache::ZeroGreen(TextureId texture) const {
+  const auto found = textures_.find(texture);
+  return found != textures_.end() && found->second.view && found->second.zero_green;
+}
+
+bool TextureCache::Translucent(TextureId texture) const {
+  const auto found = textures_.find(texture);
+  return found != textures_.end() && found->second.view && found->second.translucent;
+}
+
 bool MaterialCache::Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
     const TextureCache& textures, std::string& detail) {
   device_ = gpu.device.get();
@@ -469,14 +713,17 @@ bool MaterialCache::Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
                                  : nullptr);
   shadow_views_ = CreateBuffer(device_, sizeof(ShadowViewParameters),
       WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "shadow views");
-  if (!frame_buffer_ || !shadow_view_ || !shadow_views_) {
+  mmd_shadow_ = CreateBuffer(device_, sizeof(MmdShadowParameters),
+      WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "mmd shadow");
+  if (!frame_buffer_ || !shadow_view_ || !shadow_views_ || !mmd_shadow_) {
     detail = "creating the WebGPU frame resources failed";
     return false;
   }
   frame_group_ = CreateGroup(device_, pipelines.frame_layout(),
       {BufferBinding(0, frame_buffer_.get()), ViewBinding(1, shadow_view_.get()),
           BufferBinding(2, shadow_views_.get()),
-          SamplerBinding(3, pipelines.shadow_sampler())},
+          SamplerBinding(3, pipelines.shadow_sampler()),
+          BufferBinding(4, mmd_shadow_.get())},
       "frame");
   return frame_group_ && Reserve(64, detail);
 }
@@ -485,6 +732,8 @@ BindGroup MaterialCache::MaterialGroup(
     const std::array<WGPUTextureView, kTextureRoles>& views,
     const std::array<std::uint32_t, kTextureRoles>& samplers) const {
   std::vector<WGPUBindGroupEntry> entries{
+      BufferBinding(kMToonMaterialsBinding, mtoon_buffer_.get()),
+      BufferBinding(kMmdMaterialsBinding, mmd_buffer_.get()),
       BufferBinding(kPreviewMaterialsBinding, preview_buffer_.get())};
   for (std::uint32_t role = 0; role < kTextureRoles; ++role) {
     entries.push_back(ViewBinding(kFirstRoleTexture + role, views[role]));
@@ -498,10 +747,14 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
     std::string& detail, bool fast_values) {
   if (fast_values) {
     // No shared shadow view is drawn on this backend yet, so no light's
-    // entry names one.
+    // entry names one, and MMD's reading of the first is off; MMD's
+    // parameters still say whether material morphs' tints draw.
     std::array<float, kFrameBytes / sizeof(float)> frame{};
     WriteFrame(draws, nullptr, frame);
     wgpuQueueWriteBuffer(queue_, frame_buffer_.get(), 0, frame.data(), kFrameBytes);
+    MmdShadowParameters mmd{};
+    mmd.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
+    wgpuQueueWriteBuffer(queue_, mmd_shadow_.get(), 0, &mmd, sizeof(mmd));
   }
 
   ++generation_;
@@ -520,59 +773,73 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
     }
     Entry& entry = found->second;
     const ToonMaterial& values = material.material;
-    const ToonTextureRef* refs[kPreviewRoles] = {&values.base_texture,
-        &values.emissive_texture, &values.preview.metallic_texture,
-        &values.preview.roughness_texture, &values.preview.opacity_texture,
-        &values.normal_texture};
-    // A role's entry is 1 when its texture is resident (MaterialEntries).
-    MaterialEntries entries;
-    std::uint32_t* role_entries[kPreviewRoles] = {&entries.base, &entries.emissive,
-        &entries.metallic, &entries.roughness, &entries.opacity, &entries.normal};
-    std::array<WGPUTextureView, kTextureRoles> views;
-    views.fill(white_);
-    std::array<std::uint64_t, kTextureRoles> serials{};
-    std::array<std::uint32_t, kTextureRoles> samplers{};
-    if (values.model == ToonShadingModel::PreviewSurface) {
-      for (std::uint32_t role = 0; role < kPreviewRoles; ++role) {
-        *role_entries[role] = textures.Entry(refs[role]->texture);
-        views[role] = textures.ViewOf(refs[role]->texture);
-        serials[role] = textures.SerialOf(refs[role]->texture);
-        samplers[role] = SamplerIndex(*refs[role]);
-      }
-    }
+    const Roles roles = RolesOf(values, textures, white_);
+    // Pixel edits can change this without changing a material or its
+    // entries; it only decides what is drawn, so no slot is written.
+    entry.zero_width_texture = textures.ZeroGreen(values.mtoon.outline_width_texture.texture);
     if (fast_values && (entry.parameters_revision != material.parameters_revision ||
-                           entry.entries != entries)) {
+                           entry.entries != roles.entries)) {
       const auto write_start = SteadyNanoseconds();
-      PreviewParameters& slot = preview_slots_[entry.slot];
-      slot = {};
-      if (values.model == ToonShadingModel::PreviewSurface) {
-        WriteParameters(values, entries, slot);
+      const auto offset = [&](std::size_t size) {
+        return static_cast<std::uint64_t>(entry.slot) * size;
+      };
+      if (values.model == ToonShadingModel::MMD) {
+        MmdParameters& slot = mmd_slots_[entry.slot];
+        slot = {};
+        WriteParameters(values, roles.entries, slot);
+        wgpuQueueWriteBuffer(queue_, mmd_buffer_.get(), offset(sizeof(slot)), &slot,
+            sizeof(slot));
+      } else if (values.model == ToonShadingModel::PreviewSurface) {
+        PreviewParameters& slot = preview_slots_[entry.slot];
+        slot = {};
+        WriteParameters(values, roles.entries, slot);
+        wgpuQueueWriteBuffer(queue_, preview_buffer_.get(), offset(sizeof(slot)), &slot,
+            sizeof(slot));
+      } else {
+        MToonParameters& slot = mtoon_slots_[entry.slot];
+        slot = {};
+        WriteParameters(values, roles.entries, slot);
+        wgpuQueueWriteBuffer(queue_, mtoon_buffer_.get(), offset(sizeof(slot)), &slot,
+            sizeof(slot));
       }
-      wgpuQueueWriteBuffer(queue_, preview_buffer_.get(),
-          static_cast<std::uint64_t>(entry.slot) * sizeof(PreviewParameters), &slot,
-          sizeof(PreviewParameters));
       entry.parameters_revision = material.parameters_revision;
-      entry.entries = entries;
+      entry.entries = roles.entries;
       entry.model = values.model;
       entry.preview_enabled =
           values.model == ToonShadingModel::PreviewSurface && values.preview.enabled;
       entry.unlit_color = values.base_color;
       entry.double_sided = values.double_sided;
+      entry.outline = HasOutline(values);
+      entry.outline_width = values.outline_width;
+      entry.outline_width_mode = values.mtoon.outline_width_mode;
       entry.transparent = IsTransparent(values);
       entry.queue = RenderQueue(values);
       entry.depth_write = WritesDepth(values);
+      entry.draw_order = values.mmd.draw_order;
+      entry.mmd_translucent = values.alpha < 1.0F;
       ++writes_;
       parameter_write_ms_ += static_cast<double>(SteadyNanoseconds() - write_start) / 1e6;
+    }
+    // Whether an MMD material can blend follows its textures' pixels as
+    // well as its diffuse alpha, so it is decided every frame, as on
+    // Vulkan; one that cannot blend draws with the opaque ones.
+    if (entry.model == ToonShadingModel::MMD) {
+      entry.transparent = entry.mmd_translucent ||
+                          textures.Translucent(values.base_texture.texture) ||
+                          (SphereMode(values) != kSphereNone &&
+                              textures.Translucent(values.mmd.sphere_texture.texture));
+      entry.queue = 3000;
+      entry.depth_write = true;
     }
     // A bind group holds views and samplers, so a texture that becomes
     // resident, leaves or is reallocated, a wrap edit, or a grown buffer
     // rebuilds it; a value edit does not. Views are compared by serial: a
     // reallocated texture's new view may reuse the old one's address.
-    if (!entry.group || entry.views != serials || entry.samplers != samplers ||
+    if (!entry.group || entry.views != roles.serials || entry.samplers != roles.samplers ||
         entry.buffer_generation != buffer_generation_) {
-      entry.group = MaterialGroup(views, samplers);
-      entry.views = serials;
-      entry.samplers = samplers;
+      entry.group = MaterialGroup(roles.views, roles.samplers);
+      entry.views = roles.serials;
+      entry.samplers = roles.samplers;
       entry.buffer_generation = buffer_generation_;
       if (!entry.group) {
         detail = "creating a WebGPU material bind group failed";
@@ -600,17 +867,24 @@ const MaterialCache::Entry* MaterialCache::Find(MaterialId material) const {
 bool MaterialCache::Reserve(std::uint32_t slots, std::string& detail) {
   // A grown buffer is a new one with every slot copied, so growing
   // rewrites no material but rebuilds every material's bind group.
-  Buffer grown = CreateBuffer(device_,
-      static_cast<std::uint64_t>(slots) * sizeof(PreviewParameters),
-      WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "preview materials");
-  if (!grown) {
-    detail = "creating the WebGPU material buffer failed";
+  const auto grow = [&](Buffer& buffer, auto& copies, const char* label) {
+    using Slot = typename std::remove_reference_t<decltype(copies)>::value_type;
+    Buffer grown = CreateBuffer(device_, static_cast<std::uint64_t>(slots) * sizeof(Slot),
+        WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, label);
+    if (!grown) {
+      detail = "creating the WebGPU material buffers failed";
+      return false;
+    }
+    copies.resize(slots);
+    wgpuQueueWriteBuffer(queue_, grown.get(), 0, copies.data(), copies.size() * sizeof(Slot));
+    buffer = std::move(grown);
+    return true;
+  };
+  if (!grow(mtoon_buffer_, mtoon_slots_, "mtoon materials") ||
+      !grow(mmd_buffer_, mmd_slots_, "mmd materials") ||
+      !grow(preview_buffer_, preview_slots_, "preview materials")) {
     return false;
   }
-  preview_slots_.resize(slots);
-  wgpuQueueWriteBuffer(queue_, grown.get(), 0, preview_slots_.data(),
-      preview_slots_.size() * sizeof(PreviewParameters));
-  preview_buffer_ = std::move(grown);
   ++buffer_generation_;
   capacity_ = slots;
   std::array<WGPUTextureView, kTextureRoles> views;
@@ -633,12 +907,16 @@ bool MeshCache::Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
       WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst, "zero tangent");
   zero_skin_ = CreateBuffer(device_, sizeof(identity),
       WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "zero skin");
-  if (!zero_uv_ || !zero_tangent_ || !zero_skin_) {
+  const float unit = 1.0F;
+  unit_edge_scale_ = CreateBuffer(device_, sizeof(unit),
+      WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst, "unit edge scale");
+  if (!zero_uv_ || !zero_tangent_ || !zero_skin_ || !unit_edge_scale_) {
     detail = "creating the WebGPU mesh fallbacks failed";
     return false;
   }
   wgpuQueueWriteBuffer(queue_, zero_uv_.get(), 0, &zero_uv, sizeof(zero_uv));
   wgpuQueueWriteBuffer(queue_, zero_tangent_.get(), 0, &zero_tangent, sizeof(zero_tangent));
+  wgpuQueueWriteBuffer(queue_, unit_edge_scale_.get(), 0, &unit, sizeof(unit));
   wgpuQueueWriteBuffer(queue_, zero_skin_.get(), 0, &identity, sizeof(identity));
   std::vector<WGPUBindGroupEntry> entries;
   for (std::uint32_t binding = 0; binding < 5; ++binding) {
@@ -681,6 +959,7 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail, bool fast_val
   };
   for (const MeshSnapshot& mesh : draws.draws) {
     Entry& entry = entries_[mesh.id];
+    entry.outline_bounds.Update(mesh);
     if (entry.topology_revision != mesh.topology_revision) {
       if (!Upload(entry.indices, WGPUBufferUsage_Index, mesh.indices->data(),
               mesh.indices->size() * sizeof(std::uint32_t))) {
@@ -724,6 +1003,30 @@ bool MeshCache::Update(const DrawList& draws, std::string& detail, bool fast_val
       entry.tangents_revision = mesh.tangents_revision;
     }
     entry.has_tangents = tangents_present && mesh.tangents->size() >= mesh.index_bound;
+    // MMD's edge scales and sub-texture UVs, counted with the points as
+    // the normals and UVs are.
+    const bool edge_scales_present = mesh.edge_scales != nullptr && !mesh.edge_scales->empty();
+    if (entry.edge_scales_revision != mesh.edge_scales_revision) {
+      if (edge_scales_present &&
+          !Upload(entry.edge_scales, WGPUBufferUsage_Vertex, mesh.edge_scales->data(),
+              mesh.edge_scales->size() * sizeof(float))) {
+        return fail();
+      }
+      entry.edge_scales_revision = mesh.edge_scales_revision;
+    }
+    entry.has_edge_scales = edge_scales_present && mesh.edge_scales->size() >= mesh.index_bound;
+    const bool sub_texture_uvs_present =
+        mesh.sub_texture_uvs != nullptr && !mesh.sub_texture_uvs->empty();
+    if (entry.sub_texture_uvs_revision != mesh.sub_texture_uvs_revision) {
+      if (sub_texture_uvs_present &&
+          !Upload(entry.sub_texture_uvs, WGPUBufferUsage_Vertex, mesh.sub_texture_uvs->data(),
+              mesh.sub_texture_uvs->size() * sizeof(Float2))) {
+        return fail();
+      }
+      entry.sub_texture_uvs_revision = mesh.sub_texture_uvs_revision;
+    }
+    entry.has_sub_texture_uvs =
+        sub_texture_uvs_present && mesh.sub_texture_uvs->size() >= mesh.index_bound;
     if (!UpdateDeformation(mesh, entry, fast_values)) return fail();
     entry.generation = generation_;
   }
@@ -836,40 +1139,42 @@ std::size_t MeshCache::DrawBound(const DrawList& draws) {
   for (const MeshSnapshot& mesh : draws.draws) {
     bound += mesh.parts != nullptr && !mesh.parts->empty() ? mesh.parts->size() : 1U;
   }
-  return bound;
-}
-
-bool MeshCache::Supported(const DrawList& draws, const MaterialCache& materials,
-    std::string& detail) {
-  for (const MeshSnapshot& mesh : draws.draws) {
-    MeshPart whole;
-    const std::uint32_t count =
-        mesh.indices != nullptr ? static_cast<std::uint32_t>(mesh.indices->size()) : 0U;
-    for (const MeshPart& part : PartsOf(mesh, count, whole)) {
-      const MaterialCache::Entry* material = materials.Find(part.material);
-      if (material != nullptr && (material->model == ToonShadingModel::MToon ||
-                                     material->model == ToonShadingModel::MMD)) {
-        detail = "the WebGPU backend draws MToon and MMD materials from stage 2 "
-                 "of v0.7.0 (WebGPU policy §10)";
-        return false;
-      }
-    }
-  }
-  return true;
+  return bound * 3U;
 }
 
 bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
-    const MaterialCache& materials, const DrawList& draws, WGPUBindGroup ring,
-    std::vector<std::uint8_t>& constants, SceneRecord& record, std::string& detail) {
+    const MaterialCache& materials, const DrawList& draws, std::uint32_t width,
+    std::uint32_t height, WGPUBindGroup ring, std::vector<std::uint8_t>& constants,
+    SceneRecord& record, std::string& detail) {
+  using Kind = ScenePipelines::Kind;
   const Matrix4 clip_from_world = WebGpuClipFromWorld(draws.view);
+  // Missing bindings use a rough dielectric with per-draw display colour.
+  // This entry is local: no per-mesh material, slot or texture is allocated.
   MaterialCache::Entry display_material;
   display_material.preview_enabled = true;
   display_material.double_sided = true;
+  // Readable materials use their model; bound diagnostic materials stay unlit.
   const auto surface_material =
       [&](const MeshPart& part) -> const MaterialCache::Entry* {
     const MaterialCache::Entry* material = materials.Find(part.material);
     if (material == nullptr) return &display_material;
-    return material->preview_enabled ? material : nullptr;
+    return (material->model == ToonShadingModel::MToon ||
+               material->model == ToonShadingModel::MMD || material->preview_enabled)
+               ? material
+               : nullptr;
+  };
+  MeshPart whole;
+  if (draws.outlines && draws.outline_occlusion_culling) {
+    outline_occlusion_.Update(draws, width, height);
+  }
+  const auto hidden_outline = [&](const MeshSnapshot& mesh, const Entry& entry,
+                                  const MaterialCache::Entry& material) {
+    return (draws.outline_frustum_culling &&
+               entry.outline_bounds.OutsideView(mesh, draws.view, material.outline_width,
+                   material.outline_width_mode, draws.meters_per_unit)) ||
+           (draws.outline_occlusion_culling &&
+               outline_occlusion_.Occludes(mesh, entry.outline_bounds, draws.view,
+                   material.outline_width, material.outline_width_mode, draws.meters_per_unit));
   };
   std::uint32_t draw_count = 0;
   const auto push = [&](const void* data, std::size_t size) {
@@ -889,7 +1194,6 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
     }
     return true;
   };
-  MeshPart whole;
 
   // The unlit draws: bound diagnostic materials' own colour.
   for (const MeshSnapshot& mesh : draws.draws) {
@@ -904,8 +1208,7 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
     draw.flags = entry.skin_flags;
     for (const MeshPart& part : parts) {
       if (surface_material(part) != nullptr || !Fits(part, entry.index_count)) continue;
-      if (!bind({ScenePipelines::Kind::Mesh, WGPUCullMode_None, WGPUFrontFace_CCW, true,
-              true, true})) {
+      if (!bind({Kind::Mesh, WGPUCullMode_None, WGPUFrontFace_CCW, true, true, true})) {
         return false;
       }
       const auto* material = materials.Find(part.material);
@@ -932,9 +1235,28 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
 
   const float projection_scale = std::fabs(draws.view.projection.m[5]);
   const float units_per_meter = 1.0F / draws.meters_per_unit;
+  // A perspective projection puts -z into w; an orthographic one keeps w 1.
   const bool orthographic = draws.view.projection.m[11] == 0.0F;
-  const auto draw_surface = [&](const MeshSnapshot& mesh, const Entry& entry,
-                                const MeshPart& part, const MaterialCache::Entry& material) {
+  // Multisampled, mtoon_opaque turns its alpha into samples, through
+  // MToonCoverage's sample mask.
+  const bool multisampled = pipelines.samples() > 1;
+  const auto draw_surface = [&](Kind kind, const MeshSnapshot& mesh, const Entry& entry,
+                                const MeshPart& part, const MaterialCache::Entry& material,
+                                WGPUCullMode cull) {
+    if (kind == Kind::MToon && multisampled) kind = Kind::MToonCoverage;
+    const bool edge = kind == Kind::MmdOutline;
+    const bool mmd_surface = kind == Kind::Mmd || kind == Kind::MmdTransparent;
+    // The fourth stream: MMD's edge scale or sub-texture UV, or a tangent
+    // frame.
+    WGPUBuffer fourth = entry.has_tangents ? entry.tangents.buffer.get() : zero_tangent_.get();
+    bool has_fourth = entry.has_tangents;
+    if (edge) {
+      fourth = entry.has_edge_scales ? entry.edge_scales.buffer.get() : unit_edge_scale_.get();
+      has_fourth = entry.has_edge_scales;
+    } else if (mmd_surface) {
+      fourth = entry.has_sub_texture_uvs ? entry.sub_texture_uvs.buffer.get() : zero_uv_.get();
+      has_fourth = entry.has_sub_texture_uvs;
+    }
     SurfaceDrawConstants draw{};
     const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
     std::memcpy(draw.clip_from_object, clip_from_object.m.data(), sizeof(draw.clip_from_object));
@@ -942,7 +1264,8 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
         ViewRows(Multiply(draws.view.view, mesh.transform), draw.view_from_object_rows);
     draw.material_slot = material.slot;
     draw.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | (orthographic ? kDrawOrthographic : 0U) |
-                 (material.transparent ? kDrawBlend : 0U) | entry.skin_flags;
+                 (material.transparent ? kDrawBlend : 0U) |
+                 (kind == Kind::MToonCoverage ? kDrawAlphaToCoverage : 0U) | entry.skin_flags;
     draw.projection_scale = projection_scale;
     draw.outline_scale = units_per_meter;
     const bool display = &material == &display_material;
@@ -952,10 +1275,8 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
       draw.projection_scale = mesh.color.y;
       draw.outline_scale = mesh.color.z;
     }
-    if (!bind({ScenePipelines::Kind::Preview,
-            material.double_sided ? WGPUCullMode_None : WGPUCullMode_Back,
-            mirrored ? WGPUFrontFace_CW : WGPUFrontFace_CCW, material.depth_write,
-            entry.has_uvs, entry.has_tangents})) {
+    if (!bind({kind, cull, mirrored ? WGPUFrontFace_CW : WGPUFrontFace_CCW,
+            material.depth_write, entry.has_uvs, has_fourth})) {
       return false;
     }
     const std::uint32_t offset = push(&draw, sizeof(draw));
@@ -972,44 +1293,78 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
         WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderSetVertexBuffer(pass, 2,
         entry.has_uvs ? entry.uvs.buffer.get() : zero_uv_.get(), 0, WGPU_WHOLE_SIZE);
-    wgpuRenderPassEncoderSetVertexBuffer(pass, 3,
-        entry.has_tangents ? entry.tangents.buffer.get() : zero_tangent_.get(), 0,
-        WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetVertexBuffer(pass, 3, fourth, 0, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderSetIndexBuffer(pass, entry.indices.buffer.get(),
         WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderDrawIndexed(pass, part.index_count, 1, part.first_index, 0, 0);
     record.triangles += part.index_count / 3U;
     return true;
   };
+  const auto faces = [](const MaterialCache::Entry& material) {
+    return material.double_sided ? WGPUCullMode_None : WGPUCullMode_Back;
+  };
 
-  // The opaque surfaces, then the transparent ones in the Vulkan backend's
-  // order: by render queue, then mesh, then part.
+  // The opaque pass, Mask included: every hull, then every surface. The
+  // hull culls its front faces whether or not the material is double-sided,
+  // as MToon states. An MMD surface that cannot blend draws here too.
   transparent_scratch_.clear();
-  for (std::size_t index = 0; index < draws.draws.size(); ++index) {
-    const MeshSnapshot& mesh = draws.draws[index];
-    const auto found = entries_.find(mesh.id);
-    if (found == entries_.end()) continue;
-    const Entry& entry = found->second;
-    const auto parts = PartsOf(mesh, entry.index_count, whole);
-    for (std::size_t at = 0; at < parts.size(); ++at) {
-      const MeshPart& part = parts[at];
-      const MaterialCache::Entry* material = surface_material(part);
-      if (material == nullptr || !Fits(part, entry.index_count)) continue;
-      if (material->transparent) {
-        transparent_scratch_.emplace_back(index, at);
-        continue;
+  for (const bool outline : {true, false}) {
+    for (std::size_t index = 0; index < draws.draws.size(); ++index) {
+      const MeshSnapshot& mesh = draws.draws[index];
+      const auto found = entries_.find(mesh.id);
+      if (found == entries_.end()) continue;
+      const Entry& entry = found->second;
+      const auto parts = PartsOf(mesh, entry.index_count, whole);
+      for (std::size_t at = 0; at < parts.size(); ++at) {
+        const MeshPart& part = parts[at];
+        const MaterialCache::Entry* material = surface_material(part);
+        if (material == nullptr || !Fits(part, entry.index_count)) continue;
+        if (material->transparent) {
+          if (!outline) transparent_scratch_.emplace_back(index, at);
+          continue;
+        }
+        if (material->model == ToonShadingModel::MMD || material->preview_enabled) {
+          if (!outline) {
+            if (!draw_surface(material->preview_enabled ? Kind::Preview : Kind::Mmd, mesh,
+                    entry, part, *material, faces(*material))) {
+              return false;
+            }
+            ++record.opaque;
+          }
+          continue;
+        }
+        if (outline && (!draws.outlines || !material->outline ||
+                           (entry.has_uvs && material->zero_width_texture) ||
+                           hidden_outline(mesh, entry, *material))) {
+          continue;
+        }
+        if (!draw_surface(outline ? Kind::MToonOutline : Kind::MToon, mesh, entry, part,
+                *material, outline ? WGPUCullMode_Front : faces(*material))) {
+          return false;
+        }
+        ++(outline ? record.outline : record.opaque);
+        record.hulls += outline ? 1U : 0U;
       }
-      if (!draw_surface(mesh, entry, part, *material)) return false;
-      ++record.opaque;
     }
   }
+
+  // The transparent pass, back to front by render queue and, within one
+  // queue, in the order `draws` lists them, an MMD mesh's parts in MMD's
+  // material order. A double-sided MToon surface draws its back faces
+  // before its front ones, and its hull follows it; an MMD surface draws
+  // once, both sides together when double-sided, as on Vulkan. `whole`
+  // stands in for a mesh without parts, so the part is copied before the
+  // next lookup reuses it.
   const auto transparent_part = [&](const std::pair<std::size_t, std::size_t>& draw) {
     const MeshSnapshot& mesh = draws.draws[draw.first];
     return PartsOf(mesh, entries_.find(mesh.id)->second.index_count, whole)[draw.second];
   };
   const auto transparent_key = [&](const std::pair<std::size_t, std::size_t>& draw) {
-    return std::make_tuple(surface_material(transparent_part(draw))->queue, draw.first,
-        static_cast<std::int64_t>(draw.second));
+    const MaterialCache::Entry& material = *surface_material(transparent_part(draw));
+    const std::int64_t place = material.model == ToonShadingModel::MMD
+                                   ? material.draw_order
+                                   : static_cast<std::int64_t>(draw.second);
+    return std::make_tuple(material.queue, draw.first, place);
   };
   std::stable_sort(transparent_scratch_.begin(), transparent_scratch_.end(),
       [&](const auto& left, const auto& right) {
@@ -1019,8 +1374,68 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
     const MeshSnapshot& mesh = draws.draws[draw.first];
     const Entry& entry = entries_.find(mesh.id)->second;
     const MeshPart part = transparent_part(draw);
-    if (!draw_surface(mesh, entry, part, *surface_material(part))) return false;
+    const MaterialCache::Entry& material = *surface_material(part);
+    if (material.model == ToonShadingModel::MMD || material.preview_enabled) {
+      if (!draw_surface(material.preview_enabled ? Kind::Preview : Kind::MmdTransparent, mesh,
+              entry, part, material, faces(material))) {
+        return false;
+      }
+      ++record.transparent;
+      continue;
+    }
+    if (material.double_sided) {
+      if (!draw_surface(Kind::MToonTransparent, mesh, entry, part, material,
+              WGPUCullMode_Front)) {
+        return false;
+      }
+      ++record.transparent;
+    }
+    if (!draw_surface(Kind::MToonTransparent, mesh, entry, part, material, WGPUCullMode_Back)) {
+      return false;
+    }
     ++record.transparent;
+    if (draws.outlines && material.outline &&
+        (!entry.has_uvs || !material.zero_width_texture) &&
+        !hidden_outline(mesh, entry, material)) {
+      if (!draw_surface(Kind::MToonOutline, mesh, entry, part, material, WGPUCullMode_Front)) {
+        return false;
+      }
+      ++record.transparent;
+      ++record.hulls;
+    }
+  }
+
+  // MMD's edges, after every surface, each mesh's in MMD's material order.
+  // The hull culls its front faces, double-sided or not.
+  if (!draws.outlines) return true;
+  transparent_scratch_.clear();
+  for (std::size_t index = 0; index < draws.draws.size(); ++index) {
+    const MeshSnapshot& mesh = draws.draws[index];
+    const auto found = entries_.find(mesh.id);
+    if (found == entries_.end()) continue;
+    const auto parts = PartsOf(mesh, found->second.index_count, whole);
+    for (std::size_t at = 0; at < parts.size(); ++at) {
+      const MaterialCache::Entry* material = surface_material(parts[at]);
+      if (material != nullptr && material->model == ToonShadingModel::MMD &&
+          material->outline && Fits(parts[at], found->second.index_count)) {
+        transparent_scratch_.emplace_back(index, at);
+      }
+    }
+  }
+  const auto edge_key = [&](const std::pair<std::size_t, std::size_t>& draw) {
+    return std::make_pair(draw.first, surface_material(transparent_part(draw))->draw_order);
+  };
+  std::stable_sort(transparent_scratch_.begin(), transparent_scratch_.end(),
+      [&](const auto& left, const auto& right) { return edge_key(left) < edge_key(right); });
+  for (const auto& draw : transparent_scratch_) {
+    const MeshSnapshot& mesh = draws.draws[draw.first];
+    const MeshPart part = transparent_part(draw);
+    if (!draw_surface(Kind::MmdOutline, mesh, entries_.find(mesh.id)->second, part,
+            *surface_material(part), WGPUCullMode_Front)) {
+      return false;
+    }
+    ++record.transparent;
+    ++record.hulls;
   }
   return true;
 }

@@ -13,6 +13,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -42,6 +43,28 @@ struct Check {
   std::string id;
   std::string status;
   std::string detail;
+};
+
+// What a check renders with: a backend's offscreen renderer, so the same
+// checks run on Vulkan and on WebGPU (WebGPU policy §8). The Vulkan backend
+// creates its pipelines with the renderer; the WebGPU backend creates each
+// state combination the first time a draw needs it, so an edit that first
+// needs one creates it, once (WebGPU policy §4).
+class RendererFactory {
+public:
+  using Create = std::function<std::unique_ptr<Toon::OffscreenRenderer>(
+      Toon::FrameStatus&, std::string&, const Toon::RenderOptions&)>;
+  explicit RendererFactory(Create create, bool pipelines_on_demand = false)
+      : create_(std::move(create)), pipelines_on_demand_(pipelines_on_demand) {}
+  std::unique_ptr<Toon::OffscreenRenderer> operator()(Toon::FrameStatus& status,
+      std::string& detail, const Toon::RenderOptions& options = {}) const {
+    return create_(status, detail, options);
+  }
+  [[nodiscard]] bool pipelines_on_demand() const { return pipelines_on_demand_; }
+
+private:
+  Create create_;
+  bool pipelines_on_demand_ = false;
 };
 
 std::string Escape(std::string_view value) {
@@ -158,11 +181,11 @@ std::array<std::uint8_t, 4> CenterPixel(const Toon::ColorProduct& color) {
 }
 
 // Scene lights, attenuation, material debug, and value-only frame updates.
-Check SceneLightsCheck(const Toon::SceneShaders& shaders) {
+Check SceneLightsCheck(const RendererFactory& create) {
   const std::string id = "renderer.lighting.scene";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (!renderer)
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   Toon::RenderWorld world;
@@ -351,11 +374,11 @@ Check SceneLightsCheck(const Toon::SceneShaders& shaders) {
 // MToon material whose lit colour is red and shade colour blue. Facing the
 // key light it draws lit; a shading shift of -1, a value-only edit, turns it
 // to shade by rewriting one parameter slot, with no pipeline and no upload.
-Check MToonOpaqueCheck(const Toon::SceneShaders& shaders) {
+Check MToonOpaqueCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_opaque";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -416,11 +439,11 @@ Check MToonOpaqueCheck(const Toon::SceneShaders& shaders) {
 // (0.5, 0), a value-only edit, moves the lit side to green with no upload;
 // the same texture as the shade texture, lit fully from behind by a shading
 // shift of -1 and offset (0, 0.5), draws blue without a second upload.
-Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
+Check MToonTexturedCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_textured";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -504,11 +527,11 @@ Check MToonTexturedCheck(const Toon::SceneShaders& shaders) {
 
 // The remaining MToon surface inputs and UV animation, using texel centres
 // so image comparisons test semantics rather than filtering thresholds.
-Check MToonRestCheck(const Toon::SceneShaders& shaders) {
+Check MToonRestCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_rest";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (!renderer) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -755,11 +778,11 @@ Check MToonRestCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", "emission, linear shift, transformed B mask and timed UVs; time rewrites no material"};
 }
 
-Check MToonNormalCheck(const Toon::SceneShaders& shaders) {
+Check MToonNormalCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_normal";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (!renderer) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -935,11 +958,11 @@ Toon::MeshId AddOctahedron(Toon::RenderWorld& world) {
 // 0.2 under this camera whatever the unit; a width texture whose G is 0,
 // sampled in the vertex stage, takes the outline away again. Last, a hull
 // at its surface's depth must lose to the surface.
-Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
+Check MToonOutlineCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_outline";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -1129,11 +1152,11 @@ Check MToonOutlineCheck(const Toon::SceneShaders& shaders) {
 // Width sampling uses linear G at mip 0 and the role's UV transform. Pixel
 // changes affect hull omission without rewriting a material slot; no UVs
 // and missing images use white, just as the shader does.
-Check OutlineSamplingCheck(const Toon::SceneShaders& shaders) {
+Check OutlineSamplingCheck(const RendererFactory& create) {
   const std::string id = "renderer.outline.sampling";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (!renderer) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -1266,11 +1289,11 @@ Check OutlineSamplingCheck(const Toon::SceneShaders& shaders) {
 // Perspective distance changes a world's projected width, but not a screen
 // ratio. Compensated object scale and orthographic zoom leave screen width
 // alone as well, including a mirrored transform.
-Check OutlineWidthCheck(const Toon::SceneShaders& shaders) {
+Check OutlineWidthCheck(const RendererFactory& create) {
   const std::string id = "renderer.outline.width";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (!renderer) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -1360,7 +1383,7 @@ Check OutlineWidthCheck(const Toon::SceneShaders& shaders) {
 // Measure a subpixel hull under GPU skinning, separating its coverage from
 // the moving surface with the evaluation switch. Repeating a pose must be
 // pixel-identical; pose edits must leave geometry and materials resident.
-Check OutlineMotionCheck(const Toon::SceneShaders& shaders) {
+Check OutlineMotionCheck(const RendererFactory& create) {
   const std::string id = "renderer.outline.motion";
   std::string detail;
   struct Result {
@@ -1372,7 +1395,7 @@ Check OutlineMotionCheck(const Toon::SceneShaders& shaders) {
     Toon::FrameStatus status = Toon::FrameStatus::Fail;
     Toon::RenderOptions options;
     options.samples = samples;
-    auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+    auto renderer = create(status, detail, options);
     if (!renderer) {
       return false;
     }
@@ -1458,11 +1481,11 @@ Check OutlineMotionCheck(const Toon::SceneShaders& shaders) {
                                                                                                                                                                                                                                                                                                                                                                                                                                     "65 pose writes and one geometry/skin/material upload"};
 }
 
-Check OutlineFrustumCheck(const Toon::SceneShaders& shaders) {
+Check OutlineFrustumCheck(const RendererFactory& create) {
   const std::string id = "renderer.outline.frustum";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (!renderer)
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   Toon::RenderWorld world;
@@ -1552,7 +1575,7 @@ Check OutlineFrustumCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", "240 animated side-plane poses in Opaque/Mask/Blend, world/screen widths and perspective/orthographic views: identical colour/depth to unculled draws, 48 hull omissions, visible boundary silhouettes; one geometry/skin upload"};
 }
 
-Check OutlineDepthClipCheck(const Toon::SceneShaders& shaders) {
+Check OutlineDepthClipCheck(const RendererFactory& create) {
   const std::string id = "renderer.outline.depth_clip";
   std::string detail;
   unsigned omitted = 0;
@@ -1561,7 +1584,7 @@ Check OutlineDepthClipCheck(const Toon::SceneShaders& shaders) {
     Toon::FrameStatus status = Toon::FrameStatus::Fail;
     Toon::RenderOptions options;
     options.samples = samples;
-    auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+    auto renderer = create(status, detail, options);
     if (!renderer)
       return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
     Toon::RenderWorld world;
@@ -1660,7 +1683,7 @@ Check OutlineDepthClipCheck(const Toon::SceneShaders& shaders) {
   return {id, "pass", "384 animated near/far-plane poses at 1x/4x, Opaque/Mask/Blend with and without depth writes, world/screen widths and perspective/orthographic views: identical colour/depth, 64 hull omissions and returning boundary silhouettes; pose-only updates, clean Vulkan validation"};
 }
 
-Check OutlineOcclusionCheck(const Toon::SceneShaders& shaders) {
+Check OutlineOcclusionCheck(const RendererFactory& create) {
   const std::string id = "renderer.outline.occlusion";
   std::string detail;
   unsigned comparisons = 0, omissions = 0, visible = 0;
@@ -1668,7 +1691,7 @@ Check OutlineOcclusionCheck(const Toon::SceneShaders& shaders) {
     Toon::FrameStatus status = Toon::FrameStatus::Fail;
     Toon::RenderOptions options;
     options.samples = samples;
-    auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+    auto renderer = create(status, detail, options);
     if (!renderer)
       return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
     Toon::RenderWorld world;
@@ -1801,11 +1824,11 @@ Check OutlineOcclusionCheck(const Toon::SceneShaders& shaders) {
 // red up and to the left. A matcapFactor of 0.5 mixed fully with the
 // stand-in light, 1 + 0.25 ambient, is a value-only edit to 0.625; a black
 // rim multiply texture takes the rim away.
-Check MToonRimCheck(const Toon::SceneShaders& shaders) {
+Check MToonRimCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_rim";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -1976,11 +1999,11 @@ Toon::MeshId AddTriangle(Toon::RenderWorld& world, float z) {
 // the blue, samples green draws its back faces first. An outlined Blend
 // octahedron with transparentWithZWrite blends its green hull at the rim
 // and hides the hull's far side behind its surface.
-Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
+Check MToonTransparentCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mtoon_transparent";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -2125,6 +2148,16 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
 
   const Toon::OffscreenStatistics& first = over_opaque.statistics;
   const Toon::OffscreenStatistics& last = outlined.statistics;
+  // Created on demand, a combination's pipeline is created once: a render
+  // queue edit creates none, and the last frame again creates none.
+  Shot again;
+  if (create.pipelines_on_demand() && !render(again)) {
+    return {id, "fail", detail};
+  }
+  const bool pipelines_kept = create.pipelines_on_demand()
+      ? offset.statistics.pipelines_created == in_order.statistics.pipelines_created &&
+            again.statistics.pipelines_created == last.pipelines_created
+      : last.pipelines_created == first.pipelines_created;
   if (last.validation_message_count != 0) {
     return {id, "fail", last.validation_detail};
   }
@@ -2182,8 +2215,7 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
   if (after.material_writes != before.material_writes + 2U ||
       after.point_uploads != before.point_uploads ||
       after.topology_uploads != before.topology_uploads ||
-      after.texture_uploads != before.texture_uploads ||
-      last.pipelines_created != first.pipelines_created) {
+      after.texture_uploads != before.texture_uploads || !pipelines_kept) {
     return {id, "fail",
         "a render queue or depth write edit must rewrite one slot and "
         "nothing else"};
@@ -2212,11 +2244,11 @@ Check MToonTransparentCheck(const Toon::SceneShaders& shaders) {
 // rewrites one slot and nothing else. Last, a material drawn on an earlier
 // one's vertices passes the depth test MMD's LESSEQUAL passes: green over
 // red when opaque, half of each at alpha 0.5.
-Check MmdCheck(const Toon::SceneShaders& shaders) {
+Check MmdCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mmd";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -2455,11 +2487,11 @@ Check MmdCheck(const Toon::SceneShaders& shaders) {
 // 34 and by 0 is white. Without the switch, as MMD draws, none of those
 // tints changes the pixel, and turning it off or on rewrites no slot.
 // Last, a tint edit rewrites one slot and nothing else.
-Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
+Check MmdMorphCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mmd_morph";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -2650,11 +2682,11 @@ Check MmdMorphCheck(const Toon::SceneShaders& shaders) {
 // rewrites one slot and nothing else. Last, under a perspective camera an
 // edge of size 40 is as many pixels wide at twice the zoom, and narrower
 // from four times as far, zoomed to keep the diamond's size (MAT-Q4).
-Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
+Check MmdOutlineCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mmd_outline";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -2816,11 +2848,11 @@ Check MmdOutlineCheck(const Toon::SceneShaders& shaders) {
 // shadow itself. MMD's switch off, a wall that does not receive, a square
 // that does not cast, or a point light as the first direct light each
 // leave the centre as lit as the rest of the wall.
-Check MmdSelfShadowCheck(const Toon::SceneShaders& shaders) {
+Check MmdSelfShadowCheck(const RendererFactory& create) {
   const std::string id = "renderer.material.mmd_self_shadow";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -2947,11 +2979,11 @@ Check MmdSelfShadowCheck(const Toon::SceneShaders& shaders) {
 // faces it draws: turned from the light it casts nothing, and mirrored or
 // double-sided it casts. An unbound square casts, and a skinned one casts
 // where its pose puts it, the pose writing no geometry.
-Check SharedCastersCheck(const Toon::SceneShaders& shaders) {
+Check SharedCastersCheck(const RendererFactory& create) {
   const std::string id = "renderer.shadow.shared_casters";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -3164,11 +3196,11 @@ Check SharedCastersCheck(const Toon::SceneShaders& shaders) {
 // shadows off, MMD's self-shadow off, or the light's shadow off, each as
 // it should; a square moved into place by a morph casts there, its weight
 // writing no geometry.
-Check ShadowReceiversCheck(const Toon::SceneShaders& shaders) {
+Check ShadowReceiversCheck(const RendererFactory& create) {
   const std::string id = "renderer.shadow.receivers";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -3319,11 +3351,11 @@ Check ShadowReceiversCheck(const Toon::SceneShaders& shaders) {
 // the image; the depth bias setting lifts the shadow of a square raised
 // only 0.05; five lights give four views and one counted without; the
 // material debug view shows each receiver's visibility, MToon's and MMD's.
-Check ShadowViewsCheck(const Toon::SceneShaders& shaders) {
+Check ShadowViewsCheck(const RendererFactory& create) {
   const std::string id = "renderer.shadow.views";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -3518,11 +3550,11 @@ Check ShadowViewsCheck(const Toon::SceneShaders& shaders) {
 // in the shadow by at least 40 levels. A wall with its own raised flap, one
 // mesh of each family, shadows itself. After the first frame the whole
 // matrix writes poses, weights and materials and uploads no geometry.
-Check CrossFamilyShadowCheck(const Toon::SceneShaders& shaders) {
+Check CrossFamilyShadowCheck(const RendererFactory& create) {
   const std::string id = "renderer.shadow.cross_family";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -3759,16 +3791,16 @@ Check CrossFamilyShadowCheck(const Toon::SceneShaders& shaders) {
 // alpha rises from 0 to 1 across the diagonal x + y = 0, where it crosses
 // the cutoff: the cut is a hard step at 1 sample and, by alpha to coverage,
 // a mixture along the diagonal multisampled.
-Check AntiAliasingCheck(const Toon::SceneShaders& shaders) {
+Check AntiAliasingCheck(const RendererFactory& create) {
   const std::string id = "renderer.antialiasing.msaa";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto single = Toon::CreateOffscreenRenderer(shaders, status, detail,
+  auto single = create(status, detail,
       Toon::RenderOptions{1});
   if (single == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
-  auto multi = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto multi = create(status, detail);
   if (multi == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -3971,11 +4003,11 @@ bool DefaultDisplayPixel(const std::array<std::uint8_t, 4>& pixel) {
 // that drops joint 1's move leaves the centre empty; a skeleton-to-mesh
 // transform left by 1.2 brings it back, drawn through mtoon_opaque this
 // time. Each pose writes one joint buffer and uploads nothing else.
-Check SkinningCheck(const Toon::SceneShaders& shaders) {
+Check SkinningCheck(const RendererFactory& create) {
   const std::string id = "renderer.skinning.gpu";
   Toon::FrameStatus status = Toon::FrameStatus::Fail;
   std::string detail;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, detail);
+  auto renderer = create(status, detail);
   if (renderer == nullptr) {
     return {id, status == Toon::FrameStatus::Skip ? "skip" : "fail", detail};
   }
@@ -4045,11 +4077,15 @@ Check SkinningCheck(const Toon::SceneShaders& shaders) {
     return {id, "fail",
         "mtoon_opaque must skin into the mesh's space and light it"};
   }
+  // Created on demand, mtoon_opaque's pipeline is created when the material
+  // binds, and a pose change creates none.
+  const bool pipelines_kept = create.pipelines_on_demand()
+      ? second.pipelines_created == first.pipelines_created
+      : third.pipelines_created == first.pipelines_created;
   if (first.skin_uploads != 1 || third.skin_uploads != 1 ||
       first.pose_writes != 1 || second.pose_writes != 2 ||
       third.pose_writes != 3 || third.point_uploads != first.point_uploads ||
-      third.topology_uploads != first.topology_uploads ||
-      third.pipelines_created != first.pipelines_created) {
+      third.topology_uploads != first.topology_uploads || !pipelines_kept) {
     return {id, "fail",
         "a pose change must write one joint buffer and upload nothing else"};
   }
@@ -4071,8 +4107,8 @@ std::string Status(Toon::FrameStatus status) {
 #if defined(TOON_HAS_WEBGPU)
 // The headless evidence run on the WebGPU backend (WebGPU policy §8): the
 // same bootstrap frame, products and persistence as on Vulkan, through
-// Dawn. The checks of what later stages bring report skip, naming the
-// stage (WebGPU policy §10).
+// Dawn, and the checks of what stage 2 brought; those of what stage 3
+// brings report skip, naming it (WebGPU policy §10).
 void WebGpuChecks(const Toon::DrawList& draws, const std::string& shader_directory,
     Toon::WebGpuAdapter adapter, std::vector<Check>& checks,
     Toon::GpuFrameEvidence& frame) {
@@ -4126,19 +4162,20 @@ void WebGpuChecks(const Toon::DrawList& draws, const std::string& shader_directo
       checks.push_back({id, "skip", dependent});
     }
   }
-  const std::string stage2 = "the WebGPU backend's stage 2 (WebGPU policy §10)";
+  // The material, outline, multisampling and skinning checks, as on Vulkan.
+  const Toon::WebGpuShaders shaders = Toon::WebGpuShadersIn(shader_directory);
+  const RendererFactory create([&shaders, adapter](Toon::FrameStatus& status,
+                                   std::string& detail, const Toon::RenderOptions& options) {
+    return Toon::CreateWebGpuOffscreenRenderer(shaders, status, detail, options, adapter);
+  }, true);
+  const std::vector<Check (*)(const RendererFactory&)> stage2 = {MToonOpaqueCheck,
+      SceneLightsCheck, MToonTexturedCheck, MToonRestCheck, MToonNormalCheck,
+      MToonOutlineCheck, OutlineSamplingCheck, OutlineWidthCheck, OutlineMotionCheck,
+      OutlineFrustumCheck, OutlineDepthClipCheck, OutlineOcclusionCheck, MToonRimCheck,
+      MToonTransparentCheck, MmdCheck, MmdMorphCheck, MmdOutlineCheck, AntiAliasingCheck,
+      SkinningCheck};
+  for (const auto check : stage2) checks.push_back(check(create));
   const std::string stage3 = "the WebGPU backend's stage 3 (WebGPU policy §10)";
-  for (const char* id : {"renderer.material.mtoon_opaque", "renderer.lighting.scene",
-           "renderer.material.mtoon_textured", "renderer.material.mtoon_rest",
-           "renderer.material.mtoon_normal", "renderer.material.mtoon_outline",
-           "renderer.outline.sampling", "renderer.outline.width", "renderer.outline.motion",
-           "renderer.outline.frustum", "renderer.outline.depth_clip",
-           "renderer.outline.occlusion", "renderer.material.mtoon_rim",
-           "renderer.material.mtoon_transparent", "renderer.material.mmd",
-           "renderer.material.mmd_morph", "renderer.material.mmd_outline",
-           "renderer.antialiasing.msaa", "renderer.skinning.gpu"}) {
-    checks.push_back({id, "skip", stage2});
-  }
   for (const char* id : {"renderer.material.mmd_self_shadow", "renderer.shadow.shared_casters",
            "renderer.shadow.receivers", "renderer.shadow.views",
            "renderer.shadow.cross_family"}) {
@@ -4215,6 +4252,10 @@ int main(int argc, char** argv) {
   {
   const Toon::BackendCapability capability = Toon::ProbeVulkanBackend();
   const Toon::SceneShaders shaders = Toon::SceneShadersIn(shader_directory);
+  const RendererFactory create([&shaders](Toon::FrameStatus& status, std::string& detail,
+                                   const Toon::RenderOptions& options) {
+    return Toon::CreateOffscreenRenderer(shaders, status, detail, options);
+  });
   frame = Toon::RenderOffscreen(draws, shaders, 1000);
 
   bool color_ok = false;
@@ -4282,30 +4323,30 @@ int main(int argc, char** argv) {
         persistence_ok ? ""
                        : "1,000 frames did not complete on the scene "
                          "pipelines, one target allocation and mesh upload"});
-    checks.push_back(MToonOpaqueCheck(shaders));
-    checks.push_back(SceneLightsCheck(shaders));
-    checks.push_back(MToonTexturedCheck(shaders));
-    checks.push_back(MToonRestCheck(shaders));
-    checks.push_back(MToonNormalCheck(shaders));
-    checks.push_back(MToonOutlineCheck(shaders));
-    checks.push_back(OutlineSamplingCheck(shaders));
-    checks.push_back(OutlineWidthCheck(shaders));
-    checks.push_back(OutlineMotionCheck(shaders));
-    checks.push_back(OutlineFrustumCheck(shaders));
-    checks.push_back(OutlineDepthClipCheck(shaders));
-    checks.push_back(OutlineOcclusionCheck(shaders));
-    checks.push_back(MToonRimCheck(shaders));
-    checks.push_back(MToonTransparentCheck(shaders));
-    checks.push_back(MmdCheck(shaders));
-    checks.push_back(MmdMorphCheck(shaders));
-    checks.push_back(MmdOutlineCheck(shaders));
-    checks.push_back(MmdSelfShadowCheck(shaders));
-    checks.push_back(SharedCastersCheck(shaders));
-    checks.push_back(ShadowReceiversCheck(shaders));
-    checks.push_back(ShadowViewsCheck(shaders));
-    checks.push_back(CrossFamilyShadowCheck(shaders));
-    checks.push_back(AntiAliasingCheck(shaders));
-    checks.push_back(SkinningCheck(shaders));
+    checks.push_back(MToonOpaqueCheck(create));
+    checks.push_back(SceneLightsCheck(create));
+    checks.push_back(MToonTexturedCheck(create));
+    checks.push_back(MToonRestCheck(create));
+    checks.push_back(MToonNormalCheck(create));
+    checks.push_back(MToonOutlineCheck(create));
+    checks.push_back(OutlineSamplingCheck(create));
+    checks.push_back(OutlineWidthCheck(create));
+    checks.push_back(OutlineMotionCheck(create));
+    checks.push_back(OutlineFrustumCheck(create));
+    checks.push_back(OutlineDepthClipCheck(create));
+    checks.push_back(OutlineOcclusionCheck(create));
+    checks.push_back(MToonRimCheck(create));
+    checks.push_back(MToonTransparentCheck(create));
+    checks.push_back(MmdCheck(create));
+    checks.push_back(MmdMorphCheck(create));
+    checks.push_back(MmdOutlineCheck(create));
+    checks.push_back(MmdSelfShadowCheck(create));
+    checks.push_back(SharedCastersCheck(create));
+    checks.push_back(ShadowReceiversCheck(create));
+    checks.push_back(ShadowViewsCheck(create));
+    checks.push_back(CrossFamilyShadowCheck(create));
+    checks.push_back(AntiAliasingCheck(create));
+    checks.push_back(SkinningCheck(create));
   } else {
     const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
     checks.push_back({"renderer.render_product.color", "skip", dependent});

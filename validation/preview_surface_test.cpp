@@ -426,8 +426,8 @@ int main(int argc, char** argv) {
                                  const Toon::RenderOptions& options) {
         return Toon::CreateWebGpuOffscreenRenderer(shaders, status, error, options);
       };
-      // One sample until the backend's stage 2 brings 4x.
-      return Run(create, 1) && Normals(create, 1) ? 0 : 77;
+      return Run(create, 1) && Run(create, 4) && Normals(create, 1) && Normals(create, 4) ? 0
+                                                                                        : 77;
 #else
       return 2;
 #endif
