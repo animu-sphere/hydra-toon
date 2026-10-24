@@ -10,6 +10,15 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The backend-neutral public types — `OffscreenRenderer`, `PresentSession`,
+  `LateFrameSource`, `FrameLatency`, the products, options and statistics —
+  move from `vulkan_backend.hpp` and `vulkan_present.hpp` to
+  `include/toon/backend.hpp`, which both include, so existing consumers
+  compile unchanged; `SteadyNanoseconds` is inline there. The header
+  boundary check also covers the backend headers and rejects WebGPU and
+  Dawn includes
+  ([WebGPU policy §3](docs/design/WEBGPU_POLICY.md#3-boundary-and-targets)).
+
 - The committed VRM host Formation pins the published `toon` 0.6.0 package,
   replacing 0.2.0. Renderer report 89 verifies release assets, the GHCR pull,
   Formation smoke and headless GPU checks, and MMD and MToon avatar captures
