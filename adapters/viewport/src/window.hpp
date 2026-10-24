@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include <toon/vulkan_present.hpp>
+#include <toon/webgpu_present.hpp>
 
 namespace Toon::viewport {
 
@@ -89,5 +90,9 @@ public:
 // callback for the backend-owned VkSurfaceKHR. The window must outlive every
 // session created from the returned provider.
 [[nodiscard]] PresentSurfaceProvider MakeSurfaceProvider(Window& window);
+
+// The window as the WebGPU present session takes it: its Win32 HWND and
+// module. Throws std::runtime_error on a platform without one.
+[[nodiscard]] WebGpuWindow MakeWebGpuWindow(Window& window);
 
 } // namespace Toon::viewport

@@ -37,6 +37,10 @@ WebGpuShaders WebGpuShadersIn(const std::string& directory) {
   shaders.mmd_outline_fragment = stage("mmd_outline", ".frag.wgsl");
   shaders.shadow_vertex = stage("shadow", ".vert.wgsl");
   shaders.shadow_fragment = stage("shadow", ".frag.wgsl");
+  shaders.composite_vertex = stage("composite", ".vert.wgsl");
+  shaders.composite_fragment = stage("composite", ".frag.wgsl");
+  shaders.overlay_vertex = stage("overlay", ".vert.wgsl");
+  shaders.overlay_fragment = stage("overlay", ".frag.wgsl");
   shaders.mipmap_vertex = stage("mipmap", ".vert.wgsl");
   shaders.mipmap_fragment = stage("mipmap", ".frag.wgsl");
   shaders.depth_resolve_vertex = stage("depth_resolve", ".vert.wgsl");

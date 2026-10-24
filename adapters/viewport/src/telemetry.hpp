@@ -65,8 +65,12 @@ public:
   FrameTelemetry();
 
   void PushCpu(const CpuSample& sample);
-  // A frame's GPU times, pushed once each, as they arrive.
-  void PushGpu(const PresentGpuTimes& times);
+  // A frame's GPU times, pushed once each, as they arrive; the scene's
+  // parts and the image wait only when `parts` says the backend timed them
+  // (PresentStatistics::gpu_parts_timed), so the rest stay empty.
+  void PushGpu(const PresentGpuTimes& times, bool parts = true);
+  // The presentation call whose return the latency's present ages end at.
+  void SetPresentEndpoint(const char* endpoint) { present_endpoint_ = endpoint; }
   void PushLatency(const FrameLatency& sample);
 
   // One named series per quantity; the GPU's are empty until a frame's
@@ -101,6 +105,7 @@ private:
   Series gpu_opaque_;
   Series gpu_transparent_;
   Series gpu_resolve_;
+  Series gpu_scene_;
   Series gpu_composite_;
   Series gpu_capture_;
   Series gpu_overlay_;
@@ -122,6 +127,7 @@ private:
   // Response latency uses the first completed frame for each input update.
   // Repeated frames of a stationary camera are not new response samples.
   std::array<std::int64_t, 13> measured_inputs_{};
+  const char* present_endpoint_ = "vkQueuePresentKHR_return";
 };
 
 } // namespace Toon::viewport

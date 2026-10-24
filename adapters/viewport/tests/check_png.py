@@ -99,7 +99,7 @@ def check_writer(writer, output):
     print("PNG decode: alpha 0..255, dark colours, linear unpremultiply, sRGB, rows and CRC passed")
 
 
-def check_viewport(viewport, output):
+def check_viewport(viewport, output, backend):
     for samples in (1, 4):
         stable, screenshots = None, []
         for name, mode, rgb in (("black", "solid", (0, 0, 0)),
@@ -108,7 +108,8 @@ def check_viewport(viewport, output):
                                 ("checker", "checkerboard", (0.17, 0.43, 0.81))):
             path = output / f"foreground-{samples}-{name}.png"
             screenshot = path.with_suffix(".ppm")
-            text = run([viewport, "--hidden", "--frames", 4, "--width", 96, "--height", 96,
+            text = run([viewport, "--backend", backend, "--hidden", "--frames", 4,
+                        "--width", 96, "--height", 96,
                         "--vsync", "off", "--samples", samples, "--background", mode,
                         "--background-color", *rgb, "--foreground-output", path, "--screenshot", screenshot])
             assert "frames read back: 2" in text, text
@@ -136,9 +137,10 @@ if __name__ == "__main__":
     mode.add_argument("--writer", type=Path)
     mode.add_argument("--viewport", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--backend", choices=("vulkan", "webgpu"), default="vulkan")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     if args.writer:
         check_writer(args.writer, args.output)
     else:
-        check_viewport(args.viewport, args.output)
+        check_viewport(args.viewport, args.output, args.backend)

@@ -70,6 +70,62 @@ set_tests_properties(toon-viewport-present toon-viewport-capture
   LABELS "gpu;viewport;presentation"
   SKIP_RETURN_CODE 77
   TIMEOUT 60)
+# The same presentation through the WebGPU backend (WebGPU policy §8): frames,
+# a capture without the overlay, a live sample change, and the presented
+# image of one view, at one sample and four, against the Vulkan session's.
+if(TOON_ENABLE_WEBGPU)
+  add_test(NAME toon-viewport-webgpu-present
+    COMMAND toon-viewport --backend webgpu --hidden --frames 8 --vsync off)
+  add_test(NAME toon-viewport-webgpu-capture
+    COMMAND toon-viewport --backend webgpu --hidden --frames 4 --vsync off
+      --screenshot "${CMAKE_CURRENT_BINARY_DIR}/webgpu-capture.ppm")
+  add_test(NAME toon-viewport-webgpu-capture-no-overlay
+    COMMAND toon-viewport --backend webgpu --hidden --frames 4 --vsync off --overlay off
+      --screenshot "${CMAKE_CURRENT_BINARY_DIR}/webgpu-capture-no-overlay.ppm")
+  add_test(NAME toon-viewport-webgpu-capture-without-overlay
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIRST=${CMAKE_CURRENT_BINARY_DIR}/webgpu-capture.ppm"
+      "-DSECOND=${CMAKE_CURRENT_BINARY_DIR}/webgpu-capture-no-overlay.ppm"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_captures.cmake")
+  set_tests_properties(toon-viewport-webgpu-capture-without-overlay PROPERTIES
+    DEPENDS "toon-viewport-webgpu-capture;toon-viewport-webgpu-capture-no-overlay")
+  add_test(NAME toon-viewport-webgpu-samples
+    COMMAND toon-viewport --backend webgpu --hidden --frames 8 --vsync off --samples 4
+      --switch-samples 1)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME toon-viewport-webgpu-foreground-png COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/check_png.py"
+      --viewport "$<TARGET_FILE:toon-viewport>" --backend webgpu
+      --output "${CMAKE_CURRENT_BINARY_DIR}/webgpu-png-export")
+    set_tests_properties(toon-viewport-webgpu-foreground-png PROPERTIES
+      LABELS "gpu;viewport;presentation;rgba;webgpu" SKIP_RETURN_CODE 77 TIMEOUT 120)
+  endif()
+  set(_toon_parity_tests)
+  foreach(_toon_samples IN ITEMS 1 4)
+    foreach(_toon_backend IN ITEMS vulkan webgpu)
+      add_test(NAME toon-viewport-parity-${_toon_backend}-${_toon_samples}
+        COMMAND toon-viewport --backend ${_toon_backend} --hidden --frames 8 --vsync off
+          --overlay off --camera-pan 13 -7 --camera-dolly 2 --samples ${_toon_samples}
+          --screenshot
+            "${CMAKE_CURRENT_BINARY_DIR}/parity-${_toon_backend}-${_toon_samples}.ppm")
+      list(APPEND _toon_parity_tests toon-viewport-parity-${_toon_backend}-${_toon_samples})
+    endforeach()
+    add_test(NAME toon-viewport-webgpu-parity-${_toon_samples}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DFIRST=${CMAKE_CURRENT_BINARY_DIR}/parity-vulkan-${_toon_samples}.ppm"
+        "-DSECOND=${CMAKE_CURRENT_BINARY_DIR}/parity-webgpu-${_toon_samples}.ppm"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_captures.cmake")
+    set_tests_properties(toon-viewport-webgpu-parity-${_toon_samples} PROPERTIES
+      DEPENDS "toon-viewport-parity-vulkan-${_toon_samples};toon-viewport-parity-webgpu-${_toon_samples}")
+  endforeach()
+  set_tests_properties(toon-viewport-webgpu-present toon-viewport-webgpu-capture
+    toon-viewport-webgpu-capture-no-overlay toon-viewport-webgpu-samples
+    ${_toon_parity_tests} PROPERTIES
+    LABELS "gpu;viewport;presentation;webgpu" SKIP_RETURN_CODE 77 TIMEOUT 60)
+  set_tests_properties(toon-viewport-webgpu-capture-without-overlay
+    toon-viewport-webgpu-parity-1 toon-viewport-webgpu-parity-4 PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIP:" LABELS "gpu;viewport;presentation;webgpu")
+endif()
 if(TOON_ENABLE_HYDRA2)
   add_executable(toon-viewport-material-debug-test material_debug_test.cpp ../src/hydra_scene.cpp)
   toon_configure_warnings(toon-viewport-material-debug-test)

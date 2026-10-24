@@ -2,7 +2,7 @@
 // The present session's 2D overlay: textured, vertex-coloured triangles in
 // framebuffer pixels, blended over the presented image (OverlayDrawList).
 
-// Must match vulkan_internal::OverlayConstants.
+// Must match vulkan_internal::OverlayConstants and the WebGPU backend's.
 struct OverlayConstants {
   // Framebuffer pixels to clip space: clip = pixel * scale + translate.
   float2 scale;
@@ -18,9 +18,21 @@ struct OverlayConstants {
 static const uint kOverlayLinearize = 1;
 static const uint kOverlayDepth = 2;
 
+#if defined(TOON_WEBGPU)
+// WebGPU has no push constants or combined samplers: the constants are a
+// uniform at a dynamic offset, group 1, and each texture binds with its own
+// sampler, group 0, a filtering one or, for a shadow view's depth, not.
+[[vk::binding(0, 1)]] ConstantBuffer<OverlayConstants> overlay;
+[[vk::binding(0, 0)]] Texture2D<float4> atlas_texture;
+[[vk::binding(1, 0)]] SamplerState atlas_sampler;
+#define SampleAtlas(uv) atlas_texture.Sample(atlas_sampler, uv)
+#else
 [[vk::push_constant]] ConstantBuffer<OverlayConstants> overlay;
 
 [[vk::binding(0, 0)]] Sampler2D<float4> atlas;
+// A name, so the SPIR-V is what sampling the combined image gives.
+#define SampleAtlas(uv) atlas.Sample(uv)
+#endif
 
 struct VertexInput {
   float2 position : POSITION;
@@ -58,7 +70,7 @@ VertexStageOutput vertex_main(VertexInput input) {
 
 [shader("fragment")]
 float4 fragment_main(VertexStageOutput input) : SV_Target {
-  const float4 texel = atlas.Sample(input.uv);
+  const float4 texel = SampleAtlas(input.uv);
   // A depth image's red is its depth; grey, opaque.
   if ((overlay.flags & kOverlayDepth) != 0) {
     return input.color * float4(texel.rrr, 1.0);

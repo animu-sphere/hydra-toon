@@ -43,6 +43,11 @@ struct WebGpuShaders {
   // The shared shadow caster pass, depth alone.
   std::string shadow_vertex;
   std::string shadow_fragment;
+  // The present session's composite and overlay passes.
+  std::string composite_vertex;
+  std::string composite_fragment;
+  std::string overlay_vertex;
+  std::string overlay_fragment;
   // Each texture level drawn from the one above; WebGPU has no blit.
   std::string mipmap_vertex;
   std::string mipmap_fragment;

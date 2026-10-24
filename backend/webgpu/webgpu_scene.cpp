@@ -12,96 +12,6 @@
 namespace Toon::webgpu_internal {
 namespace {
 
-ShaderModule CreateShader(WGPUDevice device, const std::string& source,
-    const char* label) {
-  WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
-  wgsl.code = {source.data(), source.size()};
-  WGPUShaderModuleDescriptor descriptor = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
-  descriptor.nextInChain = &wgsl.chain;
-  descriptor.label = View(label);
-  return ShaderModule(wgpuDeviceCreateShaderModule(device, &descriptor));
-}
-
-BindGroupLayout CreateLayout(WGPUDevice device,
-    const std::vector<WGPUBindGroupLayoutEntry>& entries, const char* label) {
-  WGPUBindGroupLayoutDescriptor descriptor = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-  descriptor.label = View(label);
-  descriptor.entryCount = entries.size();
-  descriptor.entries = entries.data();
-  return BindGroupLayout(wgpuDeviceCreateBindGroupLayout(device, &descriptor));
-}
-
-WGPUBindGroupLayoutEntry BufferEntry(std::uint32_t binding, WGPUShaderStage stages,
-    WGPUBufferBindingType type, bool dynamic = false) {
-  WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
-  entry.binding = binding;
-  entry.visibility = stages;
-  entry.buffer.type = type;
-  entry.buffer.hasDynamicOffset = dynamic;
-  return entry;
-}
-
-WGPUBindGroupLayoutEntry TextureEntry(std::uint32_t binding, WGPUShaderStage stages,
-    WGPUTextureSampleType type, WGPUTextureViewDimension dimension) {
-  WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
-  entry.binding = binding;
-  entry.visibility = stages;
-  entry.texture.sampleType = type;
-  entry.texture.viewDimension = dimension;
-  return entry;
-}
-
-WGPUBindGroupLayoutEntry SamplerEntry(std::uint32_t binding, WGPUShaderStage stages,
-    WGPUSamplerBindingType type) {
-  WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
-  entry.binding = binding;
-  entry.visibility = stages;
-  entry.sampler.type = type;
-  return entry;
-}
-
-BindGroup CreateGroup(WGPUDevice device, WGPUBindGroupLayout layout,
-    const std::vector<WGPUBindGroupEntry>& entries, const char* label) {
-  WGPUBindGroupDescriptor descriptor = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-  descriptor.label = View(label);
-  descriptor.layout = layout;
-  descriptor.entryCount = entries.size();
-  descriptor.entries = entries.data();
-  return BindGroup(wgpuDeviceCreateBindGroup(device, &descriptor));
-}
-
-WGPUBindGroupEntry BufferBinding(std::uint32_t binding, WGPUBuffer buffer,
-    std::uint64_t size = WGPU_WHOLE_SIZE) {
-  WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
-  entry.binding = binding;
-  entry.buffer = buffer;
-  entry.size = size;
-  return entry;
-}
-
-WGPUBindGroupEntry ViewBinding(std::uint32_t binding, WGPUTextureView view) {
-  WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
-  entry.binding = binding;
-  entry.textureView = view;
-  return entry;
-}
-
-WGPUBindGroupEntry SamplerBinding(std::uint32_t binding, WGPUSampler sampler) {
-  WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
-  entry.binding = binding;
-  entry.sampler = sampler;
-  return entry;
-}
-
-PipelineLayout CreatePipelineLayout(WGPUDevice device,
-    const std::vector<WGPUBindGroupLayout>& layouts, const char* label) {
-  WGPUPipelineLayoutDescriptor descriptor = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
-  descriptor.label = View(label);
-  descriptor.bindGroupLayoutCount = layouts.size();
-  descriptor.bindGroupLayouts = layouts.data();
-  return PipelineLayout(wgpuDeviceCreatePipelineLayout(device, &descriptor));
-}
-
 WGPUAddressMode AddressMode(std::uint32_t wrap) {
   switch (static_cast<ToonWrap>(wrap)) {
   case ToonWrap::ClampToEdge:
@@ -121,8 +31,6 @@ std::uint32_t MipLevels(std::uint32_t width, std::uint32_t height) {
   }
   return levels;
 }
-
-constexpr WGPUShaderStage kBothStages = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 
 // What a material's bind group holds per role of its model (WebGPU policy
 // §4): each texture's view, the serial that tells a rebuilt view from an
@@ -681,7 +589,11 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
   return true;
 }
 
-void TextureCache::RecordMipmaps(WGPUCommandEncoder encoder) {
+void TextureCache::RecordMipmaps(WGPUCommandEncoder encoder,
+    const PassTimestamps& timestamps) {
+  std::size_t passes = 0;
+  for (const Mipmaps& mipmaps : pending_) passes += mipmaps.levels - 1U;
+  std::size_t pass_index = 0;
   for (const Mipmaps& mipmaps : pending_) {
     for (std::uint32_t level = 1; level < mipmaps.levels; ++level) {
       WGPUTextureViewDescriptor source_view = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
@@ -701,6 +613,8 @@ void TextureCache::RecordMipmaps(WGPUCommandEncoder encoder) {
       WGPURenderPassDescriptor pass_descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
       pass_descriptor.colorAttachmentCount = 1;
       pass_descriptor.colorAttachments = &color;
+      WGPUPassTimestampWrites writes = WGPU_PASS_TIMESTAMP_WRITES_INIT;
+      pass_descriptor.timestampWrites = timestamps.Of(pass_index++, passes, writes);
       RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder, &pass_descriptor));
       wgpuRenderPassEncoderSetPipeline(pass.get(),
           mipmaps.format == WGPUTextureFormat_RGBA8UnormSrgb ? mip_srgb_.get()
@@ -1632,7 +1546,8 @@ bool ShadowMap::Update(const DrawList& draws, std::string& detail, double& fit_m
 
 bool ShadowMap::Record(WGPUCommandEncoder encoder, ScenePipelines& pipelines,
     const MaterialCache& materials, const MeshCache& meshes, const DrawList& draws,
-    WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::string& detail) {
+    WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::string& detail,
+    const PassTimestamps& timestamps) {
   caster_draws_ = 0;
   mmd_draws_ = 0;
   // Each view is drawn whole; a layer no view draws this frame is not
@@ -1646,6 +1561,8 @@ bool ShadowMap::Record(WGPUCommandEncoder encoder, ScenePipelines& pipelines,
     WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     descriptor.label = View("shadow view");
     descriptor.depthStencilAttachment = &depth;
+    WGPUPassTimestampWrites writes = WGPU_PASS_TIMESTAMP_WRITES_INIT;
+    descriptor.timestampWrites = timestamps.Of(layer, fit_.views().size(), writes);
     RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder, &descriptor));
     const bool recorded = meshes.RecordShadowCasters(pass.get(), pipelines, materials, draws,
         WebGpuShadowClipFromWorld(fit_.views()[layer]), ring, constants, caster_draws_,

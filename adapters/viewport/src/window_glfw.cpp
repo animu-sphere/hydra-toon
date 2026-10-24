@@ -2,7 +2,7 @@
 #include "window.hpp"
 
 #define GLFW_INCLUDE_VULKAN
-#if TOON_VIEWPORT_HAS_HYDRA
+#if TOON_VIEWPORT_HAS_HYDRA || TOON_VIEWPORT_HAS_WEBGPU
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
 #elif defined(__APPLE__)
@@ -13,6 +13,9 @@
 #if TOON_VIEWPORT_HAS_HYDRA
 #include <nfd.h>
 #include <nfd_glfw3.h>
+#endif
+#if TOON_VIEWPORT_HAS_WEBGPU && defined(_WIN32)
+#include <GLFW/glfw3native.h>
 #endif
 
 #include <algorithm>
@@ -326,6 +329,21 @@ PresentSurfaceProvider MakeSurfaceProvider(Window& window) {
   provider.create_surface = CreateSurface;
   provider.user_data = static_cast<GlfwWindow&>(window).native();
   return provider;
+}
+
+WebGpuWindow MakeWebGpuWindow(Window& window) {
+#if TOON_VIEWPORT_HAS_WEBGPU && defined(_WIN32)
+  WebGpuWindow native;
+  native.hwnd = glfwGetWin32Window(static_cast<GlfwWindow&>(window).native());
+  native.hinstance = GetModuleHandleW(nullptr);
+  if (native.hwnd == nullptr) {
+    throw GlfwError("query the viewport window's HWND");
+  }
+  return native;
+#else
+  (void)window;
+  throw std::runtime_error("the WebGPU present session needs a Win32 window");
+#endif
 }
 
 } // namespace Toon::viewport

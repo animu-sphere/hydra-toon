@@ -69,6 +69,8 @@ using RenderPipeline = Object<WGPURenderPipeline, wgpuRenderPipelineRelease>;
 using CommandEncoder = Object<WGPUCommandEncoder, wgpuCommandEncoderRelease>;
 using CommandBuffer = Object<WGPUCommandBuffer, wgpuCommandBufferRelease>;
 using RenderPassEncoder = Object<WGPURenderPassEncoder, wgpuRenderPassEncoderRelease>;
+using Surface = Object<WGPUSurface, wgpuSurfaceRelease>;
+using QuerySet = Object<WGPUQuerySet, wgpuQuerySetRelease>;
 
 [[nodiscard]] WGPUStringView View(const char* text);
 [[nodiscard]] std::string Text(WGPUStringView view);
@@ -89,6 +91,8 @@ struct DeviceEvents {
 struct Gpu {
   std::unique_ptr<DeviceEvents> events = std::make_unique<DeviceEvents>();
   Instance instance;
+  // The window's, when one was asked for; released before the instance.
+  Surface surface;
   Adapter adapter;
   Device device;
   Queue queue;
@@ -97,11 +101,24 @@ struct Gpu {
   std::string driver;
   std::uint32_t vendor_id = 0;
   std::uint32_t device_id = 0;
+  // Whether the device writes timestamps at passes' ends, and inside them.
+  bool timestamps = false;
+  bool timestamps_inside_passes = false;
+};
+
+// What a host asks of the device beyond the WebGPU defaults: a Win32
+// window it presents to, whose surface the adapter must reach, and
+// timestamps where the adapter offers them (WebGPU policy §6, §8).
+struct GpuRequest {
+  void* hwnd = nullptr;
+  void* hinstance = nullptr;
+  bool timestamps = false;
 };
 
 // Skip when there is no adapter of the requested kind, Fail when one exists
 // but its device cannot be created.
-FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail);
+FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail,
+    const GpuRequest& request = {});
 
 // Waits for `future` on `instance`, up to ten seconds.
 bool Wait(WGPUInstance instance, WGPUFuture future, const char* what,
@@ -118,6 +135,28 @@ Buffer CreateBuffer(WGPUDevice device, std::uint64_t size, WGPUBufferUsage usage
     const char* label);
 
 bool LoadWgsl(const std::string& path, std::string& source, std::string& detail);
+
+// webgpu.h's descriptors, filled for the backend's shader modules, layouts
+// and bind groups.
+ShaderModule CreateShader(WGPUDevice device, const std::string& source, const char* label);
+BindGroupLayout CreateLayout(WGPUDevice device,
+    const std::vector<WGPUBindGroupLayoutEntry>& entries, const char* label);
+WGPUBindGroupLayoutEntry BufferEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUBufferBindingType type, bool dynamic = false);
+WGPUBindGroupLayoutEntry TextureEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUTextureSampleType type, WGPUTextureViewDimension dimension);
+WGPUBindGroupLayoutEntry SamplerEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUSamplerBindingType type);
+BindGroup CreateGroup(WGPUDevice device, WGPUBindGroupLayout layout,
+    const std::vector<WGPUBindGroupEntry>& entries, const char* label);
+WGPUBindGroupEntry BufferBinding(std::uint32_t binding, WGPUBuffer buffer,
+    std::uint64_t size = WGPU_WHOLE_SIZE);
+WGPUBindGroupEntry ViewBinding(std::uint32_t binding, WGPUTextureView view);
+WGPUBindGroupEntry SamplerBinding(std::uint32_t binding, WGPUSampler sampler);
+PipelineLayout CreatePipelineLayout(WGPUDevice device,
+    const std::vector<WGPUBindGroupLayout>& layouts, const char* label);
+
+constexpr WGPUShaderStage kBothStages = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 
 // The WGSL each pipeline compiles, loaded before any device exists so a
 // missing file is a failure rather than a skip.
@@ -142,6 +181,10 @@ struct ShaderSources {
   std::string mmd_outline_fragment;
   std::string shadow_vertex;
   std::string shadow_fragment;
+  std::string composite_vertex;
+  std::string composite_fragment;
+  std::string overlay_vertex;
+  std::string overlay_fragment;
   std::string mipmap_vertex;
   std::string mipmap_fragment;
   std::string depth_resolve_vertex;
@@ -220,6 +263,18 @@ Matrix4 WebGpuShadowClipFromWorld(const ShadowView& view);
 // per view, as the Vulkan backend's D32 array.
 constexpr WGPUTextureFormat kShadowFormat = WGPUTextureFormat_Depth32Float;
 
+// Where a run of passes writes timestamps, in nanoseconds (WebGPU policy
+// §6): the first pass as it begins at `begin`, the last as it ends at
+// `end`. Without a set, or a run without passes, it writes none.
+struct PassTimestamps {
+  WGPUQuerySet set = nullptr;
+  std::uint32_t begin = 0;
+  std::uint32_t end = 0;
+  // The writes of pass `index` of `count`, in `writes`; nullptr for none.
+  [[nodiscard]] const WGPUPassTimestampWrites* Of(std::size_t index, std::size_t count,
+      WGPUPassTimestampWrites& writes) const;
+};
+
 // The scene's bind group layouts and pipelines (WebGPU policy §4). WebGPU
 // has no dynamic cull mode, front face, depth writes or vertex strides, so
 // each combination a draw needs is its own pipeline, created the first time
@@ -267,6 +322,12 @@ public:
       std::uint32_t samples, std::string& detail);
   // Nullptr on a creation failure, which `detail` explains.
   WGPURenderPipeline Get(const Key& key, std::string& detail);
+  // Draw at `samples` from now on: every pipeline is made again as a draw
+  // first needs it, and the layouts, samplers and so every bind group stay.
+  void SetSamples(std::uint32_t samples) {
+    samples_ = samples;
+    pipelines_.clear();
+  }
 
   [[nodiscard]] WGPUBindGroupLayout frame_layout() const { return frame_layout_.get(); }
   [[nodiscard]] WGPUBindGroupLayout caster_frame_layout() const {
@@ -339,7 +400,9 @@ public:
   // longer has. No frame that samples them may be in flight.
   bool Update(const DrawList& draws, std::string& detail);
   // Record the mip passes of this frame's uploads.
-  void RecordMipmaps(WGPUCommandEncoder encoder);
+  void RecordMipmaps(WGPUCommandEncoder encoder, const PassTimestamps& timestamps = {});
+  // Whether RecordMipmaps has passes to record.
+  [[nodiscard]] bool has_pending_mipmaps() const { return !pending_.empty(); }
   // The view a role samples: the white 1 x 1 when the texture is none or
   // has no pixels.
   [[nodiscard]] WGPUTextureView ViewOf(TextureId texture) const;
@@ -518,7 +581,8 @@ public:
   // parameters read none.
   bool Record(WGPUCommandEncoder encoder, ScenePipelines& pipelines,
       const MaterialCache& materials, const MeshCache& meshes, const DrawList& draws,
-      WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::string& detail);
+      WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::string& detail,
+      const PassTimestamps& timestamps = {});
 
   [[nodiscard]] const ShadowFit& fit() const { return fit_; }
   // The last recorded frame's caster draws, every family's and MMD's.

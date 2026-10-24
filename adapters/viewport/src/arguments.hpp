@@ -2,6 +2,7 @@
 #pragma once
 
 #include <toon/vulkan_present.hpp>
+#include <toon/webgpu_backend.hpp>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -33,6 +34,10 @@ struct Arguments {
   float camera_pan_y = 0.0F;
   float camera_dolly = 0.0F;
   Toon::RenderOptions options;
+  // Which backend presents: Vulkan, or WebGPU on Dawn's adapter of
+  // `webgpu_adapter` (WebGPU policy §8), a build with TOON_ENABLE_WEBGPU.
+  bool webgpu = false;
+  Toon::WebGpuAdapter webgpu_adapter = Toon::WebGpuAdapter::Direct3D12;
   Toon::CompositeBackground background;
   // A USD stage to draw through Hydra instead of the bootstrap scene.
   std::string usd;

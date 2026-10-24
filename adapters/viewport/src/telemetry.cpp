@@ -74,7 +74,8 @@ FrameTelemetry::FrameTelemetry()
       overlay_(kWindow), wait_(kWindow), submit_(kWindow),
       gpu_uploads_(kWindow), gpu_shadow_(kWindow), gpu_image_wait_(kWindow),
       gpu_unlit_(kWindow), gpu_outline_(kWindow), gpu_opaque_(kWindow),
-      gpu_transparent_(kWindow), gpu_resolve_(kWindow), gpu_composite_(kWindow),
+      gpu_transparent_(kWindow), gpu_resolve_(kWindow), gpu_scene_(kWindow),
+      gpu_composite_(kWindow),
       gpu_capture_(kWindow), gpu_overlay_(kWindow), gpu_work_(kWindow),
       gpu_frame_(kWindow) {
   latency_frames_.reserve(kWindow);
@@ -133,15 +134,18 @@ void FrameTelemetry::PushCpu(const CpuSample& sample) {
   submit_.Push(sample.submit);
 }
 
-void FrameTelemetry::PushGpu(const PresentGpuTimes& times) {
+void FrameTelemetry::PushGpu(const PresentGpuTimes& times, bool parts) {
   gpu_uploads_.Push(times.uploads);
   gpu_shadow_.Push(times.shadow);
-  gpu_image_wait_.Push(times.image_wait);
-  gpu_unlit_.Push(times.unlit);
-  gpu_outline_.Push(times.outline);
-  gpu_opaque_.Push(times.opaque);
-  gpu_transparent_.Push(times.transparent);
-  gpu_resolve_.Push(times.resolve);
+  if (parts) {
+    gpu_image_wait_.Push(times.image_wait);
+    gpu_unlit_.Push(times.unlit);
+    gpu_outline_.Push(times.outline);
+    gpu_opaque_.Push(times.opaque);
+    gpu_transparent_.Push(times.transparent);
+    gpu_resolve_.Push(times.resolve);
+  }
+  gpu_scene_.Push(times.scene);
   gpu_composite_.Push(times.composite);
   gpu_capture_.Push(times.capture);
   gpu_overlay_.Push(times.overlay);
@@ -160,7 +164,8 @@ std::vector<FrameTelemetry::Named> FrameTelemetry::Gpu() const {
       {"image_wait", &gpu_image_wait_},
       {"unlit", &gpu_unlit_}, {"outline", &gpu_outline_},
       {"opaque", &gpu_opaque_}, {"transparent", &gpu_transparent_},
-      {"resolve", &gpu_resolve_}, {"composite", &gpu_composite_}, {"capture", &gpu_capture_},
+      {"resolve", &gpu_resolve_}, {"scene", &gpu_scene_}, {"composite", &gpu_composite_},
+      {"capture", &gpu_capture_},
       {"overlay", &gpu_overlay_}, {"work", &gpu_work_},
       {"frame", &gpu_frame_}};
 }
@@ -193,7 +198,8 @@ std::string FrameTelemetry::Json() const {
   std::ostringstream out;
   out.imbue(std::locale::classic());
   out << std::setprecision(12) << "{\"schema\":1,\"clock\":\"steady_nanoseconds\","
-      << "\"present_endpoint\":\"vkQueuePresentKHR_return\",\"display_time_measured\":false,\"summaries_ms\":{";
+      << "\"present_endpoint\":\"" << present_endpoint_
+      << "\",\"display_time_measured\":false,\"summaries_ms\":{";
   bool first = true;
   const auto summary = [&](const char* group, const Named& row) {
     if (!first) out << ',';

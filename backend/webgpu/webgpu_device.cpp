@@ -45,7 +45,8 @@ bool Wait(WGPUInstance instance, WGPUFuture future, const char* what,
   return true;
 }
 
-FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail) {
+FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail,
+    const GpuRequest& request) {
   // Waiting with a timeout is an instance feature.
   const WGPUInstanceFeatureName features[] = {WGPUInstanceFeatureName_TimedWaitAny};
   WGPUInstanceDescriptor instance_descriptor{};
@@ -56,6 +57,19 @@ FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail) {
     detail = "Dawn could not create a WebGPU instance";
     return FrameStatus::Skip;
   }
+  if (request.hwnd != nullptr) {
+    WGPUSurfaceSourceWindowsHWND window = WGPU_SURFACE_SOURCE_WINDOWS_HWND_INIT;
+    window.hwnd = request.hwnd;
+    window.hinstance = request.hinstance;
+    WGPUSurfaceDescriptor surface = WGPU_SURFACE_DESCRIPTOR_INIT;
+    surface.nextInChain = &window.chain;
+    surface.label = View("window");
+    gpu.surface.reset(wgpuInstanceCreateSurface(gpu.instance.get(), &surface));
+    if (!gpu.surface) {
+      detail = "Dawn could not create a surface for the window";
+      return FrameStatus::Skip;
+    }
+  }
 
   // A high-performance adapter on Direct3D 12 by default; Dawn's Vulkan
   // adapter only when asked, for diagnosis (WebGPU policy §2).
@@ -64,6 +78,7 @@ FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail) {
   options.powerPreference = WGPUPowerPreference_HighPerformance;
   options.backendType = kind == WebGpuAdapter::Vulkan ? WGPUBackendType_Vulkan
                                                       : WGPUBackendType_D3D12;
+  options.compatibleSurface = gpu.surface.get();
   struct AdapterResult {
     WGPURequestAdapterStatus status = WGPURequestAdapterStatus_Error;
     WGPUAdapter adapter = nullptr;
@@ -110,10 +125,29 @@ FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail) {
   }
 
   // The WebGPU defaults: no limit is raised and no optional feature is
-  // required (WebGPU policy §4). Errors and the device's loss reach
-  // `events`, which outlives the device.
+  // required (WebGPU policy §4) but timestamps, where a host asks and the
+  // adapter offers them (§6). Errors and the device's loss reach `events`,
+  // which outlives the device.
+  std::vector<WGPUFeatureName> optional;
+  if (request.timestamps && wgpuAdapterHasFeature(gpu.adapter.get(), WGPUFeatureName_TimestampQuery)) {
+    optional.push_back(WGPUFeatureName_TimestampQuery);
+    if (wgpuAdapterHasFeature(gpu.adapter.get(),
+            WGPUFeatureName_ChromiumExperimentalTimestampQueryInsidePasses)) {
+      optional.push_back(WGPUFeatureName_ChromiumExperimentalTimestampQueryInsidePasses);
+    }
+  }
   WGPUDeviceDescriptor device_descriptor{};
   device_descriptor.label = View("toon-webgpu");
+  device_descriptor.requiredFeatureCount = optional.size();
+  device_descriptor.requiredFeatures = optional.data();
+  // Dawn rounds timestamps to 2^16 ns by default, a browser's guard against
+  // timing attacks, which reads a pass shorter than 0.066 ms as 0 or 0.066;
+  // a native renderer's own passes are not that (renderer report 93).
+  const char* const unquantized[] = {"timestamp_quantization"};
+  WGPUDawnTogglesDescriptor toggles = WGPU_DAWN_TOGGLES_DESCRIPTOR_INIT;
+  toggles.disabledToggleCount = 1;
+  toggles.disabledToggles = unquantized;
+  if (!optional.empty()) device_descriptor.nextInChain = &toggles.chain;
   device_descriptor.uncapturedErrorCallbackInfo.callback =
       [](WGPUDevice const*, WGPUErrorType, WGPUStringView message, void* events, void*) {
         auto& out = *static_cast<DeviceEvents*>(events);
@@ -161,6 +195,9 @@ FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail) {
   }
   gpu.device.reset(device_result.device);
   gpu.queue.reset(wgpuDeviceGetQueue(gpu.device.get()));
+  gpu.timestamps = wgpuDeviceHasFeature(gpu.device.get(), WGPUFeatureName_TimestampQuery);
+  gpu.timestamps_inside_passes = wgpuDeviceHasFeature(gpu.device.get(),
+      WGPUFeatureName_ChromiumExperimentalTimestampQueryInsidePasses);
   return FrameStatus::Pass;
 }
 
@@ -259,6 +296,10 @@ bool LoadShaders(const WebGpuShaders& shaders, ShaderSources& sources,
       {&shaders.mmd_outline_fragment, &sources.mmd_outline_fragment},
       {&shaders.shadow_vertex, &sources.shadow_vertex},
       {&shaders.shadow_fragment, &sources.shadow_fragment},
+      {&shaders.composite_vertex, &sources.composite_vertex},
+      {&shaders.composite_fragment, &sources.composite_fragment},
+      {&shaders.overlay_vertex, &sources.overlay_vertex},
+      {&shaders.overlay_fragment, &sources.overlay_fragment},
       {&shaders.mipmap_vertex, &sources.mipmap_vertex},
       {&shaders.mipmap_fragment, &sources.mipmap_fragment},
       {&shaders.depth_resolve_vertex, &sources.depth_resolve_vertex},
@@ -268,6 +309,106 @@ bool LoadShaders(const WebGpuShaders& shaders, ShaderSources& sources,
     if (!LoadWgsl(*path, *source, detail)) return false;
   }
   return true;
+}
+
+ShaderModule CreateShader(WGPUDevice device, const std::string& source,
+    const char* label) {
+  WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
+  wgsl.code = {source.data(), source.size()};
+  WGPUShaderModuleDescriptor descriptor = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+  descriptor.nextInChain = &wgsl.chain;
+  descriptor.label = View(label);
+  return ShaderModule(wgpuDeviceCreateShaderModule(device, &descriptor));
+}
+
+BindGroupLayout CreateLayout(WGPUDevice device,
+    const std::vector<WGPUBindGroupLayoutEntry>& entries, const char* label) {
+  WGPUBindGroupLayoutDescriptor descriptor = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+  descriptor.label = View(label);
+  descriptor.entryCount = entries.size();
+  descriptor.entries = entries.data();
+  return BindGroupLayout(wgpuDeviceCreateBindGroupLayout(device, &descriptor));
+}
+
+WGPUBindGroupLayoutEntry BufferEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUBufferBindingType type, bool dynamic) {
+  WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+  entry.binding = binding;
+  entry.visibility = stages;
+  entry.buffer.type = type;
+  entry.buffer.hasDynamicOffset = dynamic;
+  return entry;
+}
+
+WGPUBindGroupLayoutEntry TextureEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUTextureSampleType type, WGPUTextureViewDimension dimension) {
+  WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+  entry.binding = binding;
+  entry.visibility = stages;
+  entry.texture.sampleType = type;
+  entry.texture.viewDimension = dimension;
+  return entry;
+}
+
+WGPUBindGroupLayoutEntry SamplerEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUSamplerBindingType type) {
+  WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+  entry.binding = binding;
+  entry.visibility = stages;
+  entry.sampler.type = type;
+  return entry;
+}
+
+BindGroup CreateGroup(WGPUDevice device, WGPUBindGroupLayout layout,
+    const std::vector<WGPUBindGroupEntry>& entries, const char* label) {
+  WGPUBindGroupDescriptor descriptor = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+  descriptor.label = View(label);
+  descriptor.layout = layout;
+  descriptor.entryCount = entries.size();
+  descriptor.entries = entries.data();
+  return BindGroup(wgpuDeviceCreateBindGroup(device, &descriptor));
+}
+
+WGPUBindGroupEntry BufferBinding(std::uint32_t binding, WGPUBuffer buffer,
+    std::uint64_t size) {
+  WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+  entry.binding = binding;
+  entry.buffer = buffer;
+  entry.size = size;
+  return entry;
+}
+
+WGPUBindGroupEntry ViewBinding(std::uint32_t binding, WGPUTextureView view) {
+  WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+  entry.binding = binding;
+  entry.textureView = view;
+  return entry;
+}
+
+WGPUBindGroupEntry SamplerBinding(std::uint32_t binding, WGPUSampler sampler) {
+  WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+  entry.binding = binding;
+  entry.sampler = sampler;
+  return entry;
+}
+
+PipelineLayout CreatePipelineLayout(WGPUDevice device,
+    const std::vector<WGPUBindGroupLayout>& layouts, const char* label) {
+  WGPUPipelineLayoutDescriptor descriptor = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+  descriptor.label = View(label);
+  descriptor.bindGroupLayoutCount = layouts.size();
+  descriptor.bindGroupLayouts = layouts.data();
+  return PipelineLayout(wgpuDeviceCreatePipelineLayout(device, &descriptor));
+}
+
+const WGPUPassTimestampWrites* PassTimestamps::Of(std::size_t index, std::size_t count,
+    WGPUPassTimestampWrites& writes) const {
+  if (set == nullptr || (index != 0 && index + 1U != count)) return nullptr;
+  writes = WGPU_PASS_TIMESTAMP_WRITES_INIT;
+  writes.querySet = set;
+  writes.beginningOfPassWriteIndex = index == 0 ? begin : WGPU_QUERY_SET_INDEX_UNDEFINED;
+  writes.endOfPassWriteIndex = index + 1U == count ? end : WGPU_QUERY_SET_INDEX_UNDEFINED;
+  return &writes;
 }
 
 Matrix4 WebGpuClipFromWorld(const ToonView& view) {

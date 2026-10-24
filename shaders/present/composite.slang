@@ -4,8 +4,15 @@ struct CompositeConstants {
   float4 color; // w: checker size in framebuffer pixels
   float4 alternate; // w: checkerboard enabled
 };
+#if defined(TOON_WEBGPU)
+// WebGPU has no push constants or combined samplers: the background is a
+// uniform, and the foreground is read by texel alone.
+[[vk::binding(1, 0)]] ConstantBuffer<CompositeConstants> background;
+[[vk::binding(0, 0)]] Texture2D<float4> foreground;
+#else
 [[vk::push_constant]] ConstantBuffer<CompositeConstants> background;
 [[vk::binding(0, 0)]] Sampler2D<float4> foreground;
+#endif
 
 [shader("vertex")]
 float4 vertex_main(uint vertex : SV_VulkanVertexID) : SV_Position {

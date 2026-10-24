@@ -547,6 +547,7 @@ PresentSetupStatus VulkanPresentSession::Initialize(
     timestamp_period_ = limits.limits.timestampPeriod;
     timestamp_mask_ = valid_bits >= 64U ? ~0ULL : (1ULL << valid_bits) - 1U;
     statistics_.gpu_timing = true;
+    statistics_.gpu_parts_timed = true;
   }
 
   VkSemaphoreCreateInfo semaphore_create{
@@ -1209,6 +1210,7 @@ void VulkanPresentSession::ReadTimestamps() {
   gpu.opaque = between(kOutlineEnd, kOpaqueEnd);
   gpu.transparent = between(kOpaqueEnd, kTransparentEnd);
   gpu.resolve = between(kTransparentEnd, kResolveEnd);
+  gpu.scene = between(kImageReady, kResolveEnd);
   gpu.composite = between(kResolveEnd, kCompositeEnd);
   gpu.capture = between(kCompositeEnd, kCaptureEnd);
   gpu.overlay = between(kCaptureEnd, kOverlayEnd);
