@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [89](89-2026-10-24-published-v060.md) | v0.6.0 release assets and GHCR pull verified; committed Formation re-pinned from v0.2.0; published headless GPU checks 31 PASS and 8 MMD and 16 MToon captures, shadows on and off, byte-identical to the stage-3 build |
 | [88](88-2026-10-21-v060-preparation.md) | v0.6.0 release gate: OST core 23/23, hydra 37/37, viewport-usd 73/73 with `ost validate`, plain CMake 23/23, a reproducible local `hydra` package; GPU evidence in reports 85–87 |
 | [87](87-2026-10-21-shared-shadow-acceptance.md) | Shared shadows, stage 3: 192 cross-family receiver/caster/deformation/setting cases and self-shadow, Hydra/fast paths drawing identical views and images, MMD frames byte-identical, MToon shadows-on reference by digest, bounded `shadow-cost` fixtures (four views ≈0.14 ms GPU, 64 MiB) |
 | [86](86-2026-10-21-shared-shadow-stage-2.md) | Shared shadows, stage 2: up to four directional and spot views in one array image, resolution/bias/filter settings measured for acne and thin-caster loss (1.5/1.0/1.5 texels), debug views; MMD byte-identical, four views ≈0.40 ms GPU and 64 MiB on AliciaSolid |

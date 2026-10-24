@@ -8,6 +8,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Changed
+
+- The committed VRM host Formation pins the published `toon` 0.6.0 package,
+  replacing 0.2.0. Renderer report 89 verifies release assets, the GHCR pull,
+  Formation smoke and headless GPU checks, and MMD and MToon avatar captures
+  with shadows on and off matching the preparation build byte for byte.
+
 ## [0.6.0] - 2026-10-21
 
 ### Added
