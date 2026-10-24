@@ -90,6 +90,16 @@ if(TOON_WITH_VULKAN)
   add_test(NAME toon-preview-surface-gpu COMMAND toon-preview-surface-test
     "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-preview-surface-gpu PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+  if(TOON_ENABLE_WEBGPU)
+    # The same PreviewSurface checks on the WebGPU backend (WebGPU policy §9).
+    target_link_libraries(toon-preview-surface-test PRIVATE Toon::WebGPU)
+    target_compile_definitions(toon-preview-surface-test PRIVATE TOON_HAS_WEBGPU=1)
+    toon_copy_webgpu_runtime(toon-preview-surface-test)
+    add_test(NAME toon-preview-surface-webgpu COMMAND toon-preview-surface-test
+      "${CMAKE_BINARY_DIR}/backend/webgpu/shaders" --backend webgpu)
+    set_tests_properties(toon-preview-surface-webgpu PROPERTIES
+      SKIP_RETURN_CODE 77 LABELS "gpu;webgpu")
+  endif()
   add_executable(toon-rgba-output-test rgba_output_test.cpp)
   toon_configure_warnings(toon-rgba-output-test)
   target_link_libraries(toon-rgba-output-test PRIVATE Toon::Vulkan)
@@ -111,6 +121,35 @@ if(TOON_WITH_VULKAN)
     set_tests_properties(toon-rgba-fixtures-gpu PROPERTIES
       SKIP_RETURN_CODE 77 LABELS "gpu;rgba" TIMEOUT 90)
   endif()
+endif()
+
+# The headless evidence run on the WebGPU backend (WebGPU policy §8); its
+# report sits beside the Vulkan one the build writes.
+if(TOON_ENABLE_WEBGPU)
+  add_test(NAME toon-headless-webgpu COMMAND toon-headless --backend webgpu
+    --report "${CMAKE_CURRENT_BINARY_DIR}/renderer-report-webgpu.json")
+  set_tests_properties(toon-headless-webgpu PROPERTIES LABELS "gpu;webgpu")
+endif()
+
+# Vulkan/WebGPU parity on the canonical scenes (WebGPU policy §9, WGPU-Q1):
+# the summary and, per scene, both backends' images and their difference.
+if(TOON_ENABLE_WEBGPU AND TOON_WITH_VULKAN)
+  add_executable(toon-webgpu-parity-test webgpu_parity_test.cpp
+    ../adapters/viewport/src/capture.cpp)
+  toon_configure_warnings(toon-webgpu-parity-test)
+  target_include_directories(toon-webgpu-parity-test PRIVATE
+    "${PROJECT_SOURCE_DIR}/adapters/viewport/src"
+    "${PROJECT_SOURCE_DIR}/third_party/stb")
+  target_link_libraries(toon-webgpu-parity-test PRIVATE Toon::Vulkan Toon::WebGPU)
+  add_dependencies(toon-webgpu-parity-test toon-renderer-shaders toon-renderer-wgsl)
+  toon_copy_webgpu_runtime(toon-webgpu-parity-test)
+  add_test(NAME toon-webgpu-parity COMMAND toon-webgpu-parity-test
+    "${CMAKE_BINARY_DIR}/backend/vulkan/shaders"
+    "${CMAKE_BINARY_DIR}/backend/webgpu/shaders"
+    "${CMAKE_CURRENT_BINARY_DIR}/webgpu-parity.json"
+    --images "${CMAKE_CURRENT_BINARY_DIR}/webgpu-parity")
+  set_tests_properties(toon-webgpu-parity PROPERTIES
+    SKIP_RETURN_CODE 77 LABELS "gpu;webgpu" TIMEOUT 120)
 endif()
 
 add_executable(toon-expression-test expression_test.cpp)

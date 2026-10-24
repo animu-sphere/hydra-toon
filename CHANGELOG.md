@@ -8,8 +8,27 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- The WebGPU backend's first stage
+  ([WebGPU policy](docs/design/WEBGPU_POLICY.md), renderer report 91):
+  `Toon::WebGPU` on a pinned Dawn release, its Direct3D 12 adapter by
+  default and its Vulkan adapter for diagnosis, renders the unlit mesh
+  pipeline and PreviewSurface offscreen with the Vulkan renderer's products
+  and statistics. `ost build --intent webgpu` (`TOON_ENABLE_WEBGPU`) builds
+  it, downloading the pinned Dawn and DXC releases; `toon-headless
+  --backend webgpu` runs its evidence. On nine canonical scenes over both
+  background modes the two backends' images agree exactly but for one
+  textured pixel at one step, and the PreviewSurface GPU checks pass on
+  both. WGPU-Q1 (parity limits) and WGPU-Q2 (bindings selection) are
+  settled.
+
 ### Changed
 
+- The Slang shaders move from `backend/vulkan/shaders/` to the root
+  `shaders/`, grouped by role, and declare their resources through one
+  bindings module per backend, sampling textures by role. Compiled
+  artifacts keep their names, and the Vulkan pipelines are unchanged.
 - The backend-neutral public types — `OffscreenRenderer`, `PresentSession`,
   `LateFrameSource`, `FrameLatency`, the products, options and statistics —
   move from `vulkan_backend.hpp` and `vulkan_present.hpp` to

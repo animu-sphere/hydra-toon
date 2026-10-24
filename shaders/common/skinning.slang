@@ -4,6 +4,8 @@
 // change only weights. Included, not compiled on its own; the including module's
 // DrawConstants carry `flags`.
 
+#include "bindings/bindings.slang"
+
 // Must match vulkan_internal::kDrawSkinned, kDrawConstantInfluences and
 // kInfluenceCountShift.
 static const uint kDrawSkinned = 2;
@@ -17,11 +19,11 @@ struct JointInfluence {
 };
 
 // The mesh's influences, per point or once when constant.
-[[vk::binding(0, 1)]] StructuredBuffer<JointInfluence> influences;
+TOON_INFLUENCES_BINDING StructuredBuffer<JointInfluence> influences;
 // Entry 0 takes skeleton space to the mesh's own; entry 1 + j is joint j's
 // skinning transform composed with the geometry bind transform, so it takes
 // a rest point straight to skeleton space.
-[[vk::binding(1, 1)]] StructuredBuffer<float4x4> joints;
+TOON_JOINTS_BINDING StructuredBuffer<float4x4> joints;
 
 struct MorphOffset {
   float3 position;
@@ -29,9 +31,9 @@ struct MorphOffset {
   float3 normal;
   uint padding;
 };
-[[vk::binding(2, 1)]] StructuredBuffer<MorphOffset> morphOffsets;
-[[vk::binding(3, 1)]] StructuredBuffer<uint2> morphRanges;
-[[vk::binding(4, 1)]] StructuredBuffer<float> morphWeights;
+TOON_MORPH_OFFSETS_BINDING StructuredBuffer<MorphOffset> morphOffsets;
+TOON_MORPH_RANGES_BINDING StructuredBuffer<uint2> morphRanges;
+TOON_MORPH_WEIGHTS_BINDING StructuredBuffer<float> morphWeights;
 static const uint kDrawMorphed = 128;
 
 // Moves a rest point and its normal as UsdSkel's classicLinear skinning

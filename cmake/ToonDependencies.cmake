@@ -70,3 +70,60 @@ function(toon_configure_viewport_dependencies)
     set(nfd_SOURCE_DIR "${nfd_SOURCE_DIR}" PARENT_SCOPE)
   endif()
 endfunction()
+
+# The WebGPU backend's Dawn (WebGPU policy §2): a published release of
+# prebuilt Windows binaries, pinned by tag and archive SHA-256. Its CMake
+# package provides the static dawn::webgpu_dawn, and its tint validates the
+# generated WGSL at build time. A pin moves only with a report that reruns
+# the parity fixtures. FETCHCONTENT_SOURCE_DIR_DAWN may name an extracted
+# copy of the same archive.
+function(toon_configure_webgpu_dependencies)
+  if(NOT WIN32)
+    message(FATAL_ERROR
+      "TOON_ENABLE_WEBGPU targets native Windows in v0.7.0 (WebGPU policy §1)")
+  endif()
+  if(NOT TOON_SLANGC_EXECUTABLE)
+    message(FATAL_ERROR
+      "TOON_ENABLE_WEBGPU needs slangc, which the Vulkan SDK bundles, to "
+      "generate WGSL")
+  endif()
+  include(FetchContent)
+  FetchContent_Declare(dawn
+    URL "https://github.com/google/dawn/releases/download/v20261008.181332/Dawn-b73d662f73d57bb42209546910666a38e6db95a1-windows-latest-Release.tar.gz"
+    URL_HASH SHA256=b3574efe866329252d738fbb8346e5c1547bdbc23a9db42debfecb267a90cc1e
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_MakeAvailable(dawn)
+  find_package(Threads REQUIRED)
+  find_package(Dawn CONFIG REQUIRED PATHS "${dawn_SOURCE_DIR}" NO_DEFAULT_PATH)
+  find_program(TOON_TINT_EXECUTABLE NAMES tint
+    HINTS "${dawn_SOURCE_DIR}/bin" NO_DEFAULT_PATH REQUIRED)
+  set(TOON_TINT_EXECUTABLE "${TOON_TINT_EXECUTABLE}" PARENT_SCOPE)
+
+  # Dawn's Direct3D 12 device compiles shaders with DXC, which it loads at
+  # run time as dxcompiler.dll beside the executable; its release archive
+  # carries none. A published DXC release is pinned the same way, and only
+  # dxcompiler.dll, under its LLVM and MIT licences, is copied and
+  # installed (report 91). FETCHCONTENT_SOURCE_DIR_DXC may name an
+  # extracted copy of the same archive.
+  FetchContent_Declare(dxc
+    URL "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
+    URL_HASH SHA256=ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_MakeAvailable(dxc)
+  set(TOON_DXC_COMPILER "${dxc_SOURCE_DIR}/bin/x64/dxcompiler.dll")
+  if(NOT EXISTS "${TOON_DXC_COMPILER}")
+    message(FATAL_ERROR "the pinned DXC release has no bin/x64/dxcompiler.dll")
+  endif()
+  set(TOON_DXC_COMPILER "${TOON_DXC_COMPILER}" PARENT_SCOPE)
+  set(TOON_DXC_LICENSES "${dxc_SOURCE_DIR}/LICENSE-LLVM.txt"
+    "${dxc_SOURCE_DIR}/LICENCE-MIT.txt" PARENT_SCOPE)
+endfunction()
+
+# Copies what an executable linking the WebGPU backend loads at run time
+# next to it: DXC's dxcompiler.dll.
+function(toon_copy_webgpu_runtime target)
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${TOON_DXC_COMPILER}"
+      "$<TARGET_FILE_DIR:${target}>"
+    VERBATIM)
+endfunction()

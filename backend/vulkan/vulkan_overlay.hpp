@@ -17,7 +17,7 @@
 
 namespace Toon::vulkan_internal {
 
-// Must match OverlayConstants in shaders/overlay.slang.
+// Must match OverlayConstants in shaders/present/overlay.slang.
 struct OverlayConstants {
   float scale[2];
   float translate[2];

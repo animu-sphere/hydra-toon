@@ -16,7 +16,9 @@ owner: hydra-toon
 > status belongs to the [capability matrix](../reference/CAPABILITY_MATRIX.md);
 > the milestone's remaining work is the [v0.7.0 roadmap](../roadmap/v0.7.0.md).
 > The toolchain measurements behind this page are
-> [report 90](../reports/renderer/90-2026-10-24-webgpu-toolchain-probe.md).
+> [report 90](../reports/renderer/90-2026-10-24-webgpu-toolchain-probe.md);
+> stage 1 and the settled WGPU-Q1 and WGPU-Q2 are
+> [report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md).
 
 ## 1. Purpose and decisions
 
@@ -65,7 +67,18 @@ the project on 2026-10-24 and shape the rest:
   measured reason.
 - **Licences.** Dawn is BSD-3-Clause; its licence and third-party notices
   install with any executable that links it, as `third_party` code already
-  does.
+  does. `third_party/dawn/README.md` lists what the static library carries
+  (Abseil, SPIRV-Tools and -Headers, Vulkan-Headers and -Utility-Libraries,
+  PartitionAlloc), each licence copied at the revision Dawn's `DEPS` pins;
+  a pin change rechecks the list.
+- **DXC.** Dawn's Direct3D 12 device compiles its shaders with DXC, which
+  it loads at run time as `dxcompiler.dll` from the executable's directory
+  and which the Dawn release does not carry. A published
+  [DXC release](https://github.com/microsoft/DirectXShaderCompiler/releases)
+  is pinned the same way, by tag and archive SHA-256, and only its
+  `dxcompiler.dll` is copied beside the hosts and installed, with its LLVM
+  and MIT licences; Microsoft's `dxil.dll` is neither needed nor
+  redistributed. Its pin moves with a parity rerun, as Dawn's does.
 
 ## 3. Boundary and targets
 
@@ -83,8 +96,10 @@ the project on 2026-10-24 and shape the rest:
   the core boundary check gains WebGPU and Dawn includes. Surfaces cross as
   an opaque native-window provider, as `PresentSurfaceProvider` does for
   `VkSurfaceKHR`.
-- Shader sources move from `backend/vulkan/shaders/` to a root `shaders/`
-  when the second backend first compiles them, as the layout already says.
+- Shader sources live in the root `shaders/`, by role: `bindings/`,
+  `common/`, `scene/`, `preview/`, `mtoon/`, `mmd/`, `present/`, and
+  `webgpu/` for this backend's own modules. A module keeps its basename,
+  which names its compiled artifacts on either backend.
 
 ## 4. Binding model
 
@@ -102,14 +117,19 @@ backend's layout is grouped by update frequency:
 - **Draw constants.** The Vulkan push-constant block becomes a dynamic-offset
   uniform binding with 256-byte alignment. Its fields and meanings do not
   change; the ring is written once per frame with the fast values (§6).
-- **Role slots.** Each material family declares its texture roles once —
+- **Role slots.** Each material family declares its texture roles once, as
+  constants of its common module —
   MToon's base, shade, normal, emissive, rim multiply, MatCap, outline width,
   UV animation mask and shading shift; MMD's base, sphere and toon;
   PreviewSurface's channels — each with its own sampler binding. A role
   without a texture binds a shared 1 × 1 fallback, so the existing "entry 0
   means absent" flag remains the shader's test. The model's parameter
   records keep their layouts; only their texture entries stop being table
-  indices on this backend.
+  indices on this backend, where a present texture's entry is 1. Group 1
+  has nine role slots, the most a model declares (MToon's), role r's
+  texture at binding 3 + r and its sampler at 12 + r, and each model's
+  buffer at its own binding (0 MToon, 1 MMD, 2 PreviewSurface), so the
+  caster pass can read two models' slots.
 - **Samplers.** A sampler is bound per role, never selected by a dynamic
   index, which WGSL forbids. The renderer's nine sampler states are created
   once and shared across bind groups.
@@ -124,10 +144,14 @@ The Vulkan backend's descriptor layout does not change for WebGPU's sake
 
 - **One source, two bindings.** The Slang modules stay the shading source of
   truth. Resource declarations — the texture table and push constants on
-  Vulkan, role bindings and the draw uniform on WebGPU — move into one small
-  bindings module per backend, behind the existing `SampleTexture` and
-  `DrawConstants` accessors. Shading functions, parameter records and
-  material semantics stay shared.
+  Vulkan, role bindings and the draw uniform on WebGPU — live in one small
+  bindings module per backend, `shaders/bindings/bindings_vulkan.slang` and
+  `bindings_webgpu.slang`, which `bindings.slang` selects by the
+  `TOON_WEBGPU` define (WGPU-Q2). Each states where every buffer binds, the
+  draw constants' binding, and the accessors the shared modules sample
+  through: `SampleRole` and `SampleRoleLevel` (a role, its entry and the
+  Vulkan sampler index) and `GatherShadow`. Shading functions, parameter
+  records and material semantics stay shared.
 - **WGSL generation.** `slangc -target wgsl`, the same `slangc` as SPIR-V,
   generates each entry point at build time. The build validates every
   generated module with the pinned Dawn release's `tint` before it is
@@ -161,7 +185,10 @@ The Vulkan backend's descriptor layout does not change for WebGPU's sake
 - **Upload.** Structural uploads (geometry, textures, deformation buffers)
   use queue writes on revision changes only, as Vulkan's staging does; the
   existing upload counters report the same zero for a pose-only frame.
-  Mipmaps are generated by a render or compute pass on this backend.
+  Mipmaps are generated on this backend by a render pass per level
+  (`shaders/webgpu/mipmap.slang`), each drawn from the level above, an sRGB
+  texture's through sRGB views so the filter averages linear values, as a
+  blit between sRGB images does.
 - **Readback.** Offscreen colour and depth are copied to mappable buffers and
   read after their map completes, giving the same `ColorProduct` and
   `DepthProduct`, origin top left, rows repacked to the products' pitch.
@@ -255,8 +282,8 @@ large gap is reported with its pass.
 
 | ID | Question | Proposal |
 | --- | --- | --- |
-| WGPU-Q1 | Visual parity thresholds per scene class | Measure in stage 1 on the unlit and PreviewSurface fixtures, then fix per-class limits on max and fraction-above values before stage 2's material scenes |
-| WGPU-Q2 | Whether the bindings module is selected by a preprocessor define or by Slang link-time modules | The simpler of the two that keeps `slangc` one invocation per entry point; decided with the first moved shader |
+| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class (multisampled, MToon, MMD, shadows) is measured against these and gets a limit of its own only with a report that explains the difference |
+| WGPU-Q2 | Whether the bindings module is selected by a preprocessor define or by Slang link-time modules | Settled 2026-10-24: the `TOON_WEBGPU` preprocessor define selects `bindings_webgpu.slang`; `slangc` stays one invocation per entry point, and nothing needed link-time modules |
 | WGPU-Q3 | How often the Dawn pin moves | Only for a fix or feature the backend needs, each with a parity rerun report; no tracking of Dawn's daily releases |
 
 ## 12. Outside this policy

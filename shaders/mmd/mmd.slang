@@ -5,7 +5,7 @@
 // plus texture table entries, so a new or changed material never compiles
 // or selects a shader.
 
-#include "mmd_common.slang"
+#include "mmd/mmd_common.slang"
 
 [shader("vertex")]
 MmdVertexOutput vertex_main(MmdVertexInput input) {

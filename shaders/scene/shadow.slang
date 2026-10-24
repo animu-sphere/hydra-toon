@@ -7,8 +7,8 @@
 // by its slot's alpha; as MikuMikuEffect's full.fx draws MMD's map, no
 // texel's alpha cuts an MMD caster away.
 
-#include "mtoon_common.slang"
-#include "preview_common.slang"
+#include "mtoon/mtoon_common.slang"
+#include "preview/preview_common.slang"
 
 // Must match vulkan_internal::kDrawCutMToon and kDrawCutPreview.
 static const uint kDrawCutMToon = 256;
@@ -50,7 +50,7 @@ void fragment_main(float2 st : TEXCOORD0) {
   } else if ((draw.flags & kDrawCutPreview) != 0) {
     const PreviewParameters material = preview_materials[draw.material_slot];
     const float opacity = saturate(
-        PreviewScalar(material.inputs[4], st, material.base_color.a));
+        PreviewScalar(material, kPreviewOpacity, st, material.base_color.a));
     if (material.surface.z >= 0.0 && opacity < material.surface.z) {
       discard;
     }

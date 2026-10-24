@@ -33,7 +33,9 @@ that moment every file is project-owned; the template is not re-applied.
 | --- | --- | --- | --- |
 | `core/render-world/` | `toon-render-world` | `Toon::RenderWorld` | host-neutral scene state |
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
-| `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline, Slang shaders |
+| `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline; compiles the Slang shaders to SPIR-V |
+| `backend/webgpu/` | `toon-render-webgpu` | `Toon::WebGPU` | WebGPU backend on Dawn ([WebGPU policy](../design/WEBGPU_POLICY.md)): persistent offscreen renderer; compiles the shaders it uses to Tint-validated WGSL; optional (`TOON_ENABLE_WEBGPU`), Windows only, linked into the headless runner and its tests, never exported |
+| `shaders/` | `toon-renderer-shaders`, `toon-renderer-wgsl` | — | the Slang shading source both backends compile, by role (§3) |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
@@ -62,13 +64,13 @@ placement rule; it does not say the component exists.
 | `RenderGraph` (§16) | `core/render-graph/` when it exists | new core target |
 | `ToonRenderer` (frame loop, late latch, telemetry) | `core/` | new core target |
 | Vulkan backend | `backend/vulkan/` | `toon-render-vulkan` |
-| WebGPU backend | `backend/webgpu/` | new backend target |
-| Slang shaders | `backend/vulkan/shaders/` while Vulkan is the only consumer; `shaders/` at the root once a second backend compiles them | — |
+| WebGPU backend | `backend/webgpu/` | `toon-render-webgpu` |
+| Slang shaders | `shaders/` at the root: `bindings/` (each backend's resource declarations, selected by `TOON_WEBGPU`), `common/` (skinning, the surface stage and lighting), `scene/` (unlit mesh, shadow casters), `preview/`, `mtoon/`, `mmd/`, `present/` (overlay, composite) and `webgpu/` (WebGPU-only modules). A compiled module keeps its basename; includes are relative to `shaders/` | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
 | Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/src/` | `toon-viewport` |
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
-| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`) | `include/toon/` | — |
+| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `webgpu_backend.hpp`) | `include/toon/` | — |
 
 The viewport keeps private implementation and headers in `adapters/viewport/src/`;
 fixtures, test executables and CMake/Python check drivers live in `tests/`,
@@ -394,7 +396,9 @@ target or new backend boundary is added.
 adapters/{headless,viewport,hydra2,fast}
         │
         ▼
-backend/vulkan ──→ core/render-extraction ──→ core/render-world
+backend/vulkan ──┐
+                 ├──→ core/render-extraction ──→ core/render-world
+backend/webgpu ──┘
 ```
 
 1. `core/` depends on nothing but the C++ standard library.
@@ -405,7 +409,10 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
    `OffscreenRenderer`, `PresentSession`, `LateFrameSource`, the products,
    options and statistics — and a backend's own header includes it and adds
    only its factories and the inputs only it consumes: SPIR-V paths
-   (`SceneShaders`) and `PresentSurfaceProvider` for Vulkan.
+   (`SceneShaders`) and `PresentSurfaceProvider` for Vulkan, WGSL paths
+   (`WebGpuShaders`) and the Dawn adapter choice for WebGPU. `webgpu.h`
+   and Dawn appear only in `backend/webgpu/`'s `.cpp` files and its private
+   `webgpu_internal.hpp`.
    `validation/check-core-boundary.cmake.in` enforces the boundary, WebGPU
    and Dawn includes among the forbidden ones, for the core and backend
    headers it lists; **a new public header is added to that list in the
@@ -496,10 +503,14 @@ backend/vulkan ──→ core/render-extraction ──→ core/render-world
 | Hydra adapter | `ost build --profile lookdev --intent hydra` | `lookdev` or `usd` (a real runtime) | yes |
 | standalone viewport | `ost renderer viewport` | `core` | none |
 | viewport hosting Hydra | `ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>` | `lookdev` or `usd` | yes |
+| WebGPU backend | `ost build --intent webgpu` | `core` | none |
 
-The `hydra` intent (`TOON_ENABLE_HYDRA2=ON`) and the `viewport-usd` intent
-(`TOON_ENABLE_HYDRA2=ON`, `TOON_ENABLE_VIEWPORT=ON`) are declared in
-`openstrata.toml`. `ost renderer view` and `ost renderer viewport` request
+The `hydra` intent (`TOON_ENABLE_HYDRA2=ON`), the `viewport-usd` intent
+(`TOON_ENABLE_HYDRA2=ON`, `TOON_ENABLE_VIEWPORT=ON`) and the `webgpu` intent
+(`TOON_ENABLE_WEBGPU=ON`) are declared in `openstrata.toml`. The `webgpu`
+intent downloads the pinned Dawn and DXC releases at configure time and adds
+`toon-headless --backend webgpu` and the WebGPU CTests; no other intent and
+not the published package links Dawn. `ost renderer view` and `ost renderer viewport` request
 their adapter through `OST_RENDERER_ADAPTERS` (`hydra2`, `viewport`); the
 project reads that list as adapters to add to what the intent's options
 enable, never as the whole set.
@@ -509,9 +520,11 @@ enable, never as the whole set.
 ```text
 <prefix>/
 ├── bin/toon-headless, bin/shaders/*.spv
+│                              bin/shaders/*.wgsl, bin/dxcompiler.dll           (WebGPU build only)
 ├── include/toon/
 ├── lib/toon-render-*.lib|.a
 ├── lib/cmake/Toon/            ToonConfig.cmake, ToonTargets.cmake
 ├── lib/usd/hdToon/            hdToon module, resources/plugInfo.json, shaders/   (Hydra build only)
-└── share/toon/                openstrata.renderer.yaml, openstrata.scaffold.yaml, tests/usdview-smoke.usda
+└── share/toon/                openstrata.renderer.yaml, openstrata.scaffold.yaml, tests/usdview-smoke.usda,
+                               licenses/{dawn,dxc}/                            (WebGPU build only)
 ```

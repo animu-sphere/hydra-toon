@@ -1,15 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Controlled linear-light checks, independent of a format plugin or an
 // external asset: constant emission, the normal-incidence BRDF, surface
-// opacity, Mask, fallback, and the cost of changing material values.
+// opacity, Mask, fallback, and the cost of changing material values. The
+// same checks run on either backend (WebGPU policy §9).
 #include <toon/vulkan_backend.hpp>
+#if defined(TOON_HAS_WEBGPU)
+#include <toon/webgpu_backend.hpp>
+#endif
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
+using Factory = std::function<std::unique_ptr<Toon::OffscreenRenderer>(
+    Toon::FrameStatus&, std::string&, const Toon::RenderOptions&)>;
 void Require(bool value, const char* message) {
   if (!value)
     throw std::runtime_error(message);
@@ -21,12 +29,12 @@ std::array<int, 4> Center(const Toon::ColorProduct& image) {
 void Near(int actual, float expected, const char* message) {
   Require(std::abs(static_cast<float>(actual) - expected * 255.0F) <= 2.0F, message);
 }
-bool Normals(const Toon::SceneShaders& shaders, std::uint32_t samples) {
+bool Normals(const Factory& create, std::uint32_t samples) {
   Toon::FrameStatus status;
   std::string error;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
+  auto renderer = create(status, error, {samples});
   if (status == Toon::FrameStatus::Skip) return false;
-  auto reference = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
+  auto reference = create(status, error, {samples});
   Require(renderer && reference, error.c_str());
   Toon::RenderWorld world, oracle;
   world.SetBootstrapTriangle();
@@ -129,10 +137,10 @@ bool Normals(const Toon::SceneShaders& shaders, std::uint32_t samples) {
   std::cout << "PreviewSurface normals: " << samples << "x constants, mirrored/rotated derivatives, transformed textures and fallback passed\n";
   return true;
 }
-bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
+bool Run(const Factory& create, std::uint32_t samples) {
   Toon::FrameStatus status;
   std::string error;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
+  auto renderer = create(status, error, {samples});
   if (status == Toon::FrameStatus::Skip) {
     std::cout << error << '\n';
     return false;
@@ -401,17 +409,35 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
               display_edited.texture_uploads == display_resident.texture_uploads &&
               display_edited.pipelines_created == display_resident.pipelines_created,
       "display colour and light edits must retain geometry, materials, textures and pipelines");
-  Require(renderer->statistics().validation_message_count == 0, "Vulkan validation error");
+  Require(renderer->statistics().validation_message_count == 0, "validation error");
   std::cout << "preview_surface samples=" << samples << " constants, textures, UV transforms, GGX, Mask, Blend and slot edits passed\n";
   return true;
 }
 } // namespace
 int main(int argc, char** argv) {
   try {
-    if (argc != 2)
+    if (argc != 2 && !(argc == 4 && std::string_view(argv[2]) == "--backend"))
       return 2;
-    const auto shaders = Toon::SceneShadersIn(argv[1]);
-    return Run(shaders, 1) && Run(shaders, 4) && Normals(shaders, 1) && Normals(shaders, 4) ? 0 : 77;
+    const std::string directory = argv[1];
+    if (argc == 4 && std::string_view(argv[3]) == "webgpu") {
+#if defined(TOON_HAS_WEBGPU)
+      const auto shaders = Toon::WebGpuShadersIn(directory);
+      const Factory create = [&](Toon::FrameStatus& status, std::string& error,
+                                 const Toon::RenderOptions& options) {
+        return Toon::CreateWebGpuOffscreenRenderer(shaders, status, error, options);
+      };
+      // One sample until the backend's stage 2 brings 4x.
+      return Run(create, 1) && Normals(create, 1) ? 0 : 77;
+#else
+      return 2;
+#endif
+    }
+    const auto shaders = Toon::SceneShadersIn(directory);
+    const Factory create = [&](Toon::FrameStatus& status, std::string& error,
+                               const Toon::RenderOptions& options) {
+      return Toon::CreateOffscreenRenderer(shaders, status, error, options);
+    };
+    return Run(create, 1) && Run(create, 4) && Normals(create, 1) && Normals(create, 4) ? 0 : 77;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;

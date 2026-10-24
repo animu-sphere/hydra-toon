@@ -2,6 +2,9 @@
 #include <toon/extraction.hpp>
 #include <toon/render_world.hpp>
 #include <toon/vulkan_backend.hpp>
+#if defined(TOON_HAS_WEBGPU)
+#include <toon/webgpu_backend.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -85,7 +88,7 @@ struct Session {
 bool WriteReport(const std::string& path,
     const std::vector<Check>& checks,
     const Toon::GpuFrameEvidence& frame,
-    const Session& session) {
+    const Session& session, std::string_view backend) {
   // Write to a sibling temp file and rename into place, so a run killed
   // mid-write leaves no partial overlay for `ost renderer merge` to pick up.
   const std::filesystem::path final_path(path);
@@ -106,7 +109,7 @@ bool WriteReport(const std::string& path,
            << (session.succeeded ? "success" : "failure") << "\"},\n";
     const Toon::OffscreenStatistics& device = frame.statistics;
     if (!device.device_name.empty()) {
-      output << "  \"device\": {\"backend\":\"vulkan\",\"name\":\""
+      output << "  \"device\": {\"backend\":\"" << backend << "\",\"name\":\""
              << Escape(device.device_name) << "\",\"api_version\":\""
              << Escape(device.api_version) << "\",\"driver_version\":\""
              << Escape(device.driver_version) << "\",\"vendor_id\":"
@@ -4065,6 +4068,85 @@ std::string Status(Toon::FrameStatus status) {
   return "fail";
 }
 
+#if defined(TOON_HAS_WEBGPU)
+// The headless evidence run on the WebGPU backend (WebGPU policy §8): the
+// same bootstrap frame, products and persistence as on Vulkan, through
+// Dawn. The checks of what later stages bring report skip, naming the
+// stage (WebGPU policy §10).
+void WebGpuChecks(const Toon::DrawList& draws, const std::string& shader_directory,
+    Toon::WebGpuAdapter adapter, std::vector<Check>& checks,
+    Toon::GpuFrameEvidence& frame) {
+  const Toon::BackendCapability capability = Toon::ProbeWebGpuBackend(adapter);
+  checks.push_back({"renderer.backend.capability",
+      capability.available ? "pass" : "skip", capability.detail});
+  frame = Toon::RenderWebGpuOffscreen(draws, Toon::WebGpuShadersIn(shader_directory),
+      1000, adapter);
+  checks.push_back({"renderer.gpu.frame", Status(frame.status), frame.detail});
+  const Toon::OffscreenStatistics& statistics = frame.statistics;
+  if (statistics.validation_available) {
+    checks.push_back({"renderer.validation.messages",
+        statistics.validation_message_count == 0 ? "pass" : "fail",
+        statistics.validation_message_count == 0 ? "" : statistics.validation_detail});
+  } else {
+    checks.push_back({"renderer.validation.messages", "skip",
+        "renderer.gpu.frame did not create a WebGPU device"});
+  }
+  const std::string dependent = "renderer.gpu.frame did not pass: " + frame.detail;
+  if (frame.status == Toon::FrameStatus::Pass) {
+    const bool color_ok = frame.color.width == 64 && frame.color.height == 64 &&
+        frame.color.row_pitch == 64U * 4U && frame.color.pixel_format == "rgba8-unorm" &&
+        frame.color.origin == "top-left" && frame.color.color_space == "linear" &&
+        frame.color.payload.size() == 64U * 64U * 4U &&
+        DefaultDisplayPixel(CenterPixel(frame.color));
+    const std::size_t depth_center =
+        (frame.depth.height / 2U) * frame.depth.width + frame.depth.width / 2U;
+    const bool depth_ok = frame.depth.width == 64 && frame.depth.height == 64 &&
+        frame.depth.row_pitch == 64U * sizeof(float) &&
+        frame.depth.pixel_format == "d32-sfloat" && frame.depth.origin == "top-left" &&
+        frame.depth.payload.size() == 64U * 64U && depth_center < frame.depth.payload.size() &&
+        frame.depth.payload[depth_center] > 0.0F && frame.depth.payload[depth_center] < 0.9F &&
+        frame.depth.payload.front() > 0.99F;
+    // 1,000 frames on one device: the one pipeline the bootstrap draw needs,
+    // created on the first frame, one target allocation and one upload of
+    // the unchanged mesh.
+    const bool persistence_ok = statistics.frames_rendered == 1000 &&
+        statistics.completion == 1000 && statistics.pipelines_created == 1 &&
+        statistics.target_allocations == 1 && statistics.topology_uploads == 1 &&
+        statistics.point_uploads == 1;
+    checks.push_back({"renderer.render_product.color", color_ok ? "pass" : "fail",
+        color_ok ? "" : "RGBA8 metadata or center pixel mismatch"});
+    checks.push_back({"renderer.render_product.depth", depth_ok ? "pass" : "fail",
+        depth_ok ? "" : "depth metadata or numeric payload mismatch"});
+    checks.push_back({"renderer.frame.persistence", persistence_ok ? "pass" : "fail",
+        persistence_ok ? "" : "1,000 frames did not complete on one pipeline, one target "
+                              "allocation and one mesh upload"});
+  } else {
+    for (const char* id : {"renderer.render_product.color", "renderer.render_product.depth",
+             "renderer.frame.persistence"}) {
+      checks.push_back({id, "skip", dependent});
+    }
+  }
+  const std::string stage2 = "the WebGPU backend's stage 2 (WebGPU policy §10)";
+  const std::string stage3 = "the WebGPU backend's stage 3 (WebGPU policy §10)";
+  for (const char* id : {"renderer.material.mtoon_opaque", "renderer.lighting.scene",
+           "renderer.material.mtoon_textured", "renderer.material.mtoon_rest",
+           "renderer.material.mtoon_normal", "renderer.material.mtoon_outline",
+           "renderer.outline.sampling", "renderer.outline.width", "renderer.outline.motion",
+           "renderer.outline.frustum", "renderer.outline.depth_clip",
+           "renderer.outline.occlusion", "renderer.material.mtoon_rim",
+           "renderer.material.mtoon_transparent", "renderer.material.mmd",
+           "renderer.material.mmd_morph", "renderer.material.mmd_outline",
+           "renderer.antialiasing.msaa", "renderer.skinning.gpu"}) {
+    checks.push_back({id, "skip", stage2});
+  }
+  for (const char* id : {"renderer.material.mmd_self_shadow", "renderer.shadow.shared_casters",
+           "renderer.shadow.receivers", "renderer.shadow.views",
+           "renderer.shadow.cross_family"}) {
+    checks.push_back({id, "skip", stage3});
+  }
+}
+#endif
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -4078,17 +4160,36 @@ int main(int argc, char** argv) {
 
   std::string report_path = "renderer-report.json";
   bool install_tree = false;
+  std::string backend = "vulkan";
+  std::string adapter = "d3d12";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--report" && index + 1 < argc) {
       report_path = argv[++index];
     } else if (argument == "--install-tree") {
       install_tree = true;
+    } else if (argument == "--backend" && index + 1 < argc) {
+      backend = argv[++index];
+    } else if (argument == "--webgpu-adapter" && index + 1 < argc) {
+      adapter = argv[++index];
     } else {
-      std::cerr << "usage: toon-headless [--report <path>] [--install-tree]\n";
+      std::cerr << "usage: toon-headless [--report <path>] [--install-tree] "
+                   "[--backend vulkan|webgpu] [--webgpu-adapter d3d12|vulkan]\n";
       return 2;
     }
   }
+  if ((backend != "vulkan" && backend != "webgpu") ||
+      (adapter != "d3d12" && adapter != "vulkan")) {
+    std::cerr << "--backend takes vulkan or webgpu, --webgpu-adapter d3d12 or vulkan\n";
+    return 2;
+  }
+#if !defined(TOON_HAS_WEBGPU)
+  if (backend == "webgpu") {
+    std::cerr << "this build has no WebGPU backend; configure with "
+                 "TOON_ENABLE_WEBGPU=ON (the webgpu intent)\n";
+    return 2;
+  }
+#endif
 
   Toon::RenderWorld world;
   world.SetBootstrapTriangle();
@@ -4098,11 +4199,23 @@ int main(int argc, char** argv) {
   const bool core_ok = first.revision == 1 && unchanged.revision == first.revision &&
                        draws.draws.size() == 1 && draws.triangle_count == 1;
 
+  const std::string shader_directory =
+      (std::filesystem::absolute(argv[0]).parent_path() / "shaders").string();
+  std::vector<Check> checks;
+  checks.push_back({"renderer.core.boundary", core_ok ? "pass" : "fail",
+      core_ok ? "" : "commit/extraction contract mismatch"});
+  Toon::GpuFrameEvidence frame;
+#if defined(TOON_HAS_WEBGPU)
+  if (backend == "webgpu") {
+    WebGpuChecks(draws, shader_directory,
+        adapter == "vulkan" ? Toon::WebGpuAdapter::Vulkan : Toon::WebGpuAdapter::Direct3D12,
+        checks, frame);
+  } else
+#endif
+  {
   const Toon::BackendCapability capability = Toon::ProbeVulkanBackend();
-  const Toon::SceneShaders shaders = Toon::SceneShadersIn(
-      (std::filesystem::absolute(argv[0]).parent_path() / "shaders").string());
-  const Toon::GpuFrameEvidence frame =
-      Toon::RenderOffscreen(draws, shaders, 1000);
+  const Toon::SceneShaders shaders = Toon::SceneShadersIn(shader_directory);
+  frame = Toon::RenderOffscreen(draws, shaders, 1000);
 
   bool color_ok = false;
   bool depth_ok = false;
@@ -4143,9 +4256,6 @@ int main(int argc, char** argv) {
                      statistics.point_uploads == 1;
   }
 
-  std::vector<Check> checks;
-  checks.push_back({"renderer.core.boundary", core_ok ? "pass" : "fail",
-      core_ok ? "" : "commit/extraction contract mismatch"});
   checks.push_back({"renderer.backend.capability",
       capability.available ? "pass" : "skip", capability.detail});
   checks.push_back({"renderer.gpu.frame", Status(frame.status), frame.detail});
@@ -4224,6 +4334,7 @@ int main(int argc, char** argv) {
     checks.push_back({"renderer.antialiasing.msaa", "skip", dependent});
     checks.push_back({"renderer.skinning.gpu", "skip", dependent});
   }
+  }
   checks.push_back({"renderer.install_tree", install_tree ? "pass" : "skip",
       install_tree ? "" : "run the renderer install-tree CTest"});
 #if defined(TOON_HAS_HYDRA2)
@@ -4255,7 +4366,7 @@ int main(int argc, char** argv) {
   // a failed session is one that could not produce them at all.
   session.completed = static_cast<long long>(std::time(nullptr));
   session.succeeded = true;
-  if (!WriteReport(report_path, checks, frame, session)) {
+  if (!WriteReport(report_path, checks, frame, session, backend)) {
     std::cerr << "cannot write renderer report: " << report_path << '\n';
     return 1;
   }

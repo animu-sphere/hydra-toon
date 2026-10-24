@@ -237,7 +237,7 @@ def main():
             changed = float(np.abs(first-second)[mask].mean())
             signals.append(dict(renderer=renderer, samples=samples, cases=[a,b], mae_rgb=changed, passed=changed > 1))
     inputs = [fixture, Path(__file__).resolve(), scripts / 'preview_surface_usdview.py',
-              scripts.parent / 'backend/vulkan/shaders/preview_surface.slang',
+              scripts.parent / 'shaders/preview/preview_surface.slang',
               scripts.parent / 'backend/vulkan/vulkan_scene.cpp']
     inputs.extend(output / name for name in ('color.png','normal.png','normal-rotated.png','scalar.png','cases.json'))
     controls = image_controls(output)
