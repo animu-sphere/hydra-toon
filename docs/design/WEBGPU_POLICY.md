@@ -18,7 +18,9 @@ owner: hydra-toon
 > The toolchain measurements behind this page are
 > [report 90](../reports/renderer/90-2026-10-24-webgpu-toolchain-probe.md);
 > stage 1 and the settled WGPU-Q1 and WGPU-Q2 are
-> [report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md).
+> [report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md), and
+> stage 2 and WGPU-Q1's multisampled classes
+> [report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md).
 
 ## 1. Purpose and decisions
 
@@ -162,6 +164,17 @@ The Vulkan backend's descriptor layout does not change for WebGPU's sake
   texture table, push constants, the composite pass's multisampled load, and
   MMD's vertex interfaces, which need explicit locations. Every other module
   validates once its draw constants are bound.
+- **Interfaces.** WGSL generation takes a semantic's nonzero index as its
+  location and fills the rest in declaration order, which SPIR-V generation
+  uses throughout, so a shared stage interface carries each place after the
+  first in its semantic (`NORMAL1`, `TEXCOORD2`), and a struct with
+  semantics is not an ordinary function's parameter or result
+  ([report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md)).
+- **Derivatives.** Explicit derivatives go through the bindings'
+  `DerivativeX`, `DerivativeY` and `DerivativeWidth`: Vulkan's plain ones,
+  as its driver takes them, and WebGPU's fine ones, since Dawn's Direct3D 12
+  device takes WGSL's plain ones coarse where the Vulkan reference driver
+  takes them fine.
 - **Uniformity.** WGSL requires implicit-derivative sampling in uniform
   control flow. A texture sample behind a material-dependent branch is
   restructured to sample unconditionally or with explicit gradients; the
@@ -213,6 +226,16 @@ background modes, and resolve before readback or presentation.
   coverage themselves through `@builtin(sample_mask)` from the same cutoff
   ramp and output alpha 1, so one opaque sample in 4x over a transparent
   clear still resolves to alpha 0.25. Opaque and 1x output need neither.
+  How many samples a share keeps, and which, is the implementation's under
+  alpha to coverage; `webgpu/mtoon_coverage.slang` keeps those the Vulkan
+  backend's reference driver keeps, its count, 2 x 2 dither and sample
+  order as measured in
+  [report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md), and the
+  parity run's coverage probe measures them again on another driver.
+- **Depth resolve.** WebGPU resolves colour as a pass ends but not depth;
+  a multisampled frame's depth product is each pixel's sample 0, written by
+  a resolve pass (`webgpu/depth_resolve.slang`), as the Vulkan backend's
+  sample-zero resolve gives it.
 - **Blend and outline** keep their draw order, blend factors and depth rules
   from [material policy](MATERIAL_POLICY.md) §5–§7; the outline's depth bias
   is a pipeline state on both backends.
@@ -282,7 +305,7 @@ large gap is reported with its pass.
 
 | ID | Question | Proposal |
 | --- | --- | --- |
-| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class (multisampled, MToon, MMD, shadows) is measured against these and gets a limit of its own only with a report that explains the difference |
+| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class is measured against these and gets a limit of its own only with a report that explains the difference. MToon and MMD hold them at 1x and 4x ([report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md)) but for two multisampled classes and the hulls' depth: at 4x a scene with outline hulls at most two steps on at most 2e-4 of its pixels, a sample at a thin hull's edge falling on its other side; MToon Mask at most one sample (64 steps) on at most 2e-4 of its pixels, a share on a coverage threshold, coverage identical; a hull's depth within 5e-6, its bias's slope term being the driver's. Shadows are measured in stage 3 |
 | WGPU-Q2 | Whether the bindings module is selected by a preprocessor define or by Slang link-time modules | Settled 2026-10-24: the `TOON_WEBGPU` preprocessor define selects `bindings_webgpu.slang`; `slangc` stays one invocation per entry point, and nothing needed link-time modules |
 | WGPU-Q3 | How often the Dawn pin moves | Only for a fix or feature the backend needs, each with a parity rerun report; no tracking of Dawn's daily releases |
 
