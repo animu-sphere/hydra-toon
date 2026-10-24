@@ -6,7 +6,7 @@
 // shows, in the edge colour. The size and colour are the material slot's,
 // so an edge edit rewrites a slot and never selects a shader.
 
-#include "mmd_common.slang"
+#include "mmd/mmd_common.slang"
 
 // VertexInput's streams at locations 0-2, in its order, and a fourth.
 struct MmdOutlineInput {

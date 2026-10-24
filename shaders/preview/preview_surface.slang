@@ -2,8 +2,8 @@
 // Basic metallic/roughness fallback. Uniform ambient approximates diffuse
 // irradiance; environment reflections and arbitrary graph evaluation are
 // outside this realization. All shading takes place in linear colour.
-#include "surface_common.slang"
-#include "preview_common.slang"
+#include "common/surface_common.slang"
+#include "preview/preview_common.slang"
 
 [shader("vertex")]
 TangentVertexStageOutput vertex_main(TangentVertexInput input) {
@@ -24,17 +24,17 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
   } else {
     material = preview_materials[draw.material_slot];
   }
-  const float opacity = saturate(PreviewScalar(material.inputs[4], st, material.base_color.a));
+  const float opacity = saturate(PreviewScalar(material, kPreviewOpacity, st, material.base_color.a));
   const float alpha = (draw.flags & kDrawBlend) != 0 ? opacity : 1.0;
-  const float3 base = max(PreviewColor(material.inputs[0], st, material.base_color.rgb), 0.0);
-  const float metallic = saturate(PreviewScalar(material.inputs[2], st, material.surface.x));
-  const float roughness = clamp(PreviewScalar(material.inputs[3], st, material.surface.y), 0.04, 1.0);
+  const float3 base = max(PreviewColor(material, kPreviewBase, st, material.base_color.rgb), 0.0);
+  const float metallic = saturate(PreviewScalar(material, kPreviewMetallic, st, material.surface.x));
+  const float roughness = clamp(PreviewScalar(material, kPreviewRoughness, st, material.surface.y), 0.04, 1.0);
   // UsdPreviewSurface consumes an already signed tangent-space vector.
   // Texture scale/bias supplies any [0,1] to [-1,1] decoding; +Y is +st.V.
-  const float3 map = PreviewColor(material.inputs[5], st, material.normal.xyz);
+  const float3 map = PreviewColor(material, kPreviewNormal, st, material.normal.xyz);
   const float3 n = TangentMappedNormal(normalize(view_normal), view_tangent,
       view_position, st, map, 1.0, true) * (front ? 1.0 : -1.0);
-  const float3 emission = max(PreviewColor(material.inputs[1], st, material.emissive.rgb), 0.0);
+  const float3 emission = max(PreviewColor(material, kPreviewEmissive, st, material.emissive.rgb), 0.0);
   const float3 position_dx = ddx(view_position);
   const float3 position_dy = ddy(view_position);
   // All implicit samples and frame derivatives precede divergent discard.

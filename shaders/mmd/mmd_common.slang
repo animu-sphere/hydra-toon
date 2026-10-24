@@ -9,7 +9,7 @@
 // result is converted from sRGB to linear once, at the end, so that the
 // host's encoding of the linear target writes MMD's values.
 
-#include "surface_common.slang"
+#include "common/surface_common.slang"
 
 // Must match vulkan_internal::MmdParameters.
 struct MmdParameters {
@@ -45,7 +45,13 @@ static const uint kSphereMultiply = 1;
 static const uint kSphereAdd = 2;
 static const uint kSphereSubTexture = 3;
 
-[[vk::binding(4, 0)]] StructuredBuffer<MmdParameters> mmd_materials;
+TOON_MMD_MATERIALS_BINDING StructuredBuffer<MmdParameters> mmd_materials;
+
+// MMD's texture roles (WebGPU policy §4), the bindings' role numbers. Must
+// match webgpu_internal::MmdRole.
+static const uint kMmdBase = 0;
+static const uint kMmdSphere = 1;
+static const uint kMmdToon = 2;
 
 // Must match vulkan_internal::MmdShadowParameters: where MMD's self-shadow
 // map was drawn from this frame, and whether material morphs' tints draw.
@@ -66,7 +72,7 @@ struct MmdShadowParameters {
 
 // The first direct light's shared view (surface_common's shadow_map) is
 // MMD's self-shadow map, read texel by texel and filtered here.
-[[vk::binding(6, 0)]] StructuredBuffer<MmdShadowParameters> mmd_shadow;
+TOON_MMD_SHADOW_BINDING StructuredBuffer<MmdShadowParameters> mmd_shadow;
 
 // How far behind the map's depth, in MMD units, a point falls into MMD's
 // self-shadow, in full.fx's form 1 - saturate(depth behind * sharpness -
@@ -213,8 +219,7 @@ float SelfShadowLight(float3 view_position, float3 normal, float lambert) {
     const float2 f = tap - base;
     // The four texels around the tap: w its own, z the next across, x the
     // next down, y both.
-    const float4 seen = shadow_map.Gather(samplers[kClampSampler],
-        float3((base + 1.0) / size, shadow.texel.z));
+    const float4 seen = GatherShadow((base + 1.0) / size, shadow.texel.z);
     const float4 behind = max(depth + dot(plane, apart) -
                                   seen * shadow.parameters.y - allowance,
         0.0);
@@ -245,7 +250,7 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
       ? float3(0.0)
       : DirectLight(0, view_position, light_direction);
   const float lambert = dot(normal, light_direction);
-  float4 base_texel = SampleTexture(material.textures.x,
+  float4 base_texel = SampleTexture(kMmdBase, material.textures.x,
       material.textures.y, material.base_uv, st);
   // The sphere map is sampled where the view-space normal points, x right
   // and y up, in the image's top-left UV space; it needs no UVs. A
@@ -255,14 +260,14 @@ MmdSurface ShadeMmd(MmdParameters material, float3 view_normal,
   const float2 sphere_uv = sphere == kSphereSubTexture
       ? sub_uv
       : normal.xy * float2(0.5, -0.5) + 0.5;
-  float4 sphere_texel = textures[material.textures.z].Sample(
-      samplers[material.textures.w], sphere_uv);
+  float4 sphere_texel = SampleRole(kMmdSphere, material.textures.z,
+      material.textures.w, sphere_uv);
   // The ramp's top row is the lit side, its bottom row the far side.
-  float4 toon_texel = textures[material.modes.x].Sample(
-      samplers[kClampSampler], float2(0.0, 0.5 - 0.5 * lambert));
+  float4 toon_texel = SampleRole(kMmdToon, material.modes.x, kClampSampler,
+      float2(0.0, 0.5 - 0.5 * lambert));
   // full.fx's TOONCOLOR: the far side's texel.
-  float4 toon_far = textures[material.modes.x].SampleLevel(
-      samplers[kClampSampler], float2(0.0, 1.0), 0.0);
+  float4 toon_far = SampleRoleLevel(kMmdToon, material.modes.x,
+      kClampSampler, float2(0.0, 1.0), 0.0);
   // Material morphs tint only a texture the material has: entry 0 is the
   // white that stands in for none.
   const bool tints = mmd_shadow[0].parameters.w != 0.0;

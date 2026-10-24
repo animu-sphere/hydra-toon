@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // What every surface pipeline shares, MToon's, MMD's and PreviewSurface's (material policy
-// §7): the draw constants, the texture table and samplers, scene lighting,
-// and the surface's vertex stage. Each model's own module declares its
+// §7): the draw constants, texture sampling through the backend's bindings,
+// scene lighting, and the surface's vertex stage. Each model's own module declares its
 // parameter buffer. Included, not compiled on its own.
 
-#include "skinning.slang"
+#include "common/skinning.slang"
 
 // Must match vulkan_internal::SurfaceDrawConstants.
 struct DrawConstants {
@@ -37,31 +37,24 @@ static const uint kDrawOrthographic = 16;
 static const uint kDrawBlend = 32;
 // Must match vulkan_internal::kDrawAlphaToCoverage.
 static const uint kDrawAlphaToCoverage = 64;
-// Must match vulkan_internal::kTextureCapacity and kSamplerCount.
-static const uint kTextureCapacity = 128;
-static const uint kSamplerCount = 9;
 // Must match vulkan_internal::kOutlineWorld and kOutlineScreen.
 static const uint kOutlineWorld = 1;
 static const uint kOutlineScreen = 2;
 
-[[vk::push_constant]] ConstantBuffer<DrawConstants> draw;
-// Indexed by a value from the material slot, so uniform across a draw.
-[[vk::binding(1, 0)]] Texture2D<float4> textures[kTextureCapacity];
-[[vk::binding(2, 0)]] SamplerState samplers[kSamplerCount];
+TOON_DRAW_BINDING ConstantBuffer<DrawConstants> draw;
 // Header: time, direct-light count, material debug mode, metres per unit;
 // uniform ambient RGB. Then four float4 rows per light, in view space:
 // colour/type, position/radius (metres), direction/outer cosine, inner
 // cosine and the shared shadow view it casts into, plus one, or 0.
-[[vk::binding(3, 0)]] StructuredBuffer<float4> frame;
+TOON_FRAME_BINDING StructuredBuffer<float4> frame;
 // The sampler that clamps both axes: ToonWrap::ClampToEdge is 1, and a
 // sampler's index is wrap_s * 3 + wrap_t.
 static const uint kClampSampler = 4;
 
-// The shared shadow views' depth, a layer each (shadow policy §5), and
-// where each was drawn from this frame, for the receivers of every family
-// but MMD, whose own reading of the first direct light's view is
+// Where each shared shadow view (the bindings' shadow_map, a layer each,
+// shadow policy §5) was drawn from this frame, for the receivers of every
+// family but MMD, whose own reading of the first direct light's view is
 // mmd_common's.
-[[vk::binding(5, 0)]] Texture2DArray<float> shadow_map;
 // Must match vulkan_internal::ShadowViewParameters.
 struct ShadowViewParameters {
   // The view's clip space from view space: x and y in [-1, 1] across it,
@@ -79,7 +72,7 @@ struct ShadowViewParameters {
   // bias, z the filter radius; w unused.
   float4 receiver;
 };
-[[vk::binding(8, 0)]] StructuredBuffer<ShadowViewParameters> shadow_views;
+TOON_SHADOW_VIEWS_BINDING StructuredBuffer<ShadowViewParameters> shadow_views;
 
 // The steepest slope a receiver's comparison allows for, and the bilinear
 // taps its filter reads (shadow policy §3).
@@ -181,8 +174,7 @@ float ShadowVisibility(uint index, float3 view_position, float3 position_dx,
     const float2 f = tap - base;
     // The four texels around the tap: w its own, z the next across, x the
     // next down, y both.
-    const float4 seen = shadow_map.Gather(samplers[kClampSampler],
-        float3((base + 1.0) / size, view.extent.y));
+    const float4 seen = GatherShadow((base + 1.0) / size, view.extent.y);
     // A perspective view's depth back to the distance it was drawn at.
     const float4 seen_depth = perspective
         ? near * far / (far - seen * view.depth.x) * depth_scale
@@ -328,8 +320,10 @@ uint TextureEntry(uint entry) {
   return (draw.flags & kDrawHasUVs) == 0 ? 0 : entry;
 }
 
-float4 SampleTexture(uint entry, uint sampler, float4 uv_rows[2], float2 st) {
-  return textures[TextureEntry(entry)].Sample(samplers[sampler],
+// Texture `role` of the draw's material (the bindings' SampleRole).
+float4 SampleTexture(uint role, uint entry, uint sampler, float4 uv_rows[2],
+    float2 st) {
+  return SampleRole(role, TextureEntry(entry), sampler,
       TransformUV(uv_rows, st));
 }
 

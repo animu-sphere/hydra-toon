@@ -16,19 +16,20 @@ if(TOON_WITH_VULKAN)
 
   include(ToonShaders)
   toon_add_shader_library(toon-renderer-shaders
-    shaders/mesh.slang
-    shaders/preview_surface.slang
-    shaders/mtoon.slang
-    shaders/mtoon_transparent.slang
-    shaders/mtoon_outline.slang
-    shaders/mmd.slang
-    shaders/mmd_transparent.slang
-    shaders/mmd_outline.slang
-    shaders/shadow.slang
-    shaders/overlay.slang
-    shaders/composite.slang
-    INCLUDES shaders/skinning.slang shaders/surface_common.slang
-      shaders/mtoon_common.slang shaders/mmd_common.slang
-      shaders/preview_common.slang)
+    scene/mesh.slang
+    preview/preview_surface.slang
+    mtoon/mtoon.slang
+    mtoon/mtoon_transparent.slang
+    mtoon/mtoon_outline.slang
+    mmd/mmd.slang
+    mmd/mmd_transparent.slang
+    mmd/mmd_outline.slang
+    scene/shadow.slang
+    present/overlay.slang
+    present/composite.slang
+    INCLUDES bindings/bindings.slang bindings/bindings_vulkan.slang
+      bindings/bindings_webgpu.slang common/skinning.slang
+      common/surface_common.slang mtoon/mtoon_common.slang
+      mmd/mmd_common.slang preview/preview_common.slang)
   set(TOON_SHADER_SPVS "${TOON_SHADER_SPVS}" PARENT_SCOPE)
 endif()

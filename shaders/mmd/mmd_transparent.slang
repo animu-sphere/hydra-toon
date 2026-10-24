@@ -6,7 +6,7 @@
 // When it draws is the draw's: after every opaque draw, in MMD's material
 // order. It writes depth, as MMD does, except where its alpha is 0.
 
-#include "mmd_common.slang"
+#include "mmd/mmd_common.slang"
 
 [shader("vertex")]
 MmdVertexOutput vertex_main(MmdVertexInput input) {

@@ -47,7 +47,7 @@ private:
   DrawList prepared_;
 };
 
-// Must match DrawConstants in shaders/mesh.slang.
+// Must match DrawConstants in shaders/scene/mesh.slang.
 struct DrawConstants {
   float clip_from_object[16];
   float color[4];
@@ -56,7 +56,7 @@ struct DrawConstants {
   std::uint32_t padding[3];
 };
 
-// Must match DrawConstants in shaders/surface_common.slang, which every
+// Must match DrawConstants in shaders/common/surface_common.slang, which every
 // MToon and MMD pipeline reads: 128 bytes, the push constant size every
 // Vulkan device offers.
 struct SurfaceDrawConstants {
@@ -109,7 +109,7 @@ constexpr std::uint32_t kOutlineWorld = 1U;
 constexpr std::uint32_t kOutlineScreen = 2U;
 
 // Entries in the texture table the surface pipelines index, and a shader
-// constant (kTextureCapacity in shaders/surface_common.slang). Entry 0 is a
+// constant (kTextureCapacity in shaders/bindings/bindings_vulkan.slang). Entry 0 is a
 // white placeholder, which a material samples for a texture it has not got
 // or that is not resident, so every entry is always a valid image.
 constexpr std::uint32_t kTextureCapacity = 128;
@@ -128,7 +128,7 @@ constexpr std::uint32_t kLightCapacity = 32;
 constexpr std::uint32_t kFrameBytes = (2 + 4 * kLightCapacity) * 16;
 
 // One material's slot in the parameter buffer. Must match MToonParameters
-// in shaders/mtoon_common.slang.
+// in shaders/mtoon/mtoon_common.slang.
 struct MToonParameters {
   float base_color[4];
   // a: the alpha cutoff, negative when the material is not Mask.
@@ -177,7 +177,7 @@ struct MToonParameters {
 };
 static_assert(sizeof(MToonParameters) == 544);
 
-// Must match PreviewParameters in shaders/preview_surface.slang.
+// Must match PreviewParameters in shaders/preview/preview_common.slang.
 struct PreviewTextureParameters {
   float uv_rows[8];
   float scale[4];
@@ -197,14 +197,14 @@ struct PreviewParameters {
 };
 static_assert(sizeof(PreviewParameters) == 640);
 
-// An MMD slot's sphere mode, as shaders/mmd_common.slang reads it.
+// An MMD slot's sphere mode, as shaders/mmd/mmd_common.slang reads it.
 constexpr std::uint32_t kSphereNone = 0U;
 constexpr std::uint32_t kSphereMultiply = 1U;
 constexpr std::uint32_t kSphereAdd = 2U;
 constexpr std::uint32_t kSphereSubTexture = 3U;
 
 // One material's slot in the MMD parameter buffer. Must match
-// MmdParameters in shaders/mmd_common.slang. Colours are MMD's as stored.
+// MmdParameters in shaders/mmd/mmd_common.slang. Colours are MMD's as stored.
 struct MmdParameters {
   float diffuse[4];
   // rgb the specular colour, a the specular power.
@@ -231,7 +231,7 @@ static_assert(sizeof(MmdParameters) == 240);
 
 // Where MMD's self-shadow map was drawn from this frame, and whether MMD
 // materials' tints draw. Must match MmdShadowParameters in
-// shaders/mmd_common.slang.
+// shaders/mmd/mmd_common.slang.
 struct MmdShadowParameters {
   // The map's Vulkan clip space from view space, column-major.
   float clip_from_view[16];
@@ -249,7 +249,7 @@ static_assert(sizeof(MmdShadowParameters) == 96);
 
 // Where a shared shadow view was drawn from this frame, for the receivers
 // of every family but MMD. Must match ShadowViewParameters in
-// shaders/surface_common.slang.
+// shaders/common/surface_common.slang.
 struct ShadowViewParameters {
   // The view's clip space from view space, column-major.
   float clip_from_view[16];

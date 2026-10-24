@@ -6,7 +6,7 @@
 // the colour are the material slot's, so an outline edit rewrites a slot
 // and never selects a shader.
 
-#include "mtoon_common.slang"
+#include "mtoon/mtoon_common.slang"
 
 [shader("vertex")]
 TangentVertexStageOutput vertex_main(TangentVertexInput input) {
@@ -23,13 +23,15 @@ TangentVertexStageOutput vertex_main(TangentVertexInput input) {
   // outlineWidthFactor times the G channel of outlineWidthMultiplyTexture,
   // which is white when the material has none. Mip 0: the vertex stage has
   // no derivatives to pick another.
-  const float mask = textures[TextureEntry(material.animation_textures.z)].SampleLevel(
-      samplers[material.animation_textures.w],
+  const float mask = SampleRoleLevel(kMToonMask,
+      TextureEntry(material.animation_textures.z),
+      material.animation_textures.w,
       TransformUV(material.mask_uv, input.st), 0.0).b;
   const float2 animated_st = AnimatedST(material, input.st, mask);
   const float4 width_texel =
-      textures[TextureEntry(material.outline_texture.x)].SampleLevel(
-          samplers[material.outline_texture.y],
+      SampleRoleLevel(kMToonOutlineWidth,
+          TextureEntry(material.outline_texture.x),
+          material.outline_texture.y,
           TransformUV(material.outline_uv, animated_st), 0.0);
   float width = material.outline.x * width_texel.g;
   // worldCoordinates is a length in metres; in the scene's units it is a

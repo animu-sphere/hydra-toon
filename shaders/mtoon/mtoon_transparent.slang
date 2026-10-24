@@ -5,7 +5,7 @@
 // over what is behind it. Whether it writes depth, and when it draws, are
 // the draw's, from the material's transparentWithZWrite and render queue.
 
-#include "mtoon_common.slang"
+#include "mtoon/mtoon_common.slang"
 
 [shader("vertex")]
 TangentVertexStageOutput vertex_main(TangentVertexInput input) {

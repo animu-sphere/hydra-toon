@@ -6,7 +6,7 @@
 // plus texture table entries, so a new or changed material never compiles
 // or selects a shader.
 
-#include "mtoon_common.slang"
+#include "mtoon/mtoon_common.slang"
 
 [shader("vertex")]
 TangentVertexStageOutput vertex_main(TangentVertexInput input) {

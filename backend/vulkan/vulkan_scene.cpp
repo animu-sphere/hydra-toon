@@ -599,7 +599,7 @@ bool Fits(const MeshPart& part, std::uint32_t index_count) {
 }
 
 // MMD's unit on the stage (usd-mmd-plugins stage contract §6), as
-// shaders/mmd_outline.slang states it.
+// shaders/mmd/mmd_outline.slang states it.
 constexpr double kMetersPerMmdUnit = 0.08;
 
 } // namespace

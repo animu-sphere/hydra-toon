@@ -4,7 +4,7 @@
 // included, over what every surface pipeline shares. Included, not
 // compiled on its own.
 
-#include "surface_common.slang"
+#include "common/surface_common.slang"
 
 // Must match vulkan_internal::MToonParameters.
 struct MToonParameters {
@@ -52,7 +52,19 @@ struct MToonParameters {
   float4 animation;
 };
 
-[[vk::binding(0, 0)]] StructuredBuffer<MToonParameters> materials;
+TOON_MTOON_MATERIALS_BINDING StructuredBuffer<MToonParameters> materials;
+
+// MToon's texture roles (WebGPU policy §4), the bindings' role numbers.
+// Must match webgpu_internal::MToonRole.
+static const uint kMToonBase = 0;
+static const uint kMToonShade = 1;
+static const uint kMToonNormal = 2;
+static const uint kMToonEmissive = 3;
+static const uint kMToonRim = 4;
+static const uint kMToonMatcap = 5;
+static const uint kMToonOutlineWidth = 6;
+static const uint kMToonMask = 7;
+static const uint kMToonShift = 8;
 
 float2 AnimatedST(MToonParameters material, float2 st, float mask) {
   const float time = frame[0].x * mask;
@@ -100,10 +112,10 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
   // For the shared shadow views' receiver plane, in uniform control flow.
   const float3 position_dx = ddx(view_position);
   const float3 position_dy = ddy(view_position);
-  const float mask = SampleTexture(material.animation_textures.z,
+  const float mask = SampleTexture(kMToonMask, material.animation_textures.z,
       material.animation_textures.w, material.mask_uv, st).b;
   const float2 animated_st = AnimatedST(material, st, mask);
-  const float3 normal_texel = SampleTexture(material.surface_textures.z,
+  const float3 normal_texel = SampleTexture(kMToonNormal, material.surface_textures.z,
       material.surface_textures.w, material.normal_uv, animated_st).rgb;
   const float3 map = float3((normal_texel.xy * 2.0 - 1.0) * material.surface.x,
       normal_texel.z * 2.0 - 1.0);
@@ -113,20 +125,20 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
     normal = -normal;
   }
   const float3 view = ViewDirection(view_position);
-  const float4 base_texel = SampleTexture(material.textures.x,
+  const float4 base_texel = SampleTexture(kMToonBase, material.textures.x,
       material.textures.y, material.base_uv, animated_st);
-  const float3 shade_texel = SampleTexture(material.textures.z,
+  const float3 shade_texel = SampleTexture(kMToonShade, material.textures.z,
       material.textures.w, material.shade_uv, animated_st).rgb;
   // The MatCap texture needs no UVs, and a material without one adds none,
   // so its entry is not replaced by white.
-  const float3 matcap_texel = textures[material.rim_textures.x].Sample(
-      samplers[material.rim_textures.y],
+  const float3 matcap_texel = SampleRole(kMToonMatcap,
+      material.rim_textures.x, material.rim_textures.y,
       TransformUV(material.matcap_uv, MatcapST(normal, view))).rgb;
-  const float3 rim_texel = SampleTexture(material.rim_textures.z,
+  const float3 rim_texel = SampleTexture(kMToonRim, material.rim_textures.z,
       material.rim_textures.w, material.rim_uv, animated_st).rgb;
-  const float3 emissive_texel = SampleTexture(material.surface_textures.x,
+  const float3 emissive_texel = SampleTexture(kMToonEmissive, material.surface_textures.x,
       material.surface_textures.y, material.emissive_uv, animated_st).rgb;
-  const float shift_texel = SampleTexture(material.animation_textures.x,
+  const float shift_texel = SampleTexture(kMToonShift, material.animation_textures.x,
       material.animation_textures.y, material.shift_uv, animated_st).r;
   const float shift = TextureEntry(material.animation_textures.x) == 0 ? 0.0
       : shift_texel * material.surface.y;
@@ -196,10 +208,10 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
 // shadow caster's cut: the base colour's and its texel's at the animated
 // UVs.
 float SurfaceAlpha(MToonParameters material, float2 st) {
-  const float mask = SampleTexture(material.animation_textures.z,
+  const float mask = SampleTexture(kMToonMask, material.animation_textures.z,
       material.animation_textures.w, material.mask_uv, st).b;
   const float2 animated_st = AnimatedST(material, st, mask);
-  return material.base_color.a * SampleTexture(material.textures.x,
+  return material.base_color.a * SampleTexture(kMToonBase, material.textures.x,
       material.textures.y, material.base_uv, animated_st).a;
 }
 
