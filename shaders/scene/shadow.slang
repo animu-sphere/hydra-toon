@@ -10,7 +10,7 @@
 #include "mtoon/mtoon_common.slang"
 #include "preview/preview_common.slang"
 
-// Must match vulkan_internal::kDrawCutMToon and kDrawCutPreview.
+// Must match backend_shared::kDrawCutMToon and kDrawCutPreview.
 static const uint kDrawCutMToon = 256;
 static const uint kDrawCutPreview = 512;
 

@@ -113,48 +113,6 @@ WGPUAddressMode AddressMode(std::uint32_t wrap) {
   return WGPUAddressMode_Repeat;
 }
 
-// The Vulkan backend's helpers, for the same records and draw order.
-bool ViewRows(const Matrix4& matrix, float rows[12]) {
-  for (int row = 0; row < 3; ++row) {
-    for (int column = 0; column < 4; ++column) {
-      rows[row * 4 + column] = matrix.m[column * 4 + row];
-    }
-  }
-  const float* m = matrix.m.data();
-  const float determinant = m[0] * (m[5] * m[10] - m[9] * m[6]) -
-                            m[4] * (m[1] * m[10] - m[9] * m[2]) +
-                            m[8] * (m[1] * m[6] - m[5] * m[2]);
-  return determinant < 0.0F;
-}
-
-void WriteUvRows(const ToonTextureRef& texture, float rows[8]) {
-  const float c = std::cos(texture.rotation);
-  const float s = std::sin(texture.rotation);
-  const float values[8] = {texture.scale.x * c, texture.scale.y * s,
-      texture.offset.x, 0.0F, -texture.scale.x * s, texture.scale.y * c,
-      texture.offset.y, 0.0F};
-  std::copy(values, values + 8, rows);
-}
-
-std::uint32_t SamplerIndex(const ToonTextureRef& texture) {
-  return static_cast<std::uint32_t>(texture.wrap_s) * 3U +
-         static_cast<std::uint32_t>(texture.wrap_t);
-}
-
-std::span<const MeshPart> PartsOf(const MeshSnapshot& mesh,
-    std::uint32_t index_count, MeshPart& whole) {
-  if (mesh.parts != nullptr && !mesh.parts->empty()) {
-    return *mesh.parts;
-  }
-  whole = {0, index_count, mesh.material};
-  return {&whole, 1};
-}
-
-bool Fits(const MeshPart& part, std::uint32_t index_count) {
-  return part.index_count != 0 && part.first_index <= index_count &&
-         part.index_count <= index_count - part.first_index;
-}
-
 std::uint32_t MipLevels(std::uint32_t width, std::uint32_t height) {
   std::uint32_t levels = 1;
   for (std::uint32_t size = std::max(width, height); size > 1U; size /= 2U) {
@@ -509,7 +467,7 @@ bool MaterialCache::Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
   shadow_view.aspect = WGPUTextureAspect_DepthOnly;
   shadow_view_.reset(shadow_map_ ? wgpuTextureCreateView(shadow_map_.get(), &shadow_view)
                                  : nullptr);
-  shadow_views_ = CreateBuffer(device_, kShadowViewBytes,
+  shadow_views_ = CreateBuffer(device_, sizeof(ShadowViewParameters),
       WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "shadow views");
   if (!frame_buffer_ || !shadow_view_ || !shadow_views_) {
     detail = "creating the WebGPU frame resources failed";
@@ -539,67 +497,10 @@ BindGroup MaterialCache::MaterialGroup(
 bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
     std::string& detail, bool fast_values) {
   if (fast_values) {
-    // The Vulkan backend's frame rows: time, direct-light count, material
-    // debug mode, metres per unit; ambient; then each direct light in view
-    // space (shaders/common/surface_common.slang).
+    // No shared shadow view is drawn on this backend yet, so no light's
+    // entry names one.
     std::array<float, kFrameBytes / sizeof(float)> frame{};
-    frame[0] = static_cast<float>(draws.time_seconds);
-    frame[2] = static_cast<float>(draws.lighting.material);
-    frame[3] = draws.meters_per_unit;
-    const auto transform = [&](Float3 value, float w) {
-      const auto& m = draws.view.view.m;
-      return Float3{m[0] * value.x + m[4] * value.y + m[8] * value.z + m[12] * w,
-          m[1] * value.x + m[5] * value.y + m[9] * value.z + m[13] * w,
-          m[2] * value.x + m[6] * value.y + m[10] * value.z + m[14] * w};
-    };
-    std::uint32_t count = 0;
-    const auto append = [&](const ToonLight& light, bool view_space) {
-      if (!light.visible) return;
-      if (light.type == ToonLightType::Ambient) {
-        frame[4] += light.color.x * draws.lighting.ambient_scale;
-        frame[5] += light.color.y * draws.lighting.ambient_scale;
-        frame[6] += light.color.z * draws.lighting.ambient_scale;
-        return;
-      }
-      if (count == kLightCapacity) return;
-      float* slot = frame.data() + 8 + count++ * 16;
-      slot[0] = light.color.x * draws.lighting.direct_scale;
-      slot[1] = light.color.y * draws.lighting.direct_scale;
-      slot[2] = light.color.z * draws.lighting.direct_scale;
-      slot[3] = static_cast<float>(light.type);
-      const Float3 position = view_space ? light.position : transform(light.position, 1.0F);
-      slot[4] = position.x;
-      slot[5] = position.y;
-      slot[6] = position.z;
-      slot[7] = light.radius;
-      const Float3 direction = view_space ? light.direction : transform(light.direction, 0.0F);
-      slot[8] = direction.x;
-      slot[9] = direction.y;
-      slot[10] = direction.z;
-      constexpr float radians = 0.017453292519943295F;
-      slot[11] = std::cos(light.cone_angle * radians);
-      slot[12] = std::cos(light.cone_angle * (1.0F - light.cone_softness) * radians);
-      // slot[13], the shared view it casts into plus one, stays 0: this
-      // backend draws no shadow views yet.
-    };
-    if (!draws.lighting.scene_lights || draws.lights.empty()) {
-      ToonLight key;
-      key.direction = {-draws.lighting.key_direction.x,
-          -draws.lighting.key_direction.y, -draws.lighting.key_direction.z};
-      if (key.direction == Float3{}) {
-        key.direction = {-0.25F, -0.5F, -1.0F};
-      }
-      append(key, true);
-      ToonLight ambient;
-      ambient.type = ToonLightType::Ambient;
-      ambient.color = {0.25F, 0.25F, 0.25F};
-      append(ambient, true);
-    } else {
-      for (const auto& light : draws.lights) {
-        append(light.light, false);
-      }
-    }
-    frame[1] = static_cast<float>(count);
+    WriteFrame(draws, nullptr, frame);
     wgpuQueueWriteBuffer(queue_, frame_buffer_.get(), 0, frame.data(), kFrameBytes);
   }
 
@@ -623,14 +524,17 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
         &values.emissive_texture, &values.preview.metallic_texture,
         &values.preview.roughness_texture, &values.preview.opacity_texture,
         &values.normal_texture};
-    std::array<std::uint32_t, kPreviewRoles> entries{};
+    // A role's entry is 1 when its texture is resident (MaterialEntries).
+    MaterialEntries entries;
+    std::uint32_t* role_entries[kPreviewRoles] = {&entries.base, &entries.emissive,
+        &entries.metallic, &entries.roughness, &entries.opacity, &entries.normal};
     std::array<WGPUTextureView, kTextureRoles> views;
     views.fill(white_);
     std::array<std::uint64_t, kTextureRoles> serials{};
     std::array<std::uint32_t, kTextureRoles> samplers{};
     if (values.model == ToonShadingModel::PreviewSurface) {
       for (std::uint32_t role = 0; role < kPreviewRoles; ++role) {
-        entries[role] = textures.Entry(refs[role]->texture);
+        *role_entries[role] = textures.Entry(refs[role]->texture);
         views[role] = textures.ViewOf(refs[role]->texture);
         serials[role] = textures.SerialOf(refs[role]->texture);
         samplers[role] = SamplerIndex(*refs[role]);
@@ -642,36 +546,7 @@ bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
       PreviewParameters& slot = preview_slots_[entry.slot];
       slot = {};
       if (values.model == ToonShadingModel::PreviewSurface) {
-        slot.base_color[0] = values.base_color.x;
-        slot.base_color[1] = values.base_color.y;
-        slot.base_color[2] = values.base_color.z;
-        slot.base_color[3] = values.alpha;
-        slot.emissive[0] = values.emissive.x;
-        slot.emissive[1] = values.emissive.y;
-        slot.emissive[2] = values.emissive.z;
-        slot.surface[0] = values.preview.metallic;
-        slot.surface[1] = values.preview.roughness;
-        slot.surface[2] = values.alpha_mode == ToonAlphaMode::Mask ? values.alpha_cutoff : -1.0F;
-        slot.normal[0] = values.preview.normal.x;
-        slot.normal[1] = values.preview.normal.y;
-        slot.normal[2] = values.preview.normal.z;
-        for (std::size_t i = 0; i < values.preview.inputs.size() && i < kPreviewRoles; ++i) {
-          const auto& input = values.preview.inputs[i];
-          auto& target = slot.inputs[i];
-          WriteUvRows(*refs[i], target.uv_rows);
-          target.uv_rows[3] = input.uv_fallback.x;
-          target.uv_rows[7] = input.uv_fallback.y;
-          const auto copy = [](const Float4& value, float* out) {
-            out[0] = value.x; out[1] = value.y; out[2] = value.z; out[3] = value.w;
-          };
-          copy(input.scale, target.scale);
-          copy(input.bias, target.bias);
-          copy(input.fallback, target.fallback);
-          target.info[0] = entries[i];
-          target.info[1] = SamplerIndex(*refs[i]);
-          target.info[2] = input.channel;
-          target.info[3] = input.connected ? 1U : 0U;
-        }
+        WriteParameters(values, entries, slot);
       }
       wgpuQueueWriteBuffer(queue_, preview_buffer_.get(),
           static_cast<std::uint64_t>(entry.slot) * sizeof(PreviewParameters), &slot,

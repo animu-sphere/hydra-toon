@@ -25,6 +25,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The shader contract's C++ side — draw constants, frame rows, each
+  model's parameter record, shadow view records, the draw and material
+  flags — and the writers that fill them move from the Vulkan backend to
+  `backend/shared/` (`Toon::BackendShared`), which both backends link, so
+  the WebGPU backend no longer copies them. No output changes.
 - The Slang shaders move from `backend/vulkan/shaders/` to the root
   `shaders/`, grouped by role, and declare their resources through one
   bindings module per backend, sampling textures by role. Compiled

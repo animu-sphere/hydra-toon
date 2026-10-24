@@ -11,7 +11,7 @@ target_link_libraries(toon-render-vulkan PUBLIC Toon::RenderExtraction)
 target_compile_features(toon-render-vulkan PUBLIC cxx_std_20)
 if(TOON_WITH_VULKAN)
   target_sources(toon-render-vulkan PRIVATE vulkan_overlay.cpp vulkan_scene.cpp vulkan_composite.cpp)
-  target_link_libraries(toon-render-vulkan PRIVATE Vulkan::Vulkan)
+  target_link_libraries(toon-render-vulkan PRIVATE Vulkan::Vulkan Toon::BackendShared)
   target_compile_definitions(toon-render-vulkan PRIVATE TOON_HAS_VULKAN=1)
 
   include(ToonShaders)

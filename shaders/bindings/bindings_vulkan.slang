@@ -21,7 +21,7 @@
 #define TOON_MORPH_RANGES_BINDING [[vk::binding(3, 1)]]
 #define TOON_MORPH_WEIGHTS_BINDING [[vk::binding(4, 1)]]
 
-// Must match vulkan_internal::kTextureCapacity and kSamplerCount.
+// Must match vulkan_internal::kTextureCapacity and backend_shared::kSamplerCount.
 static const uint kTextureCapacity = 128;
 static const uint kSamplerCount = 9;
 
