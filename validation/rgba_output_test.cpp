@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <toon/vulkan_backend.hpp>
+#if defined(TOON_HAS_WEBGPU)
+#include <toon/webgpu_backend.hpp>
+#endif
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
+// A backend's offscreen renderer, so the same checks run on Vulkan and on
+// WebGPU (WebGPU policy §9).
+using Factory = std::function<std::unique_ptr<Toon::OffscreenRenderer>(
+    Toon::FrameStatus&, std::string&, const Toon::RenderOptions&)>;
+
 void Require(bool value, const char* message) {
   if (!value) throw std::runtime_error(message);
 }
@@ -21,10 +31,10 @@ float Linear(float value) {
   return value <= 0.04045F ? value / 12.92F : std::pow((value + 0.055F) / 1.055F, 2.4F);
 }
 
-bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
+bool Run(const Factory& create, std::uint32_t samples) {
   Toon::FrameStatus status;
   std::string error;
-  auto renderer = Toon::CreateOffscreenRenderer(shaders, status, error, {samples});
+  auto renderer = create(status, error, {samples});
   if (status == Toon::FrameStatus::Skip) { std::cout << error << '\n'; return false; }
   Require(renderer != nullptr, error.c_str());
   Require(renderer->statistics().samples == samples, "requested MSAA unavailable");
@@ -210,7 +220,7 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
       Require(color.payload[center() + 3] == 0, "outline fixture has a visible surface");
     }
   }
-  Require(renderer->statistics().validation_message_count == 0, "Vulkan validation messages");
+  Require(renderer->statistics().validation_message_count == 0, "validation messages");
   std::cout << "RGBA output: " << samples << "x clear, three shading models, Blend, Mask, silhouettes, hulls and source-over passed\n";
   return true;
 }
@@ -218,9 +228,27 @@ bool Run(const Toon::SceneShaders& shaders, std::uint32_t samples) {
 
 int main(int argc, char** argv) {
   try {
-    Require(argc == 2, "expected shader directory");
-    const auto shaders = Toon::SceneShadersIn(argv[1]);
-    if (!Run(shaders, 1) || !Run(shaders, 4)) return 77;
+    Require(argc == 2 || (argc == 4 && std::string_view(argv[2]) == "--backend"),
+        "expected shader directory [--backend vulkan|webgpu]");
+    Factory create;
+    if (argc == 4 && std::string_view(argv[3]) == "webgpu") {
+#if defined(TOON_HAS_WEBGPU)
+      const auto shaders = Toon::WebGpuShadersIn(argv[1]);
+      create = [shaders](Toon::FrameStatus& status, std::string& error,
+                   const Toon::RenderOptions& options) {
+        return Toon::CreateWebGpuOffscreenRenderer(shaders, status, error, options);
+      };
+#else
+      return 2;
+#endif
+    } else {
+      const auto shaders = Toon::SceneShadersIn(argv[1]);
+      create = [shaders](Toon::FrameStatus& status, std::string& error,
+                   const Toon::RenderOptions& options) {
+        return Toon::CreateOffscreenRenderer(shaders, status, error, options);
+      };
+    }
+    if (!Run(create, 1) || !Run(create, 4)) return 77;
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';

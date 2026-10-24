@@ -13,10 +13,33 @@ namespace Toon {
 
 WebGpuShaders WebGpuShadersIn(const std::string& directory) {
   const std::filesystem::path root(directory);
-  return {(root / "mesh.vert.wgsl").string(), (root / "mesh.frag.wgsl").string(),
-      (root / "preview_surface.vert.wgsl").string(),
-      (root / "preview_surface.frag.wgsl").string(),
-      (root / "mipmap.vert.wgsl").string(), (root / "mipmap.frag.wgsl").string()};
+  const auto stage = [&](const char* module, const char* suffix) {
+    return (root / (std::string(module) + suffix)).string();
+  };
+  WebGpuShaders shaders;
+  shaders.mesh_vertex = stage("mesh", ".vert.wgsl");
+  shaders.mesh_fragment = stage("mesh", ".frag.wgsl");
+  shaders.preview_vertex = stage("preview_surface", ".vert.wgsl");
+  shaders.preview_fragment = stage("preview_surface", ".frag.wgsl");
+  shaders.mtoon_vertex = stage("mtoon", ".vert.wgsl");
+  shaders.mtoon_fragment = stage("mtoon", ".frag.wgsl");
+  shaders.mtoon_transparent_vertex = stage("mtoon_transparent", ".vert.wgsl");
+  shaders.mtoon_transparent_fragment = stage("mtoon_transparent", ".frag.wgsl");
+  shaders.mtoon_outline_vertex = stage("mtoon_outline", ".vert.wgsl");
+  shaders.mtoon_outline_fragment = stage("mtoon_outline", ".frag.wgsl");
+  shaders.mtoon_coverage_vertex = stage("mtoon_coverage", ".vert.wgsl");
+  shaders.mtoon_coverage_fragment = stage("mtoon_coverage", ".frag.wgsl");
+  shaders.mmd_vertex = stage("mmd", ".vert.wgsl");
+  shaders.mmd_fragment = stage("mmd", ".frag.wgsl");
+  shaders.mmd_transparent_vertex = stage("mmd_transparent", ".vert.wgsl");
+  shaders.mmd_transparent_fragment = stage("mmd_transparent", ".frag.wgsl");
+  shaders.mmd_outline_vertex = stage("mmd_outline", ".vert.wgsl");
+  shaders.mmd_outline_fragment = stage("mmd_outline", ".frag.wgsl");
+  shaders.mipmap_vertex = stage("mipmap", ".vert.wgsl");
+  shaders.mipmap_fragment = stage("mipmap", ".frag.wgsl");
+  shaders.depth_resolve_vertex = stage("depth_resolve", ".vert.wgsl");
+  shaders.depth_resolve_fragment = stage("depth_resolve", ".frag.wgsl");
+  return shaders;
 }
 
 BackendCapability ProbeWebGpuBackend(WebGpuAdapter adapter) {
@@ -60,6 +83,7 @@ private:
   TextureCache textures_;
   MaterialCache materials_;
   MeshCache meshes_;
+  DepthResolve depth_resolve_;
   LateFrameState late_;
   BackgroundSettings background_;
   std::uint32_t width_ = 0;
@@ -68,6 +92,13 @@ private:
   TextureView color_view_;
   Texture depth_;
   TextureView depth_view_;
+  // Multisampled, what the scene pass draws into: its colour samples are
+  // resolved as the pass ends and not kept, and its depth samples are
+  // resolved by depth_resolve_ into `depth_`.
+  Texture color_samples_;
+  TextureView color_samples_view_;
+  Texture depth_samples_;
+  TextureView depth_samples_view_;
   Buffer color_readback_;
   Buffer depth_readback_;
   // The draw constants of a frame, a draw's at kDrawStride times its index,
@@ -86,15 +117,15 @@ FrameStatus WebGpuOffscreenRenderer::Initialize(const WebGpuShaders& shaders,
   if (!LoadShaders(shaders, sources, detail)) return FrameStatus::Fail;
   const FrameStatus status = CreateGpu(adapter, gpu_, detail);
   if (status != FrameStatus::Pass) return status;
-  // Multisampling, with the sample-mask Mask coverage it needs (WebGPU
-  // policy §7), arrives with stage 2; until then every request renders at
-  // one sample.
-  (void)options;
-  const std::uint32_t samples = 1;
+  // Core WebGPU renders 1 or 4 samples: a request takes the highest of
+  // them at or below it, as the Vulkan backend takes its device's (WebGPU
+  // policy §7).
+  const std::uint32_t samples = options.samples >= kMultisampleCount ? kMultisampleCount : 1U;
   if (!pipelines_.Initialize(gpu_.device.get(), sources, samples, detail) ||
       !textures_.Initialize(gpu_, sources, detail) ||
       !materials_.Initialize(gpu_, pipelines_, textures_, detail) ||
-      !meshes_.Initialize(gpu_, pipelines_, detail)) {
+      !meshes_.Initialize(gpu_, pipelines_, detail) ||
+      !depth_resolve_.Initialize(gpu_.device.get(), sources, detail)) {
     return FrameStatus::Fail;
   }
   statistics_.samples = samples;
@@ -151,13 +182,37 @@ bool WebGpuOffscreenRenderer::EnsureTargets(std::uint32_t width, std::uint32_t h
       WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst, "color readback");
   depth_readback_ = CreateBuffer(gpu_.device.get(), bytes,
       WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst, "depth readback");
-  if (!color_ || !depth_ || !color_readback_ || !depth_readback_) {
+  // The samples live only within the pass that resolves them; the depth
+  // samples are read by the resolve.
+  const std::uint32_t samples = pipelines_.samples();
+  color_samples_.reset();
+  depth_samples_.reset();
+  if (samples > 1) {
+    descriptor.sampleCount = samples;
+    descriptor.label = View("color samples");
+    descriptor.format = kColorFormat;
+    descriptor.usage = WGPUTextureUsage_RenderAttachment;
+    color_samples_.reset(wgpuDeviceCreateTexture(gpu_.device.get(), &descriptor));
+    descriptor.label = View("depth samples");
+    descriptor.format = kDepthFormat;
+    descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+    depth_samples_.reset(wgpuDeviceCreateTexture(gpu_.device.get(), &descriptor));
+  }
+  if (!color_ || !depth_ || !color_readback_ || !depth_readback_ ||
+      (samples > 1 && (!color_samples_ || !depth_samples_))) {
     error = "allocating the WebGPU render targets failed";
     width_ = height_ = 0;
     return false;
   }
   color_view_.reset(wgpuTextureCreateView(color_.get(), nullptr));
   depth_view_.reset(wgpuTextureCreateView(depth_.get(), nullptr));
+  color_samples_view_.reset(
+      color_samples_ ? wgpuTextureCreateView(color_samples_.get(), nullptr) : nullptr);
+  WGPUTextureViewDescriptor depth_samples_view = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+  depth_samples_view.aspect = WGPUTextureAspect_DepthOnly;
+  depth_samples_view_.reset(depth_samples_
+          ? wgpuTextureCreateView(depth_samples_.get(), &depth_samples_view)
+          : nullptr);
   width_ = width;
   height_ = height;
   ++statistics_.target_allocations;
@@ -214,7 +269,6 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
   if (!meshes_.Update(draws, error) || !materials_.Update(draws, textures_, error) ||
-      !MeshCache::Supported(draws, materials_, error) ||
       !EnsureRing(MeshCache::DrawBound(draws), error)) {
     return false;
   }
@@ -228,10 +282,15 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
       wgpuDeviceCreateCommandEncoder(gpu_.device.get(), &encoder_descriptor));
   textures_.RecordMipmaps(encoder.get());
 
+  // Every attachment is cleared, so none keeps its contents. Multisampled,
+  // the colour samples resolve into the colour product as the pass ends,
+  // and the depth samples are kept for the depth resolve.
+  const bool multisampled = static_cast<bool>(color_samples_);
   WGPURenderPassColorAttachment color_attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-  color_attachment.view = color_view_.get();
+  color_attachment.view = multisampled ? color_samples_view_.get() : color_view_.get();
+  color_attachment.resolveTarget = multisampled ? color_view_.get() : nullptr;
   color_attachment.loadOp = WGPULoadOp_Clear;
-  color_attachment.storeOp = WGPUStoreOp_Store;
+  color_attachment.storeOp = multisampled ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
   if (background_.mode == BackgroundMode::Opaque) {
     color_attachment.clearValue = {background_.color.x, background_.color.y,
         background_.color.z, 1.0};
@@ -240,7 +299,7 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   }
   WGPURenderPassDepthStencilAttachment depth_attachment =
       WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
-  depth_attachment.view = depth_view_.get();
+  depth_attachment.view = multisampled ? depth_samples_view_.get() : depth_view_.get();
   depth_attachment.depthLoadOp = WGPULoadOp_Clear;
   depth_attachment.depthStoreOp = WGPUStoreOp_Store;
   depth_attachment.depthClearValue = 1.0F;
@@ -251,11 +310,15 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder.get(), &pass_descriptor));
   constants_.clear();
   SceneRecord record;
-  const bool recorded = meshes_.Record(pass.get(), pipelines_, materials_, draws,
-      ring_group_.get(), constants_, record, error);
+  const bool recorded = meshes_.Record(pass.get(), pipelines_, materials_, draws, width_,
+      height_, ring_group_.get(), constants_, record, error);
   wgpuRenderPassEncoderEnd(pass.get());
   if (!recorded) return false;
-  statistics_.outline_draws = 0;
+  if (multisampled && !depth_resolve_.Record(encoder.get(), depth_samples_view_.get(),
+                          depth_view_.get(), error)) {
+    return false;
+  }
+  statistics_.outline_draws = record.hulls;
   statistics_.pipelines_created = pipelines_.created();
 
   WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;

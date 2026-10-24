@@ -8,14 +8,14 @@
 
 #include "mmd/mmd_common.slang"
 
-// VertexInput's streams at locations 0-2, in its order, and a fourth.
+// The surface streams at locations 0-2 (surface_common) and a fourth.
 struct MmdOutlineInput {
   float3 position : POSITION;
-  float3 normal : NORMAL;
-  float2 st : TEXCOORD0;
+  float3 normal : NORMAL1;
+  float2 st : TEXCOORD2;
   // primvars:mmd:edgeScale, at location 3; 1 when the mesh has none, bound
   // with stride 0.
-  float edge_scale : TEXCOORD1;
+  float edge_scale : TEXCOORD3;
   uint vertex : SV_VulkanVertexID;
 };
 

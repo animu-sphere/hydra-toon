@@ -185,15 +185,6 @@ float ShadowVisibility(uint index, float3 view_position, float3 position_dx,
   return light / float(kReceiverFilterTaps);
 }
 
-struct VertexInput {
-  float3 position : POSITION;
-  float3 normal : NORMAL;
-  // USD's st: origin at the image's bottom left. (0, 0) when the mesh has
-  // none, bound with stride 0.
-  float2 st : TEXCOORD0;
-  uint vertex : SV_VulkanVertexID;
-};
-
 // The vertex stage's move of a skinned point out along its normal by
 // `width` in view space, for an inverted hull: the object-space move that is
 // `width` along the view-space normal. The inverse of the model-view 3x3 is
@@ -215,11 +206,18 @@ float ScreenWidth(float share, float w) {
   return 2.0 * share * w / max(draw.projection_scale, 1e-6);
 }
 
+// A stage interface's locations are its declaration order: SPIR-V
+// generation numbers them so, and WGSL generation takes a semantic's index
+// as its location, so each semantic after the first carries its place
+// (WebGPU policy §5). The vertex streams are the surface pipelines': the
+// point at 0, the normal at 1, USD's st at 2 (origin at the image's bottom
+// left; (0, 0) when the mesh has none, bound with stride 0) and a fourth
+// stream at 3.
 struct VertexStageOutput {
   float4 position : SV_Position;
   float3 view_normal : NORMAL;
-  float2 st : TEXCOORD0;
-  float3 view_position : TEXCOORD1;
+  float2 st : TEXCOORD1;
+  float3 view_position : TEXCOORD2;
 };
 
 float3 ViewPosition(float3 position) {
@@ -259,18 +257,18 @@ float4 ViewTangent(float4 tangent) {
 
 struct TangentVertexInput {
   float3 position : POSITION;
-  float3 normal : NORMAL;
-  float2 st : TEXCOORD0;
-  float4 tangent : TANGENT;
+  float3 normal : NORMAL1;
+  float2 st : TEXCOORD2;
+  float4 tangent : TANGENT3;
   uint vertex : SV_VulkanVertexID;
 };
 
 struct TangentVertexStageOutput {
   float4 position : SV_Position;
   float3 view_normal : NORMAL;
-  float2 st : TEXCOORD0;
-  float3 view_position : TEXCOORD1;
-  float4 view_tangent : TEXCOORD2;
+  float2 st : TEXCOORD1;
+  float3 view_position : TEXCOORD2;
+  float4 view_tangent : TEXCOORD3;
 };
 
 TangentVertexStageOutput TangentSurfaceVertex(TangentVertexInput input) {
@@ -288,17 +286,15 @@ TangentVertexStageOutput TangentSurfaceVertex(TangentVertexInput input) {
 }
 
 // The surface's vertex stage, every surface pipeline's but an outline's:
-// the point and normal skinned, then seen through the camera.
-VertexStageOutput SurfaceVertex(VertexInput input) {
-  VertexStageOutput output;
-  float3 position = input.position;
-  float3 normal = input.normal;
-  Skin(draw.flags, input.vertex, position, normal);
-  output.position = mul(draw.clip_from_object, float4(position, 1.0));
-  output.view_normal = ViewNormal(normal);
-  output.st = input.st;
-  output.view_position = ViewPosition(position);
-  return output;
+// the point and normal skinned, then seen through the camera. It takes and
+// gives plain values: a function's parameter or result with semantics would
+// be given locations in WGSL, and clashing ones.
+void SurfaceVertex(uint vertex, float3 position, float3 normal,
+    out float4 clip_position, out float3 view_normal, out float3 view_position) {
+  Skin(draw.flags, vertex, position, normal);
+  clip_position = mul(draw.clip_from_object, float4(position, 1.0));
+  view_normal = ViewNormal(normal);
+  view_position = ViewPosition(position);
 }
 
 // The unit vector from a view-space point toward the eye.
@@ -334,10 +330,10 @@ float4 SampleTexture(uint role, uint entry, uint sampler, float4 uv_rows[2],
 // map a constant/fallback vector without mesh UVs, as PreviewSurface allows.
 float3 TangentMappedNormal(float3 normal, float4 authored_tangent, float3 position, float2 st,
     float3 map, float v_sign, bool enabled) {
-  const float3 dx = ddx(position);
-  const float3 dy = ddy(position);
-  const float2 ux = ddx(float2(st.x, st.y * v_sign));
-  const float2 uy = ddy(float2(st.x, st.y * v_sign));
+  const float3 dx = DerivativeX(position);
+  const float3 dy = DerivativeY(position);
+  const float2 ux = DerivativeX(float2(st.x, st.y * v_sign));
+  const float2 uy = DerivativeY(float2(st.x, st.y * v_sign));
   const float determinant = ux.x * uy.y - ux.y * uy.x;
   if (!enabled) {
     return normal;

@@ -21,9 +21,32 @@ struct WebGpuShaders {
   // colour as an opaque rough dielectric.
   std::string preview_vertex;
   std::string preview_fragment;
+  // MToon's Opaque and Mask surfaces, its Blend surfaces and its outline
+  // hull, as the Vulkan backend's mtoon_opaque, mtoon_transparent and
+  // mtoon_outline; and mtoon_opaque multisampled, which writes Mask's
+  // coverage through the sample mask.
+  std::string mtoon_vertex;
+  std::string mtoon_fragment;
+  std::string mtoon_transparent_vertex;
+  std::string mtoon_transparent_fragment;
+  std::string mtoon_outline_vertex;
+  std::string mtoon_outline_fragment;
+  std::string mtoon_coverage_vertex;
+  std::string mtoon_coverage_fragment;
+  // MMD's surfaces that blend nothing, those that can blend, and its edge.
+  std::string mmd_vertex;
+  std::string mmd_fragment;
+  std::string mmd_transparent_vertex;
+  std::string mmd_transparent_fragment;
+  std::string mmd_outline_vertex;
+  std::string mmd_outline_fragment;
   // Each texture level drawn from the one above; WebGPU has no blit.
   std::string mipmap_vertex;
   std::string mipmap_fragment;
+  // A multisampled frame's depth, sample 0 of each pixel; WebGPU resolves
+  // colour alone.
+  std::string depth_resolve_vertex;
+  std::string depth_resolve_fragment;
 };
 
 // The shaders as the build and install trees lay them out:

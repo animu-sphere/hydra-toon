@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The WebGPU backend's second stage (renderer report 92): MToon's and
+  MMD's opaque, transparent and outline pipelines on per-material bind
+  groups, skinning, morphs and the late latch, and 4x multisampling with
+  MToon Mask's coverage through the sample mask and a depth resolve. On
+  sixteen canonical scenes at 1x and 4x the backends agree within
+  WGPU-Q1's limits, which gain measured multisampled classes for outline
+  hull edges, Mask coverage thresholds and hull depth; the RGBA output,
+  morph and late-latch GPU checks pass on WebGPU.
 - The WebGPU backend's first stage
   ([WebGPU policy](docs/design/WEBGPU_POLICY.md), renderer report 91):
   `Toon::WebGPU` on a pinned Dawn release, its Direct3D 12 adapter by
@@ -25,6 +33,10 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The shared shader stage interfaces carry their locations in their
+  semantic indices, and explicit derivatives go through per-backend
+  accessors, so WGSL generation numbers and differentiates them as SPIR-V
+  does. The Vulkan backend's output is unchanged.
 - The shader contract's C++ side — draw constants, frame rows, each
   model's parameter record, shadow view records, the draw and material
   flags — and the writers that fill them move from the Vulkan backend to

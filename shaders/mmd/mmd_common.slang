@@ -99,14 +99,14 @@ static const float kShadowSlopeLimit = 4.0;
 static const float kShadowRadiusTexels = 6.0;
 static const int kShadowTaps = 32;
 
-// VertexInput's streams at locations 0-2, in its order, and a fourth.
+// The surface streams at locations 0-2 (surface_common) and a fourth.
 struct MmdVertexInput {
   float3 position : POSITION;
-  float3 normal : NORMAL;
-  float2 st : TEXCOORD0;
+  float3 normal : NORMAL1;
+  float2 st : TEXCOORD2;
   // primvars:mmd:uv1's x and y, at location 3: raw, origin at the image's
   // top left. (0, 0) when the mesh has none, bound with stride 0.
-  float2 sub_uv : TEXCOORD1;
+  float2 sub_uv : TEXCOORD3;
   uint vertex : SV_VulkanVertexID;
 };
 
@@ -114,25 +114,18 @@ struct MmdVertexInput {
 struct MmdVertexOutput {
   float4 position : SV_Position;
   float3 view_normal : NORMAL;
-  float2 st : TEXCOORD0;
-  float3 view_position : TEXCOORD1;
-  float2 sub_uv : TEXCOORD2;
+  float2 st : TEXCOORD1;
+  float3 view_position : TEXCOORD2;
+  float2 sub_uv : TEXCOORD3;
 };
 
 // The surface's vertex stage, SurfaceVertex's, passing the sub-texture UV
 // on.
 MmdVertexOutput MmdSurfaceVertex(MmdVertexInput input) {
-  VertexInput surface_input;
-  surface_input.position = input.position;
-  surface_input.normal = input.normal;
-  surface_input.st = input.st;
-  surface_input.vertex = input.vertex;
-  const VertexStageOutput surface = SurfaceVertex(surface_input);
   MmdVertexOutput output;
-  output.position = surface.position;
-  output.view_normal = surface.view_normal;
-  output.st = surface.st;
-  output.view_position = surface.view_position;
+  SurfaceVertex(input.vertex, input.position, input.normal, output.position,
+      output.view_normal, output.view_position);
+  output.st = input.st;
   output.sub_uv = input.sub_uv;
   return output;
 }
@@ -186,8 +179,8 @@ float SelfShadowLight(float3 view_position, float3 normal, float lambert) {
   // is still here.
   const float2 at = uv * size - 0.5;
   const float depth = map.z * shadow.parameters.y;
-  const float3 across_x = ddx(float3(at, depth));
-  const float3 across_y = ddy(float3(at, depth));
+  const float3 across_x = DerivativeX(float3(at, depth));
+  const float3 across_y = DerivativeY(float3(at, depth));
   if (any(uv < 0.0) || any(uv > 1.0)) {
     return 1.0;
   }

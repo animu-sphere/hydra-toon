@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [92](92-2026-10-25-webgpu-stage-2.md) | WebGPU stage 2: MToon and MMD pipelines, skinning, morphs, late latch and 4x on WebGPU; WGSL locations from semantic indices; the reference driver's alpha to coverage (count, 2 x 2 dither, sample order, fine derivatives) reproduced through the sample mask; sixteen parity scenes at 1x and 4x, WGPU-Q1's multisampled classes for hull edges, Mask thresholds and hull depth |
 | [91](91-2026-10-24-webgpu-stage-1.md) | WebGPU stage 1: shaders at the root behind per-backend bindings (WGPU-Q2), `Toon::WebGPU` on Dawn with a pinned DXC, unlit and PreviewSurface offscreen; nine parity scenes identical but for one textured pixel at one step, setting WGPU-Q1's limits |
 | [90](90-2026-10-24-webgpu-toolchain-probe.md) | WebGPU toolchain probe for the v0.7.0 RFC: Dawn's pinned Windows release (static `webgpu_dawn`, CMake package, `tint`); all 22 shader entry points generate WGSL, which Tint rejects only for push constants, texture/sampler tables, the composite MSAA load and MMD vertex locations |
 | [89](89-2026-10-24-published-v060.md) | v0.6.0 release assets and GHCR pull verified; committed Formation re-pinned from v0.2.0; published headless GPU checks 31 PASS and 8 MMD and 16 MToon captures, shadows on and off, byte-identical to the stage-3 build |

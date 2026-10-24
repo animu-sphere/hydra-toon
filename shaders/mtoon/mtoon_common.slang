@@ -110,8 +110,8 @@ MToonSurface ShadeSurface(MToonParameters material, float3 view_normal,
     float4 view_tangent, float3 view_position, float2 st, bool front) {
   float3 normal = normalize(view_normal);
   // For the shared shadow views' receiver plane, in uniform control flow.
-  const float3 position_dx = ddx(view_position);
-  const float3 position_dy = ddy(view_position);
+  const float3 position_dx = DerivativeX(view_position);
+  const float3 position_dy = DerivativeY(view_position);
   const float mask = SampleTexture(kMToonMask, material.animation_textures.z,
       material.animation_textures.w, material.mask_uv, st).b;
   const float2 animated_st = AnimatedST(material, st, mask);
@@ -235,5 +235,5 @@ float MaskCoverage(MToonParameters material, float alpha) {
   if ((draw.flags & kDrawAlphaToCoverage) == 0) {
     return alpha < cutoff ? 0.0 : 1.0;
   }
-  return saturate((alpha - cutoff) / max(fwidth(alpha), 1e-4) + 0.5);
+  return saturate((alpha - cutoff) / max(DerivativeWidth(alpha), 1e-4) + 0.5);
 }
