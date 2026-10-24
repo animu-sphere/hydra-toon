@@ -466,6 +466,9 @@ public:
   ~WebGpuPresentSession() override {
     std::string ignored;
     WaitForCompletion(ignored);
+    // The surface outlives the device in Gpu; it lets go of the device's
+    // textures first.
+    if (configured_once_) wgpuSurfaceUnconfigure(gpu_.surface.get());
   }
 
   PresentSetupStatus Initialize(const WebGpuWindow& window, const WebGpuShaders& shaders,
