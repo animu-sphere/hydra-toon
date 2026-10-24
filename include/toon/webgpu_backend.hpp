@@ -40,6 +40,9 @@ struct WebGpuShaders {
   std::string mmd_transparent_fragment;
   std::string mmd_outline_vertex;
   std::string mmd_outline_fragment;
+  // The shared shadow caster pass, depth alone.
+  std::string shadow_vertex;
+  std::string shadow_fragment;
   // Each texture level drawn from the one above; WebGPU has no blit.
   std::string mipmap_vertex;
   std::string mipmap_fragment;

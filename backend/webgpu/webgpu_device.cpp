@@ -257,6 +257,8 @@ bool LoadShaders(const WebGpuShaders& shaders, ShaderSources& sources,
       {&shaders.mmd_transparent_fragment, &sources.mmd_transparent_fragment},
       {&shaders.mmd_outline_vertex, &sources.mmd_outline_vertex},
       {&shaders.mmd_outline_fragment, &sources.mmd_outline_fragment},
+      {&shaders.shadow_vertex, &sources.shadow_vertex},
+      {&shaders.shadow_fragment, &sources.shadow_fragment},
       {&shaders.mipmap_vertex, &sources.mipmap_vertex},
       {&shaders.mipmap_fragment, &sources.mipmap_fragment},
       {&shaders.depth_resolve_vertex, &sources.depth_resolve_vertex},
@@ -273,6 +275,12 @@ Matrix4 WebGpuClipFromWorld(const ToonView& view) {
   depth.m[10] = 0.5F;
   depth.m[14] = 0.5F;
   return Multiply(depth, Multiply(view.projection, view.view));
+}
+
+Matrix4 WebGpuShadowClipFromWorld(const ShadowView& view) {
+  Matrix4 flip;
+  flip.m[5] = -1.0F;
+  return Multiply(flip, view.clip_from_world);
 }
 
 } // namespace Toon::webgpu_internal

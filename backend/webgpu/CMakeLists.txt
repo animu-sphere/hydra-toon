@@ -24,6 +24,7 @@ toon_add_shader_library(toon-renderer-wgsl WGSL
   mmd/mmd.slang
   mmd/mmd_transparent.slang
   mmd/mmd_outline.slang
+  scene/shadow.slang
   webgpu/mtoon_coverage.slang
   webgpu/mipmap.slang
   webgpu/depth_resolve.slang

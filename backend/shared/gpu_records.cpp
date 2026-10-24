@@ -3,9 +3,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace Toon::backend_shared {
 namespace {
+
+// MMD's unit on the stage (usd-mmd-plugins stage contract §6), as
+// shaders/mmd/mmd_outline.slang states it.
+constexpr double kMetersPerMmdUnit = 0.08;
 
 // A tint's multiply RGBA, then its add RGBA.
 void WriteTint(const ToonMaterial::MMD::TextureTint& tint, float (&row)[8]) {
@@ -307,6 +312,43 @@ void WriteFrame(const DrawList& draws, const std::vector<ShadowView>* views,
     }
   }
   frame[1] = static_cast<float>(count);
+}
+
+void WriteShadowParameters(const DrawList& draws, const std::vector<ShadowView>& views,
+    std::uint32_t resolution, std::span<ShadowViewParameters> written,
+    MmdShadowParameters& mmd) {
+  const ShadowSettings& settings = draws.shadow_settings;
+  mmd = {};
+  const Matrix4 world_from_view = AffineInverse(draws.view.view);
+  for (std::size_t index = 0; index < views.size() && index < written.size(); ++index) {
+    const ShadowView& view = views[index];
+    const Matrix4 clip_from_view = Multiply(view.clip_from_world, world_from_view);
+    ShadowViewParameters& parameters = written[index];
+    std::memcpy(parameters.clip_from_view, clip_from_view.m.data(),
+        sizeof(parameters.clip_from_view));
+    parameters.extent[0] = static_cast<float>(resolution);
+    parameters.extent[1] = static_cast<float>(index);
+    parameters.extent[2] = view.perspective ? 1.0F : 0.0F;
+    parameters.extent[3] = 0.0F;
+    parameters.depth[0] = static_cast<float>(view.depth);
+    parameters.depth[1] = static_cast<float>(view.near_plane);
+    parameters.depth[2] = static_cast<float>(view.texel);
+    parameters.depth[3] = 0.0F;
+    parameters.receiver[0] = std::clamp(settings.depth_bias, 0.0F, 16.0F);
+    parameters.receiver[1] = std::clamp(settings.normal_bias, 0.0F, 16.0F);
+    parameters.receiver[2] = std::clamp(settings.filter_radius, 0.0F, 8.0F);
+    parameters.receiver[3] = 0.0F;
+    if (!view.mmd) continue;
+    std::memcpy(mmd.clip_from_view, clip_from_view.m.data(), sizeof(mmd.clip_from_view));
+    mmd.parameters[0] = 1.0F;
+    mmd.parameters[1] =
+        static_cast<float>(view.depth * draws.meters_per_unit / kMetersPerMmdUnit);
+    mmd.parameters[2] = static_cast<float>(resolution);
+    mmd.texel[0] = static_cast<float>(3.0 * view.texel);
+    mmd.texel[1] = static_cast<float>(view.texel * draws.meters_per_unit / kMetersPerMmdUnit);
+    mmd.texel[2] = static_cast<float>(index);
+  }
+  mmd.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
 }
 
 } // namespace Toon::backend_shared

@@ -405,10 +405,6 @@ void Barrier(VkCommandBuffer command, const VkImageMemoryBarrier2& barrier) {
   vkCmdPipelineBarrier2(command, &dependency);
 }
 
-// MMD's unit on the stage (usd-mmd-plugins stage contract §6), as
-// shaders/mmd/mmd_outline.slang states it.
-constexpr double kMetersPerMmdUnit = 0.08;
-
 } // namespace
 
 bool LoadSceneShaders(const SceneShaders& shaders, SceneShaderWords& words,
@@ -2171,45 +2167,11 @@ bool ShadowMap::Update(const DrawList& draws, std::string& detail,
       !Build(resolution, std::max(count, layers()), detail)) {
     return false;
   }
-  const ShadowSettings& settings = draws.shadow_settings;
   MmdShadowParameters parameters{};
-  auto* views = static_cast<ShadowViewParameters*>(views_buffer_.mapped);
-  const Matrix4 world_from_view = AffineInverse(draws.view.view);
-  for (std::size_t index = 0; index < fit_.views().size(); ++index) {
-    const ShadowView& view = fit_.views()[index];
-    // Every receiver reads in view space.
-    const Matrix4 clip_from_view = Multiply(view.clip_from_world, world_from_view);
-    ShadowViewParameters& written = views[index];
-    std::memcpy(written.clip_from_view, clip_from_view.m.data(),
-        sizeof(written.clip_from_view));
-    written.extent[0] = static_cast<float>(resolution_);
-    written.extent[1] = static_cast<float>(index);
-    written.extent[2] = view.perspective ? 1.0F : 0.0F;
-    written.extent[3] = 0.0F;
-    written.depth[0] = static_cast<float>(view.depth);
-    written.depth[1] = static_cast<float>(view.near_plane);
-    written.depth[2] = static_cast<float>(view.texel);
-    written.depth[3] = 0.0F;
-    written.receiver[0] = std::clamp(settings.depth_bias, 0.0F, 16.0F);
-    written.receiver[1] = std::clamp(settings.normal_bias, 0.0F, 16.0F);
-    written.receiver[2] = std::clamp(settings.filter_radius, 0.0F, 8.0F);
-    written.receiver[3] = 0.0F;
-    if (!view.mmd) {
-      continue;
-    }
-    // MMD's receivers compare in MMD units.
-    std::memcpy(parameters.clip_from_view, clip_from_view.m.data(),
-        sizeof(parameters.clip_from_view));
-    parameters.parameters[0] = 1.0F;
-    parameters.parameters[1] = static_cast<float>(
-        view.depth * draws.meters_per_unit / kMetersPerMmdUnit);
-    parameters.parameters[2] = static_cast<float>(resolution_);
-    parameters.texel[0] = static_cast<float>(3.0 * view.texel);
-    parameters.texel[1] = static_cast<float>(
-        view.texel * draws.meters_per_unit / kMetersPerMmdUnit);
-    parameters.texel[2] = static_cast<float>(index);
-  }
-  parameters.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
+  WriteShadowParameters(draws, fit_.views(), resolution_,
+      std::span(static_cast<ShadowViewParameters*>(views_buffer_.mapped),
+          kShadowViewCapacity),
+      parameters);
   std::memcpy(buffer_.mapped, &parameters, sizeof(parameters));
   return FlushIfNeeded(device_, buffer_, detail) &&
          FlushIfNeeded(device_, views_buffer_, detail);

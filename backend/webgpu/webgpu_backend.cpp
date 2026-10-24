@@ -35,6 +35,8 @@ WebGpuShaders WebGpuShadersIn(const std::string& directory) {
   shaders.mmd_transparent_fragment = stage("mmd_transparent", ".frag.wgsl");
   shaders.mmd_outline_vertex = stage("mmd_outline", ".vert.wgsl");
   shaders.mmd_outline_fragment = stage("mmd_outline", ".frag.wgsl");
+  shaders.shadow_vertex = stage("shadow", ".vert.wgsl");
+  shaders.shadow_fragment = stage("shadow", ".frag.wgsl");
   shaders.mipmap_vertex = stage("mipmap", ".vert.wgsl");
   shaders.mipmap_fragment = stage("mipmap", ".frag.wgsl");
   shaders.depth_resolve_vertex = stage("depth_resolve", ".vert.wgsl");
@@ -81,6 +83,7 @@ private:
   Gpu gpu_;
   ScenePipelines pipelines_;
   TextureCache textures_;
+  ShadowMap shadow_;
   MaterialCache materials_;
   MeshCache meshes_;
   DepthResolve depth_resolve_;
@@ -122,8 +125,8 @@ FrameStatus WebGpuOffscreenRenderer::Initialize(const WebGpuShaders& shaders,
   // policy §7).
   const std::uint32_t samples = options.samples >= kMultisampleCount ? kMultisampleCount : 1U;
   if (!pipelines_.Initialize(gpu_.device.get(), sources, samples, detail) ||
-      !textures_.Initialize(gpu_, sources, detail) ||
-      !materials_.Initialize(gpu_, pipelines_, textures_, detail) ||
+      !textures_.Initialize(gpu_, sources, detail) || !shadow_.Initialize(gpu_, detail) ||
+      !materials_.Initialize(gpu_, pipelines_, textures_, shadow_, detail) ||
       !meshes_.Initialize(gpu_, pipelines_, detail) ||
       !depth_resolve_.Initialize(gpu_.device.get(), sources, detail)) {
     return FrameStatus::Fail;
@@ -261,15 +264,18 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   const double morph_before = meshes_.morph_write_ms();
   const double material_before = materials_.parameter_write_ms();
   if (!EnsureTargets(width, height, error) || !textures_.Update(extracted, error) ||
-      (late_.enabled() && (!meshes_.Update(extracted, error, false) ||
-                              !materials_.Update(extracted, textures_, error, false)))) {
+      (late_.enabled() &&
+          (!meshes_.Update(extracted, error, false) ||
+              !materials_.Update(extracted, textures_, shadow_, error, false)))) {
     return false;
   }
   const DrawList* frame = nullptr;
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
-  if (!meshes_.Update(draws, error) || !materials_.Update(draws, textures_, error) ||
-      !EnsureRing(MeshCache::DrawBound(draws), error)) {
+  if (!meshes_.Update(draws, error) ||
+      !shadow_.Update(draws, error, statistics_.latency.shadow_fit_ms) ||
+      !materials_.Update(draws, textures_, shadow_, error) ||
+      !EnsureRing(MeshCache::DrawBound(draws, shadow_.fit().views().size()), error)) {
     return false;
   }
   statistics_.latency.buffers_written = SteadyNanoseconds();
@@ -281,6 +287,21 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   CommandEncoder encoder(
       wgpuDeviceCreateCommandEncoder(gpu_.device.get(), &encoder_descriptor));
   textures_.RecordMipmaps(encoder.get());
+  // The shared shadow views, before the scene that reads them; their draw
+  // constants come first in the ring.
+  constants_.clear();
+  if (!shadow_.Record(encoder.get(), pipelines_, materials_, meshes_, draws, ring_group_.get(),
+          constants_, error)) {
+    return false;
+  }
+  statistics_.shadow_draws = shadow_.mmd_draws();
+  statistics_.shadow_caster_draws = shadow_.caster_draws();
+  statistics_.shadow_views = static_cast<std::uint32_t>(shadow_.fit().views().size());
+  statistics_.shadow_unviewed = shadow_.fit().unviewed();
+  statistics_.shadow_resolution = shadow_.resolution();
+  statistics_.shadow_layers = shadow_.layers();
+  statistics_.shadow_memory_bytes = shadow_.memory_bytes();
+  statistics_.shadow_rebuilds = shadow_.rebuilds();
 
   // Every attachment is cleared, so none keeps its contents. Multisampled,
   // the colour samples resolve into the colour product as the pass ends,
@@ -308,7 +329,6 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
   pass_descriptor.colorAttachments = &color_attachment;
   pass_descriptor.depthStencilAttachment = &depth_attachment;
   RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder.get(), &pass_descriptor));
-  constants_.clear();
   SceneRecord record;
   const bool recorded = meshes_.Record(pass.get(), pipelines_, materials_, draws, width_,
       height_, ring_group_.get(), constants_, record, error);

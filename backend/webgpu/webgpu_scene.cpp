@@ -216,6 +216,7 @@ bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
           &sources.mmd_transparent_fragment, "mmd_transparent"},
       {Kind::MmdOutline, &sources.mmd_outline_vertex, &sources.mmd_outline_fragment,
           "mmd_outline"},
+      {Kind::Shadow, &sources.shadow_vertex, &sources.shadow_fragment, "shadow"},
   };
   bool shaders = true;
   for (const auto& module : modules) {
@@ -240,6 +241,10 @@ bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
           SamplerEntry(3, WGPUShaderStage_Fragment, WGPUSamplerBindingType_NonFiltering),
           BufferEntry(4, WGPUShaderStage_Fragment, WGPUBufferBindingType_ReadOnlyStorage)},
       "frame");
+  // The caster pass's group 0: the frame buffer alone, for a Mask cut's
+  // UV animation time, since the pass draws into the views' image.
+  caster_frame_layout_ = CreateLayout(device,
+      {BufferEntry(0, kBothStages, WGPUBufferBindingType_ReadOnlyStorage)}, "caster frame");
   // Group 1, a material: every model's buffer and a texture and sampler
   // per role. mtoon_outline's vertex stage reads its MToon slot and two of
   // its roles, and mmd_outline's its MMD slot; PreviewSurface is read by
@@ -275,6 +280,10 @@ bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
       {frame_layout_.get(), material_layout_.get(), deformation_layout_.get(),
           draw_layout_.get()},
       "surface");
+  caster_layout_ = CreatePipelineLayout(device,
+      {caster_frame_layout_.get(), material_layout_.get(), deformation_layout_.get(),
+          draw_layout_.get()},
+      "caster");
 
   // Trilinear, one sampler per wrap pair, as the Vulkan backend's.
   for (std::uint32_t index = 0; index < kSamplerCount; ++index) {
@@ -292,8 +301,9 @@ bool ScenePipelines::Initialize(WGPUDevice device, const ShaderSources& sources,
   shadow.addressModeV = WGPUAddressMode_ClampToEdge;
   shadow_sampler_.reset(wgpuDeviceCreateSampler(device, &shadow));
 
-  if (!shaders || !frame_layout_ || !material_layout_ || !deformation_layout_ ||
-      !draw_layout_ || !mesh_layout_ || !surface_layout_ || !shadow_sampler_) {
+  if (!shaders || !frame_layout_ || !caster_frame_layout_ || !material_layout_ ||
+      !deformation_layout_ || !draw_layout_ || !mesh_layout_ || !surface_layout_ ||
+      !caster_layout_ || !shadow_sampler_) {
     detail = "creating the WebGPU scene layouts or shader modules failed";
     return false;
   }
@@ -305,6 +315,7 @@ WGPURenderPipeline ScenePipelines::Get(const Key& key, std::string& detail) {
     if (existing == key) return pipeline.get();
   }
   const Kind kind = key.kind;
+  if (kind == Kind::Shadow) return CreateCaster(key, detail);
   const bool mesh = kind == Kind::Mesh;
   const bool outline = kind == Kind::MToonOutline || kind == Kind::MmdOutline;
   // Position, normal, UV and a fourth stream, as the Vulkan pipelines'
@@ -389,6 +400,57 @@ WGPURenderPipeline ScenePipelines::Get(const Key& key, std::string& detail) {
   RenderPipeline pipeline(wgpuDeviceCreateRenderPipeline(device_, &descriptor));
   if (!pipeline) {
     detail = "creating a WebGPU scene pipeline failed";
+    return nullptr;
+  }
+  ++created_;
+  pipelines_.emplace_back(key, std::move(pipeline));
+  return pipelines_.back().second.get();
+}
+
+WGPURenderPipeline ScenePipelines::CreateCaster(const Key& key, std::string& detail) {
+  // The points and, for a Mask cut, the UVs, the second stream, as the
+  // Vulkan backend's shadow pipeline reads them.
+  const WGPUVertexAttribute attributes[2] = {
+      {nullptr, WGPUVertexFormat_Float32x3, 0, 0},
+      {nullptr, WGPUVertexFormat_Float32x2, 0, 1},
+  };
+  WGPUVertexBufferLayout buffers[2]{};
+  const std::uint64_t strides[2] = {sizeof(Float3), key.uvs ? sizeof(Float2) : 0U};
+  for (std::uint32_t stream = 0; stream < 2; ++stream) {
+    buffers[stream].stepMode = WGPUVertexStepMode_Vertex;
+    buffers[stream].arrayStride = strides[stream];
+    buffers[stream].attributeCount = 1;
+    buffers[stream].attributes = &attributes[stream];
+  }
+  const Stages& stages = stages_[static_cast<std::size_t>(Kind::Shadow)];
+  // Depth alone: no colour target.
+  WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+  fragment.module = stages.fragment.get();
+  fragment.entryPoint = View("fragment_main");
+  // Pushed back by a depth resolution step and the slope's worth of one,
+  // so a lit surface does not shadow itself, as on Vulkan.
+  WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
+  depth.format = kShadowFormat;
+  depth.depthWriteEnabled = WGPUOptionalBool_True;
+  depth.depthCompare = WGPUCompareFunction_Less;
+  depth.depthBias = 1;
+  depth.depthBiasSlopeScale = 1.0F;
+  WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+  descriptor.label = View("shadow");
+  descriptor.layout = caster_layout_.get();
+  descriptor.vertex.module = stages.vertex.get();
+  descriptor.vertex.entryPoint = View("vertex_main");
+  descriptor.vertex.bufferCount = 2;
+  descriptor.vertex.buffers = buffers;
+  descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+  descriptor.primitive.frontFace = key.front;
+  descriptor.primitive.cullMode = key.cull;
+  descriptor.depthStencil = &depth;
+  descriptor.multisample.count = 1;
+  descriptor.fragment = &fragment;
+  RenderPipeline pipeline(wgpuDeviceCreateRenderPipeline(device_, &descriptor));
+  if (!pipeline) {
+    detail = "creating the WebGPU shadow pipeline failed";
     return nullptr;
   }
   ++created_;
@@ -690,42 +752,39 @@ bool TextureCache::Translucent(TextureId texture) const {
 }
 
 bool MaterialCache::Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
-    const TextureCache& textures, std::string& detail) {
+    const TextureCache& textures, const ShadowMap& shadow, std::string& detail) {
   device_ = gpu.device.get();
   queue_ = gpu.queue.get();
   pipelines_ = &pipelines;
   white_ = textures.ViewOf(0);
   frame_buffer_ = CreateBuffer(device_, kFrameBytes,
       WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "frame");
-  // No shared shadow view is drawn yet on this backend, so every light's
-  // slot names none and receivers never read these; they are bound because
-  // the receivers' code is there.
-  WGPUTextureDescriptor shadow = WGPU_TEXTURE_DESCRIPTOR_INIT;
-  shadow.label = View("shadow views");
-  shadow.usage = WGPUTextureUsage_TextureBinding;
-  shadow.size = {1, 1, 1};
-  shadow.format = kDepthFormat;
-  shadow_map_.reset(wgpuDeviceCreateTexture(device_, &shadow));
-  WGPUTextureViewDescriptor shadow_view = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-  shadow_view.dimension = WGPUTextureViewDimension_2DArray;
-  shadow_view.aspect = WGPUTextureAspect_DepthOnly;
-  shadow_view_.reset(shadow_map_ ? wgpuTextureCreateView(shadow_map_.get(), &shadow_view)
-                                 : nullptr);
-  shadow_views_ = CreateBuffer(device_, sizeof(ShadowViewParameters),
-      WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "shadow views");
-  mmd_shadow_ = CreateBuffer(device_, sizeof(MmdShadowParameters),
-      WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "mmd shadow");
-  if (!frame_buffer_ || !shadow_view_ || !shadow_views_ || !mmd_shadow_) {
-    detail = "creating the WebGPU frame resources failed";
+  if (!frame_buffer_) {
+    detail = "creating the WebGPU frame buffer failed";
     return false;
   }
-  frame_group_ = CreateGroup(device_, pipelines.frame_layout(),
-      {BufferBinding(0, frame_buffer_.get()), ViewBinding(1, shadow_view_.get()),
-          BufferBinding(2, shadow_views_.get()),
-          SamplerBinding(3, pipelines.shadow_sampler()),
-          BufferBinding(4, mmd_shadow_.get())},
+  caster_frame_group_ = CreateGroup(device_, pipelines.caster_frame_layout(),
+      {BufferBinding(0, frame_buffer_.get())}, "caster frame");
+  if (!caster_frame_group_) {
+    detail = "creating the WebGPU caster frame group failed";
+    return false;
+  }
+  return BindFrame(shadow, detail) && Reserve(64, detail);
+}
+
+bool MaterialCache::BindFrame(const ShadowMap& shadow, std::string& detail) {
+  frame_group_ = CreateGroup(device_, pipelines_->frame_layout(),
+      {BufferBinding(0, frame_buffer_.get()), ViewBinding(1, shadow.array_view()),
+          BufferBinding(2, shadow.views_buffer()),
+          SamplerBinding(3, pipelines_->shadow_sampler()),
+          BufferBinding(4, shadow.mmd_buffer())},
       "frame");
-  return frame_group_ && Reserve(64, detail);
+  frame_shadow_build_ = shadow.rebuilds();
+  if (!frame_group_) {
+    detail = "creating the WebGPU frame group failed";
+    return false;
+  }
+  return true;
 }
 
 BindGroup MaterialCache::MaterialGroup(
@@ -744,18 +803,13 @@ BindGroup MaterialCache::MaterialGroup(
 }
 
 bool MaterialCache::Update(const DrawList& draws, const TextureCache& textures,
-    std::string& detail, bool fast_values) {
+    const ShadowMap& shadow, std::string& detail, bool fast_values) {
   if (fast_values) {
-    // No shared shadow view is drawn on this backend yet, so no light's
-    // entry names one, and MMD's reading of the first is off; MMD's
-    // parameters still say whether material morphs' tints draw.
     std::array<float, kFrameBytes / sizeof(float)> frame{};
-    WriteFrame(draws, nullptr, frame);
+    WriteFrame(draws, &shadow.fit().views(), frame);
     wgpuQueueWriteBuffer(queue_, frame_buffer_.get(), 0, frame.data(), kFrameBytes);
-    MmdShadowParameters mmd{};
-    mmd.parameters[3] = draws.mmd_morph_tints ? 1.0F : 0.0F;
-    wgpuQueueWriteBuffer(queue_, mmd_shadow_.get(), 0, &mmd, sizeof(mmd));
   }
+  if (frame_shadow_build_ != shadow.rebuilds() && !BindFrame(shadow, detail)) return false;
 
   ++generation_;
   for (const MaterialSnapshot& material : draws.materials) {
@@ -1134,12 +1188,84 @@ void MeshCache::BindDeformation(Entry& entry) {
       "deformation");
 }
 
-std::size_t MeshCache::DrawBound(const DrawList& draws) {
+std::size_t MeshCache::DrawBound(const DrawList& draws, std::size_t shadow_views) {
   std::size_t bound = 0;
   for (const MeshSnapshot& mesh : draws.draws) {
     bound += mesh.parts != nullptr && !mesh.parts->empty() ? mesh.parts->size() : 1U;
   }
-  return bound * 3U;
+  return bound * (3U + shadow_views);
+}
+
+bool MeshCache::RecordShadowCasters(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
+    const MaterialCache& materials, const DrawList& draws, const Matrix4& clip_from_world,
+    WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::uint32_t& casters,
+    std::uint32_t& mmd_casters, std::string& detail) const {
+  MeshPart whole;
+  WGPURenderPipeline bound = nullptr;
+  wgpuRenderPassEncoderSetBindGroup(pass, 0, materials.caster_frame_group(), 0, nullptr);
+  for (const MeshSnapshot& mesh : draws.draws) {
+    const auto found = entries_.find(mesh.id);
+    if (found == entries_.end()) continue;
+    const Entry& entry = found->second;
+    bool streams = false;
+    SurfaceDrawConstants draw{};
+    WGPUFrontFace front = WGPUFrontFace_CW;
+    for (const MeshPart& part : PartsOf(mesh, entry.index_count, whole)) {
+      const ShadowRole role = ShadowRoleOf(FindMaterial(draws, part.material));
+      if (!ShadowFit::Casts(role, draws) || !Fits(part, entry.index_count)) continue;
+      if (!streams) {
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, entry.vertices.buffer.get(), 0,
+            WGPU_WHOLE_SIZE);
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 1,
+            entry.has_uvs ? entry.uvs.buffer.get() : zero_uv_.get(), 0, WGPU_WHOLE_SIZE);
+        wgpuRenderPassEncoderSetIndexBuffer(pass, entry.indices.buffer.get(),
+            WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
+        wgpuRenderPassEncoderSetBindGroup(pass, 2,
+            (entry.skinned || entry.morphed) ? entry.deformation.get() : undeformed_.get(), 0,
+            nullptr);
+        const Matrix4 clip_from_object = Multiply(clip_from_world, mesh.transform);
+        std::memcpy(draw.clip_from_object, clip_from_object.m.data(),
+            sizeof(draw.clip_from_object));
+        // Drawn with y flipped (WebGpuShadowClipFromWorld), a face
+        // counter-clockwise in the scene is clockwise in the view's image,
+        // as in the Vulkan backend's.
+        float rows[12];
+        front = ViewRows(mesh.transform, rows) ? WGPUFrontFace_CCW : WGPUFrontFace_CW;
+        streams = true;
+      }
+      const MaterialCache::Entry* material = materials.Find(part.material);
+      const bool cut = role.cut && material != nullptr;
+      draw.material_slot = cut ? material->slot : 0U;
+      draw.flags = (entry.has_uvs ? kDrawHasUVs : 0U) | entry.skin_flags |
+                   (cut ? (material->model == ToonShadingModel::MToon ? kDrawCutMToon
+                                                                      : kDrawCutPreview)
+                        : 0U);
+      ScenePipelines::Key key;
+      key.kind = ScenePipelines::Kind::Shadow;
+      key.cull = role.both_faces ? WGPUCullMode_None : WGPUCullMode_Back;
+      key.front = front;
+      key.uvs = entry.has_uvs;
+      key.fourth = false;
+      WGPURenderPipeline pipeline = pipelines.Get(key, detail);
+      if (pipeline == nullptr) return false;
+      if (pipeline != bound) {
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        bound = pipeline;
+      }
+      // A cut reads its material's slot and base or opacity texture; any
+      // other caster reads none, and binds the display colour's group.
+      wgpuRenderPassEncoderSetBindGroup(pass, 1,
+          cut ? material->group.get() : materials.display_group(), 0, nullptr);
+      const auto offset = static_cast<std::uint32_t>(constants.size());
+      constants.resize(constants.size() + kDrawStride);
+      std::memcpy(constants.data() + offset, &draw, sizeof(draw));
+      wgpuRenderPassEncoderSetBindGroup(pass, 3, ring, 1, &offset);
+      wgpuRenderPassEncoderDrawIndexed(pass, part.index_count, 1, part.first_index, 0, 0);
+      ++casters;
+      mmd_casters += role.mmd ? 1U : 0U;
+    }
+  }
+  return true;
 }
 
 bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
@@ -1176,7 +1302,7 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
                outline_occlusion_.Occludes(mesh, entry.outline_bounds, draws.view,
                    material.outline_width, material.outline_width_mode, draws.meters_per_unit));
   };
-  std::uint32_t draw_count = 0;
+  auto draw_count = static_cast<std::uint32_t>(constants.size() / kDrawStride);
   const auto push = [&](const void* data, std::size_t size) {
     const std::size_t offset = static_cast<std::size_t>(draw_count++) * kDrawStride;
     constants.resize(offset + kDrawStride);
@@ -1436,6 +1562,96 @@ bool MeshCache::Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
     }
     ++record.transparent;
     ++record.hulls;
+  }
+  return true;
+}
+
+bool ShadowMap::Initialize(const Gpu& gpu, std::string& detail) {
+  device_ = gpu.device.get();
+  queue_ = gpu.queue.get();
+  views_buffer_ = CreateBuffer(device_, sizeof(ShadowViewParameters) * kShadowViewCapacity,
+      WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "shadow views");
+  mmd_buffer_ = CreateBuffer(device_, sizeof(MmdShadowParameters),
+      WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst, "mmd shadow");
+  if (!views_buffer_ || !mmd_buffer_) {
+    detail = "creating the WebGPU shadow parameters failed";
+    return false;
+  }
+  // Off until a frame draws a view; a new buffer is zeroed.
+  return Build(ShadowResolution(ShadowSettings{}.resolution), 1, detail);
+}
+
+// The image, its array view and a view of each layer.
+bool ShadowMap::Build(std::uint32_t resolution, std::uint32_t layers, std::string& detail) {
+  layer_views_.clear();
+  array_view_.reset();
+  WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
+  descriptor.label = View("shadow views");
+  descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+  descriptor.size = {resolution, resolution, layers};
+  descriptor.format = kShadowFormat;
+  image_.reset(wgpuDeviceCreateTexture(device_, &descriptor));
+  if (!image_) {
+    detail = "creating the WebGPU shadow views' image failed";
+    resolution_ = 0;
+    return false;
+  }
+  WGPUTextureViewDescriptor array = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+  array.dimension = WGPUTextureViewDimension_2DArray;
+  array.aspect = WGPUTextureAspect_DepthOnly;
+  array_view_.reset(wgpuTextureCreateView(image_.get(), &array));
+  for (std::uint32_t layer = 0; layer < layers; ++layer) {
+    WGPUTextureViewDescriptor one = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    one.dimension = WGPUTextureViewDimension_2D;
+    one.baseArrayLayer = layer;
+    one.arrayLayerCount = 1;
+    layer_views_.emplace_back(wgpuTextureCreateView(image_.get(), &one));
+  }
+  resolution_ = resolution;
+  ++rebuilds_;
+  return static_cast<bool>(array_view_);
+}
+
+bool ShadowMap::Update(const DrawList& draws, std::string& detail, double& fit_ms) {
+  const std::int64_t fit_start = SteadyNanoseconds();
+  fit_.Update(draws);
+  fit_ms = static_cast<double>(SteadyNanoseconds() - fit_start) / 1e6;
+  const std::uint32_t resolution = ShadowResolution(draws.shadow_settings.resolution);
+  const auto count = static_cast<std::uint32_t>(fit_.views().size());
+  if ((resolution != resolution_ || count > layers()) &&
+      !Build(resolution, std::max(count, layers()), detail)) {
+    return false;
+  }
+  std::array<ShadowViewParameters, kShadowViewCapacity> views{};
+  MmdShadowParameters mmd{};
+  WriteShadowParameters(draws, fit_.views(), resolution_, views, mmd);
+  wgpuQueueWriteBuffer(queue_, views_buffer_.get(), 0, views.data(), sizeof(views));
+  wgpuQueueWriteBuffer(queue_, mmd_buffer_.get(), 0, &mmd, sizeof(mmd));
+  return true;
+}
+
+bool ShadowMap::Record(WGPUCommandEncoder encoder, ScenePipelines& pipelines,
+    const MaterialCache& materials, const MeshCache& meshes, const DrawList& draws,
+    WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::string& detail) {
+  caster_draws_ = 0;
+  mmd_draws_ = 0;
+  // Each view is drawn whole; a layer no view draws this frame is not
+  // read, since no light's entry names it.
+  for (std::uint32_t layer = 0; layer < fit_.views().size(); ++layer) {
+    WGPURenderPassDepthStencilAttachment depth = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    depth.view = layer_views_[layer].get();
+    depth.depthLoadOp = WGPULoadOp_Clear;
+    depth.depthStoreOp = WGPUStoreOp_Store;
+    depth.depthClearValue = 1.0F;
+    WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    descriptor.label = View("shadow view");
+    descriptor.depthStencilAttachment = &depth;
+    RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder, &descriptor));
+    const bool recorded = meshes.RecordShadowCasters(pass.get(), pipelines, materials, draws,
+        WebGpuShadowClipFromWorld(fit_.views()[layer]), ring, constants, caster_draws_,
+        mmd_draws_, detail);
+    wgpuRenderPassEncoderEnd(pass.get());
+    if (!recorded) return false;
   }
   return true;
 }
