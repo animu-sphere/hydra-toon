@@ -35,6 +35,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
 | `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline; compiles the Slang shaders to SPIR-V |
 | `backend/webgpu/` | `toon-render-webgpu` | `Toon::WebGPU` | WebGPU backend on Dawn ([WebGPU policy](../design/WEBGPU_POLICY.md)): persistent offscreen renderer; compiles the shaders it uses to Tint-validated WGSL; optional (`TOON_ENABLE_WEBGPU`), Windows only, linked into the headless runner and its tests, never exported |
+| `backend/shared/` | `toon-render-backend-shared` | `Toon::BackendShared` | what both backends share below their GPU APIs (§3): the shader contract's records and flags in C++, and the CPU code that fills them; no GPU API type, no public header |
 | `shaders/` | `toon-renderer-shaders`, `toon-renderer-wgsl` | — | the Slang shading source both backends compile, by role (§3) |
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
@@ -65,6 +66,7 @@ placement rule; it does not say the component exists.
 | `ToonRenderer` (frame loop, late latch, telemetry) | `core/` | new core target |
 | Vulkan backend | `backend/vulkan/` | `toon-render-vulkan` |
 | WebGPU backend | `backend/webgpu/` | `toon-render-webgpu` |
+| What both backends fill the same way: the C++ side of the shader contract (draw constants, the frame buffer's rows, each model's parameter record, shadow view records, the draw and material flags) and its writers (the frame's light rows, each model's slot from a material and its texture entries, view-from-object rows, UV transform rows, wrap-pair sampler indices, a mesh's parts and their fit) | `backend/shared/` | `toon-render-backend-shared` |
 | Slang shaders | `shaders/` at the root: `bindings/` (each backend's resource declarations, selected by `TOON_WEBGPU`), `common/` (skinning, the surface stage and lighting), `scene/` (unlit mesh, shadow casters), `preview/`, `mtoon/`, `mmd/`, `present/` (overlay, composite) and `webgpu/` (WebGPU-only modules). A compiled module keeps its basename; includes are relative to `shaders/` | — |
 | Hydra prims, render pass, scene indices | `adapters/hydra2/src/` | `toon-hydra2-runtime` |
 | Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
@@ -397,7 +399,7 @@ adapters/{headless,viewport,hydra2,fast}
         │
         ▼
 backend/vulkan ──┐
-                 ├──→ core/render-extraction ──→ core/render-world
+                 ├──→ backend/shared ──→ core/render-extraction ──→ core/render-world
 backend/webgpu ──┘
 ```
 
@@ -417,7 +419,14 @@ backend/webgpu ──┘
    and Dawn includes among the forbidden ones, for the core and backend
    headers it lists; **a new public header is added to that list in the
    same change.**
-3. A backend depends on `core/`, never on an adapter or on another backend.
+3. A backend depends on `core/` and `backend/shared/`, never on an adapter
+   or on another backend. `backend/shared/` depends on `core/` alone and
+   names no GPU API: its records are the bytes the shaders read (each says
+   which Slang declaration it must match), and each backend keeps what is
+   its own — resources, bindings, pipelines, a texture's table entry or
+   role view, draw recording. Its headers are private to the backends; the
+   static library is installed and exported only because the exported
+   Vulkan backend links it.
 4. OpenUSD appears only under `adapters/hydra2/` and in the viewport's optional
    `src/hydra_scene.cpp` and provider-only `src/avatar_runtime.cpp`, with their
    private `src/hydra_scene_parts.hpp` bridge. They compile only with the Hydra
