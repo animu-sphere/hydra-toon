@@ -11,7 +11,7 @@
 
 #include "common/surface_common.slang"
 
-// Must match vulkan_internal::MmdParameters.
+// Must match backend_shared::MmdParameters.
 struct MmdParameters {
   // MMD's diffuse RGBA, as stored.
   float4 diffuse;
@@ -39,7 +39,7 @@ struct MmdParameters {
   float4 toon_tint[2];
 };
 
-// Must match vulkan_internal::kSphere*.
+// Must match backend_shared::kSphere*.
 static const uint kSphereNone = 0;
 static const uint kSphereMultiply = 1;
 static const uint kSphereAdd = 2;
@@ -53,7 +53,7 @@ static const uint kMmdBase = 0;
 static const uint kMmdSphere = 1;
 static const uint kMmdToon = 2;
 
-// Must match vulkan_internal::MmdShadowParameters: where MMD's self-shadow
+// Must match backend_shared::MmdShadowParameters: where MMD's self-shadow
 // map was drawn from this frame, and whether material morphs' tints draw.
 struct MmdShadowParameters {
   // The map's clip space, Vulkan's, from view space: x and y in [-1, 1]

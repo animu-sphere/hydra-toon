@@ -6,7 +6,7 @@
 
 #include "bindings/bindings.slang"
 
-// Must match vulkan_internal::kDrawSkinned, kDrawConstantInfluences and
+// Must match backend_shared::kDrawSkinned, kDrawConstantInfluences and
 // kInfluenceCountShift.
 static const uint kDrawSkinned = 2;
 static const uint kDrawConstantInfluences = 4;

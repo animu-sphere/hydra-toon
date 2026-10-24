@@ -11,7 +11,7 @@ target_include_directories(toon-render-webgpu PUBLIC
   "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>")
 target_link_libraries(toon-render-webgpu
   PUBLIC Toon::RenderExtraction
-  PRIVATE dawn::webgpu_dawn)
+  PRIVATE Toon::BackendShared dawn::webgpu_dawn)
 target_compile_features(toon-render-webgpu PUBLIC cxx_std_20)
 
 include(ToonShaders)

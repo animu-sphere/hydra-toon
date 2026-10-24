@@ -6,7 +6,7 @@
 
 #include "common/skinning.slang"
 
-// Must match vulkan_internal::SurfaceDrawConstants.
+// Must match backend_shared::SurfaceDrawConstants.
 struct DrawConstants {
   float4x4 clip_from_object;
   // The top three rows of view-from-object: its 3x3 in xyz, the
@@ -31,13 +31,13 @@ struct DrawConstants {
 
 static const uint kDrawHasUVs = 1;
 static const uint kDrawDisplayColor = 8;
-// Must match vulkan_internal::kDrawOrthographic.
+// Must match backend_shared::kDrawOrthographic.
 static const uint kDrawOrthographic = 16;
-// Must match vulkan_internal::kDrawBlend.
+// Must match backend_shared::kDrawBlend.
 static const uint kDrawBlend = 32;
-// Must match vulkan_internal::kDrawAlphaToCoverage.
+// Must match backend_shared::kDrawAlphaToCoverage.
 static const uint kDrawAlphaToCoverage = 64;
-// Must match vulkan_internal::kOutlineWorld and kOutlineScreen.
+// Must match backend_shared::kOutlineWorld and kOutlineScreen.
 static const uint kOutlineWorld = 1;
 static const uint kOutlineScreen = 2;
 
@@ -55,7 +55,7 @@ static const uint kClampSampler = 4;
 // shadow policy §5) was drawn from this frame, for the receivers of every
 // family but MMD, whose own reading of the first direct light's view is
 // mmd_common's.
-// Must match vulkan_internal::ShadowViewParameters.
+// Must match backend_shared::ShadowViewParameters.
 struct ShadowViewParameters {
   // The view's clip space from view space: x and y in [-1, 1] across it,
   // z its depth in [0, 1] from the light, w 1 or, when the view is

@@ -3,7 +3,7 @@
 // the PreviewSurface parameter slot and how its inputs sample. Included
 // after surface_common.slang, not compiled on its own.
 
-// Must match vulkan_internal::PreviewParameters.
+// Must match backend_shared::PreviewParameters.
 struct PreviewTextureParameters {
   float4 uv_rows[2];
   float4 scale;

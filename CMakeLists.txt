@@ -66,6 +66,7 @@ toon_configure_dependencies()
 
 add_subdirectory(core/render-world)
 add_subdirectory(core/render-extraction)
+add_subdirectory(backend/shared)
 add_subdirectory(backend/vulkan)
 if(TOON_ENABLE_WEBGPU)
   add_subdirectory(backend/webgpu)

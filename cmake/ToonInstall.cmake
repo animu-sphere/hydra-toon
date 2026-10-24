@@ -4,6 +4,7 @@ function(toon_install_renderer)
   install(TARGETS
       toon-render-world
       toon-render-extraction
+      toon-render-backend-shared
       toon-render-vulkan
     EXPORT ToonTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"

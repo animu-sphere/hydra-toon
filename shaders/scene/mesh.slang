@@ -5,7 +5,7 @@
 
 #include "common/skinning.slang"
 
-// Must match vulkan_internal::DrawConstants.
+// Must match backend_shared::DrawConstants.
 struct DrawConstants {
   float4x4 clip_from_object;
   float4 color;

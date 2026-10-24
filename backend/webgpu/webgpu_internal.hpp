@@ -17,7 +17,13 @@
 #include <toon/extraction.hpp>
 #include <toon/webgpu_backend.hpp>
 
+#include "gpu_records.hpp"
+
 namespace Toon::webgpu_internal {
+
+// The shader contract's records, flags and writers, which the Vulkan
+// backend fills the same way (backend/shared/).
+using namespace Toon::backend_shared;
 
 // Reference-counted webgpu.h objects, released when the owner is.
 template <class Handle, void (*Release)(Handle)>
@@ -126,40 +132,10 @@ struct ShaderSources {
 bool LoadShaders(const WebGpuShaders& shaders, ShaderSources& sources,
     std::string& detail);
 
-// Must match DrawConstants in shaders/scene/mesh.slang.
-struct DrawConstants {
-  float clip_from_object[16];
-  float color[4];
-  std::uint32_t flags;
-  std::uint32_t padding[3];
-};
-
-// Must match DrawConstants in shaders/common/surface_common.slang; the
-// Vulkan backend's SurfaceDrawConstants.
-struct SurfaceDrawConstants {
-  float clip_from_object[16];
-  float view_from_object_rows[12];
-  std::uint32_t material_slot;
-  std::uint32_t flags;
-  float projection_scale;
-  float outline_scale;
-};
-static_assert(sizeof(SurfaceDrawConstants) == 128);
-
 // Every draw's constants sit at a multiple of this in one per-frame
 // uniform ring, bound at a dynamic offset (WebGPU policy §4).
 constexpr std::uint32_t kDrawStride = 256;
 constexpr std::uint32_t kDrawBindingSize = sizeof(SurfaceDrawConstants);
-
-// The draw flags, as the shaders read them; the Vulkan backend's values.
-constexpr std::uint32_t kDrawHasUVs = 1U;
-constexpr std::uint32_t kDrawSkinned = 2U;
-constexpr std::uint32_t kDrawConstantInfluences = 4U;
-constexpr std::uint32_t kDrawDisplayColor = 8U;
-constexpr std::uint32_t kDrawOrthographic = 16U;
-constexpr std::uint32_t kDrawBlend = 32U;
-constexpr std::uint32_t kDrawMorphed = 128U;
-constexpr std::uint32_t kInfluenceCountShift = 16U;
 
 // Must match the bindings' role slots (shaders/bindings/bindings_webgpu.slang):
 // role r's texture at binding kFirstRoleTexture + r, its sampler at
@@ -169,43 +145,9 @@ constexpr std::uint32_t kFirstRoleTexture = 3;
 constexpr std::uint32_t kFirstRoleSampler = 12;
 constexpr std::uint32_t kPreviewMaterialsBinding = 2;
 
-// PreviewSurface's roles, its inputs' order. Must match kPreview* in
-// shaders/preview/preview_common.slang.
-enum class PreviewRole : std::uint32_t {
-  Base, Emissive, Metallic, Roughness, Opacity, Normal,
-};
+// PreviewSurface's roles are its inputs, in PreviewParameters' order
+// (kPreview* in shaders/preview/preview_common.slang).
 constexpr std::uint32_t kPreviewRoles = 6;
-
-// One sampler per glTF wrap pair: index wrap_s * 3 + wrap_t, in ToonWrap
-// order, as the Vulkan backend's.
-constexpr std::uint32_t kSamplerCount = 9;
-
-// Two float4 header rows and four rows per direct light, as the Vulkan
-// backend's frame buffer.
-constexpr std::uint32_t kLightCapacity = 32;
-constexpr std::uint32_t kFrameBytes = (2 + 4 * kLightCapacity) * 16;
-
-// Must match PreviewParameters in shaders/preview/preview_common.slang.
-struct PreviewTextureParameters {
-  float uv_rows[8];
-  float scale[4];
-  float bias[4];
-  float fallback[4];
-  // Whether the role has a texture (0 none, as the Vulkan backend's entry
-  // 0), the Vulkan sampler index, scalar channel, connected.
-  std::uint32_t info[4];
-};
-struct PreviewParameters {
-  float base_color[4];
-  float emissive[4];
-  float surface[4];
-  float normal[4];
-  PreviewTextureParameters inputs[kPreviewRoles];
-};
-static_assert(sizeof(PreviewParameters) == 640);
-
-// Must match ShadowViewParameters in shaders/common/surface_common.slang.
-constexpr std::uint32_t kShadowViewBytes = 112;
 
 constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;
 constexpr WGPUTextureFormat kDepthFormat = WGPUTextureFormat_Depth32Float;
@@ -340,7 +282,7 @@ public:
   struct Entry {
     std::uint32_t slot = 0;
     std::uint64_t parameters_revision = 0;
-    std::array<std::uint32_t, kPreviewRoles> entries{};
+    MaterialEntries entries;
     ToonShadingModel model = ToonShadingModel::PreviewSurface;
     bool preview_enabled = false;
     Float3 unlit_color;

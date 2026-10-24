@@ -6,7 +6,7 @@
 
 #include "common/surface_common.slang"
 
-// Must match vulkan_internal::MToonParameters.
+// Must match backend_shared::MToonParameters.
 struct MToonParameters {
   // rgb linear, a alpha.
   float4 base_color;
