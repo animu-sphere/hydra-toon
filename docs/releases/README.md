@@ -7,7 +7,7 @@ link resolving. What comes next is the [roadmap](../roadmap/).
 
 | Version | Record | Milestone |
 | --- | --- | --- |
-| v0.6.0 | [v0.6.0.md](v0.6.0.md) | Shared shadows: one map per shadowing light from one caster pass, up to four directional and spot views, received by MToon, MMD and PreviewSurface; MAT-Q7 resolved, MMD frames unchanged, bounded cost fixtures |
+| v0.6.0 | [v0.6.0.md](v0.6.0.md) | Shared shadows: one map per shadowing light from one caster pass, up to four directional and spot views, received by MToon, MMD and PreviewSurface; MAT-Q7 resolved, MMD frames unchanged, bounded cost fixtures; published package GPU-verified in [report 89](../reports/renderer/89-2026-10-24-published-v060.md) |
 | v0.5.0 | [v0.5.0.md](v0.5.0.md) | Reusable premultiplied RGBA, Hydra AOV preservation, viewport compositing/PNG export, PreviewSurface interoperability and shared tangent frames; bounded acceptance with explicit host/reference limitations |
 | v0.4.0 | [v0.4.0.md](v0.4.0.md) | MMD realization: MMD materials, edges, self-shadow and morphs from the canonical stage, each settled against MikuMikuDance's own frames, MAT-Q1 to MAT-Q6 resolved |
 | v0.3.0 | [v0.3.0.md](v0.3.0.md) | Avatar animation fast path: GPU morphs, late input, the evaluated-state consumer, real runtime providers with oracle parity, and the viewport as the runtime host with latency to present API return |
