@@ -235,6 +235,10 @@ struct PresentGpuTimes {
   double opaque = 0.0;
   double transparent = 0.0;
   double resolve = 0.0;
+  // The scene pass whole: its parts and resolve together. A backend that
+  // times whole passes fills it and leaves the parts and the image wait
+  // unmeasured (PresentStatistics::gpu_parts_timed).
+  double scene = 0.0;
   // Fullscreen source-over and output transfer into the swapchain.
   double composite = 0.0;
   // The copy a capture reads back; 0 in a frame without one.
@@ -311,6 +315,10 @@ struct PresentStatistics {
   double cpu_submit = 0.0;
   // Whether the queue writes timestamps; without them `gpu` stays zero.
   bool gpu_timing = false;
+  // Whether `gpu` times the scene pass's parts and the image wait, which
+  // timestamps between commands give; core WebGPU writes timestamps only
+  // as passes begin and end (WebGPU policy §6), so they stay zero there.
+  bool gpu_parts_timed = false;
   // The GPU times of the latest frame known to have completed, and that
   // frame's number, counting every frame submitted from 1. One frame is in
   // flight, so they arrive with the frame after it.

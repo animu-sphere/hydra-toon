@@ -10,6 +10,20 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The WebGPU backend's third stage (renderer report 93): the shared shadow
+  views, drawn by the caster pass into a depth32float array and read by
+  MToon, PreviewSurface and MMD receivers, MMD's self-shadow among them;
+  and `toon-viewport --backend webgpu`, presenting through the window's
+  surface with the composite, captures, foreground PNG export, the overlay
+  and its shadow-view previews, sample changes and GPU pass timing. Six
+  shadow scenes of one to four views agree with Vulkan within WGPU-Q1's
+  limits, exactly at 1x, and the presented image of the bootstrap view is
+  byte-identical to the Vulkan session's at 1x and 4x. The `webgpu` intent
+  builds the viewport.
+- `PresentGpuTimes::scene`, the scene pass whole, and
+  `PresentStatistics::gpu_parts_timed`: the WebGPU session times whole
+  passes, its scene's parts unmeasured; the viewport's telemetry adds a
+  `scene` row.
 - The WebGPU backend's second stage (renderer report 92): MToon's and
   MMD's opaque, transparent and outline pipelines on per-material bind
   groups, skinning, morphs and the late latch, and 4x multisampling with

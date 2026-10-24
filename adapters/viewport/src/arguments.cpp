@@ -199,6 +199,19 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--vsync must be on or off");
       }
       result.vsync = value == "on";
+    } else if (option == "--backend") {
+      const auto value = next();
+      if (value != "vulkan" && value != "webgpu") {
+        throw std::invalid_argument("--backend must be vulkan or webgpu");
+      }
+      result.webgpu = value == "webgpu";
+    } else if (option == "--webgpu-adapter") {
+      const auto value = next();
+      if (value != "d3d12" && value != "vulkan") {
+        throw std::invalid_argument("--webgpu-adapter must be d3d12 or vulkan");
+      }
+      result.webgpu_adapter =
+          value == "vulkan" ? Toon::WebGpuAdapter::Vulkan : Toon::WebGpuAdapter::Direct3D12;
     } else if (option == "--overlay") {
       const auto value = next();
       if (value != "on" && value != "off") {
@@ -227,6 +240,9 @@ Arguments ParseArguments(int argc, char** argv) {
                    "  --frames N               exit after N presented frames\n"
                    "  --telemetry-output FILE  save latency/timing JSON on exit\n"
                    "  --vsync on|off           FIFO or immediate present\n"
+                   "  --backend vulkan|webgpu  the backend that presents\n"
+                   "                           (webgpu: a TOON_ENABLE_WEBGPU build)\n"
+                   "  --webgpu-adapter d3d12|vulkan  Dawn's adapter (d3d12)\n"
                    "  --overlay on|off         the measurements over the\n"
                    "                           scene (default on)\n"
                    "  --outlines on|off        draw hulls (default on)\n"
@@ -339,6 +355,12 @@ Arguments ParseArguments(int argc, char** argv) {
   if (result.play && result.usd.empty()) {
     throw std::invalid_argument("--play needs --usd <stage>");
   }
+#if !TOON_VIEWPORT_HAS_WEBGPU
+  if (result.webgpu) {
+    throw std::invalid_argument("--backend webgpu needs a build with TOON_ENABLE_WEBGPU "
+                                "(the webgpu intent)");
+  }
+#endif
 #if !TOON_VIEWPORT_HAS_HYDRA
   if (!result.usd.empty() || !result.switch_file.empty() || result.time ||
       result.time_step || result.play) {

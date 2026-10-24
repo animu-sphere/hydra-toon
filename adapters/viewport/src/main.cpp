@@ -307,11 +307,16 @@ int RunViewport(int argc, char** argv) {
 
     std::unique_ptr<Toon::viewport::Window> window;
     Toon::PresentSurfaceProvider provider;
+    Toon::WebGpuWindow native_window;
     try {
       window = Toon::viewport::Window::Create(
           "toon-viewport", arguments.width, arguments.height,
           arguments.visible);
-      provider = Toon::viewport::MakeSurfaceProvider(*window);
+      if (arguments.webgpu) {
+        native_window = Toon::viewport::MakeWebGpuWindow(*window);
+      } else {
+        provider = Toon::viewport::MakeSurfaceProvider(*window);
+      }
     } catch (const std::exception& environment) {
       std::cerr << "toon-viewport: skip: " << environment.what() << '\n';
       return kExitSkip;
@@ -321,9 +326,19 @@ int RunViewport(int argc, char** argv) {
         std::filesystem::absolute(argv[0]).parent_path() / "shaders";
     Toon::PresentSetupStatus status = Toon::PresentSetupStatus::Error;
     std::string error;
-    auto session = Toon::CreatePresentSession(provider,
-        Toon::SceneShadersIn(shader_directory.string()), arguments.vsync,
-        status, error, arguments.options);
+    std::unique_ptr<Toon::PresentSession> session;
+#if TOON_VIEWPORT_HAS_WEBGPU
+    if (arguments.webgpu) {
+      session = Toon::CreateWebGpuPresentSession(native_window,
+          Toon::WebGpuShadersIn(shader_directory.string()), arguments.vsync, status, error,
+          arguments.options, arguments.webgpu_adapter);
+    }
+#endif
+    if (!arguments.webgpu) {
+      session = Toon::CreatePresentSession(provider,
+          Toon::SceneShadersIn(shader_directory.string()), arguments.vsync,
+          status, error, arguments.options);
+    }
     if (session == nullptr) {
       if (status == Toon::PresentSetupStatus::Unavailable) {
         std::cerr << "toon-viewport: skip: " << error << '\n';
@@ -333,7 +348,7 @@ int RunViewport(int argc, char** argv) {
       return 1;
     }
     // The labels `ost renderer viewport` reads into its launch record.
-    std::cout << "Selected backend: vulkan\n"
+    std::cout << "Selected backend: " << (arguments.webgpu ? "webgpu" : "vulkan") << '\n'
               << "Device: " << session->statistics().device_name << '\n'
               << "Presentation: "
               << (arguments.visible ? "GPU swapchain" : "hidden GPU swapchain")
@@ -362,6 +377,7 @@ int RunViewport(int argc, char** argv) {
     Toon::LightingDebug lighting = arguments.lighting;
     Toon::OverlayDrawList overlay_draws;
     Toon::viewport::FrameTelemetry telemetry;
+    if (arguments.webgpu) telemetry.SetPresentEndpoint("wgpuSurfacePresent_return");
     std::uint64_t gpu_frame = 0;
     Toon::viewport::UploadCounts uploads_before;
     Toon::viewport::UploadCounts frame_uploads;
@@ -767,7 +783,7 @@ int RunViewport(int argc, char** argv) {
       }
       if (session->statistics().gpu_frame != gpu_frame) {
         gpu_frame = session->statistics().gpu_frame;
-        telemetry.PushGpu(session->statistics().gpu);
+        telemetry.PushGpu(session->statistics().gpu, session->statistics().gpu_parts_timed);
       }
       const auto uploads_after =
           Toon::viewport::UploadCounts::Of(session->statistics());
@@ -866,7 +882,8 @@ int RunViewport(int argc, char** argv) {
       std::cout << "Timing: this queue writes no GPU timestamps\n";
     }
     if (statistics.validation_message_count != 0) {
-      std::cerr << "toon-viewport: Vulkan validation reported "
+      std::cerr << "toon-viewport: " << (arguments.webgpu ? "Dawn" : "Vulkan")
+                << " validation reported "
                 << statistics.validation_message_count
                 << " message(s): " << statistics.validation_detail << '\n';
       return 1;

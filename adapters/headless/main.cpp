@@ -4107,8 +4107,7 @@ std::string Status(Toon::FrameStatus status) {
 #if defined(TOON_HAS_WEBGPU)
 // The headless evidence run on the WebGPU backend (WebGPU policy §8): the
 // same bootstrap frame, products and persistence as on Vulkan, through
-// Dawn, and the checks of what stage 2 brought; those of what stage 3
-// brings report skip, naming it (WebGPU policy §10).
+// Dawn, and the scene checks of every material, outline and shared shadow.
 void WebGpuChecks(const Toon::DrawList& draws, const std::string& shader_directory,
     Toon::WebGpuAdapter adapter, std::vector<Check>& checks,
     Toon::GpuFrameEvidence& frame) {
@@ -4142,11 +4141,13 @@ void WebGpuChecks(const Toon::DrawList& draws, const std::string& shader_directo
         frame.depth.payload.size() == 64U * 64U && depth_center < frame.depth.payload.size() &&
         frame.depth.payload[depth_center] > 0.0F && frame.depth.payload[depth_center] < 0.9F &&
         frame.depth.payload.front() > 0.99F;
-    // 1,000 frames on one device: the one pipeline the bootstrap draw needs,
-    // created on the first frame, one target allocation and one upload of
-    // the unchanged mesh.
+    // 1,000 frames on one device: the two pipelines the bootstrap draw
+    // needs, its own and, as it casts into the fallback key's shared view,
+    // the caster's, created on the first frame, one target allocation and
+    // one upload of the unchanged mesh.
     const bool persistence_ok = statistics.frames_rendered == 1000 &&
-        statistics.completion == 1000 && statistics.pipelines_created == 1 &&
+        statistics.completion == 1000 && statistics.pipelines_created == 2 &&
+        statistics.shadow_views == 1 && statistics.shadow_caster_draws == 1 &&
         statistics.target_allocations == 1 && statistics.topology_uploads == 1 &&
         statistics.point_uploads == 1;
     checks.push_back({"renderer.render_product.color", color_ok ? "pass" : "fail",
@@ -4154,33 +4155,29 @@ void WebGpuChecks(const Toon::DrawList& draws, const std::string& shader_directo
     checks.push_back({"renderer.render_product.depth", depth_ok ? "pass" : "fail",
         depth_ok ? "" : "depth metadata or numeric payload mismatch"});
     checks.push_back({"renderer.frame.persistence", persistence_ok ? "pass" : "fail",
-        persistence_ok ? "" : "1,000 frames did not complete on one pipeline, one target "
-                              "allocation and one mesh upload"});
+        persistence_ok ? "" : "1,000 frames did not complete on two pipelines, one shadow "
+                              "view, one target allocation and one mesh upload"});
   } else {
     for (const char* id : {"renderer.render_product.color", "renderer.render_product.depth",
              "renderer.frame.persistence"}) {
       checks.push_back({id, "skip", dependent});
     }
   }
-  // The material, outline, multisampling and skinning checks, as on Vulkan.
+  // The material, outline, shadow, multisampling and skinning checks, as
+  // on Vulkan.
   const Toon::WebGpuShaders shaders = Toon::WebGpuShadersIn(shader_directory);
   const RendererFactory create([&shaders, adapter](Toon::FrameStatus& status,
                                    std::string& detail, const Toon::RenderOptions& options) {
     return Toon::CreateWebGpuOffscreenRenderer(shaders, status, detail, options, adapter);
   }, true);
-  const std::vector<Check (*)(const RendererFactory&)> stage2 = {MToonOpaqueCheck,
+  const std::vector<Check (*)(const RendererFactory&)> scene_checks = {MToonOpaqueCheck,
       SceneLightsCheck, MToonTexturedCheck, MToonRestCheck, MToonNormalCheck,
       MToonOutlineCheck, OutlineSamplingCheck, OutlineWidthCheck, OutlineMotionCheck,
       OutlineFrustumCheck, OutlineDepthClipCheck, OutlineOcclusionCheck, MToonRimCheck,
-      MToonTransparentCheck, MmdCheck, MmdMorphCheck, MmdOutlineCheck, AntiAliasingCheck,
-      SkinningCheck};
-  for (const auto check : stage2) checks.push_back(check(create));
-  const std::string stage3 = "the WebGPU backend's stage 3 (WebGPU policy §10)";
-  for (const char* id : {"renderer.material.mmd_self_shadow", "renderer.shadow.shared_casters",
-           "renderer.shadow.receivers", "renderer.shadow.views",
-           "renderer.shadow.cross_family"}) {
-    checks.push_back({id, "skip", stage3});
-  }
+      MToonTransparentCheck, MmdCheck, MmdMorphCheck, MmdOutlineCheck, MmdSelfShadowCheck,
+      SharedCastersCheck, ShadowReceiversCheck, ShadowViewsCheck, CrossFamilyShadowCheck,
+      AntiAliasingCheck, SkinningCheck};
+  for (const auto check : scene_checks) checks.push_back(check(create));
 }
 #endif
 

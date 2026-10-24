@@ -35,6 +35,9 @@ struct Limits {
   int max_difference = 0;
   // The share of pixels with any channel more than one step apart.
   double above_one = 0.0;
+  // The share of pixels whose depth product, sample 0, is covered on one
+  // backend only.
+  double coverage = 0.0;
 };
 
 // WGPU-Q1's limits per scene class, from the first measured scenes
@@ -54,9 +57,11 @@ constexpr double kDepthLimit = 1e-6;
 // apart: such a pixel moves by a quarter of the hull's difference from the
 // surface, two steps on the measured scenes, and no more than a few pixels
 // do. MToon's Mask keeps each pixel's samples as the reference driver does,
-// but a share that falls on a threshold keeps one sample more or less.
+// but a share that falls on a threshold keeps one sample more or less; the
+// second sample kept is sample 0, so where a share falls between one
+// sample and two, the depth product's coverage differs too (report 93).
 constexpr Limits kHullEdgeLimits{2, 2e-4};
-constexpr Limits kMaskCoverageLimits{64, 2e-4};
+constexpr Limits kMaskCoverageLimits{64, 2e-4, 2e-4};
 // A hull's depth is biased by its slope, which Vulkan lets a driver take as
 // the larger of the two screen slopes or their length and Direct3D 12 takes
 // as the larger: 1.2e-7 apart without the slope term, 2.4e-6 with it.
@@ -69,6 +74,9 @@ struct Scene {
   // At 4x, when it differs from `limits`.
   std::optional<Limits> multisampled = std::nullopt;
   double depth_limit = kDepthLimit;
+  // Whether it draws shared shadows and MMD's self-shadow, as a frame does
+  // by default; the scenes of stages 1 and 2 draw neither.
+  bool shadows = false;
 };
 
 Toon::Matrix4 Perspective(float fov_y, float aspect, float near, float far) {
@@ -472,6 +480,194 @@ std::vector<Scene> Scenes() {
     material.mtoon.outline_width_mode = Toon::ToonOutlineWidthMode::World;
     Bind(world, sphere, material);
   }, kHullEdgeLimits, kHullDepthLimit});
+
+  // Stage 3: the shared caster pass and every family's receivers (shadow
+  // policy §4-§7), one to four views.
+  scenes.push_back({"shadow-mtoon", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0.5F, 2, 4});
+    Bind(world, AddSphere(world, 0.8F, {0, 0.1F, 0}), MToon({0.9F, 0.6F, 0.45F}, {0.45F, 0.25F, 0.3F}));
+    const auto ground = AddGround(world, 5);
+    Toon::Matrix4 down;
+    down.m[13] = -0.8F;
+    world.SetMeshTransform(ground, down);
+    Bind(world, ground, MToon({0.75F, 0.8F, 0.7F}, {0.3F, 0.35F, 0.45F}));
+    Toon::ToonLight key;
+    key.type = Toon::ToonLightType::Directional;
+    key.color = {1, 0.95F, 0.9F};
+    key.direction = {-0.4F, -0.8F, -0.45F};
+    world.SetLight(world.CreateLight(), key);
+  }, std::nullopt, kDepthLimit, true});
+  scenes.push_back({"shadow-preview-spot", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    SetCamera(world, {0, 2.5F, 4.5F});
+    Bind(world, AddSphere(world, 0.7F, {-0.6F, 0, 0}), Preview({0.8F, 0.4F, 0.2F}, 0, 0.5F));
+    Bind(world, AddSphere(world, 0.5F, {0.8F, -0.2F, 0.4F}), Preview({0.9F, 0.85F, 0.8F}, 1, 0.35F));
+    const auto ground = AddGround(world, 6);
+    Toon::Matrix4 down;
+    down.m[13] = -0.7F;
+    world.SetMeshTransform(ground, down);
+    Bind(world, ground, Preview({0.6F, 0.6F, 0.6F}, 0, 0.8F));
+    Toon::ToonLight key;
+    key.type = Toon::ToonLightType::Directional;
+    key.color = {0.6F, 0.6F, 0.7F};
+    key.direction = {0.5F, -0.7F, -0.3F};
+    world.SetLight(world.CreateLight(), key);
+    Toon::ToonLight spot;
+    spot.type = Toon::ToonLightType::Spot;
+    spot.color = {8, 6, 3};
+    spot.position = {-1.5F, 2.5F, 1.5F};
+    spot.direction = {0.45F, -0.8F, -0.4F};
+    spot.cone_angle = 40;
+    spot.cone_softness = 0.2F;
+    world.SetLight(world.CreateLight(), spot);
+  }, std::nullopt, kDepthLimit, true});
+  scenes.push_back({"shadow-mmd-self", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    // MMD's self-shadow under the fallback key, its map the key's view.
+    SetCamera(world, {0, 1.5F, 4});
+    auto body = Mmd({0.8F, 0.65F, 0.55F}, {0.35F, 0.3F, 0.25F});
+    body.mmd.toon_source = Toon::ToonRampSource::Shared;
+    body.mmd.shared_toon_index = 1;
+    body.mmd.cast_self_shadow = true;
+    body.mmd.receive_self_shadow = true;
+    Bind(world, AddSphere(world, 0.6F, {0.3F, 0.4F, 0.3F}), body);
+    auto floor = Mmd({0.7F, 0.7F, 0.75F}, {0.3F, 0.3F, 0.35F});
+    floor.mmd.cast_self_shadow = true;
+    floor.mmd.receive_self_shadow = true;
+    floor.double_sided = true;
+    const auto ground = AddGround(world, 4);
+    Toon::Matrix4 down;
+    down.m[13] = -0.4F;
+    world.SetMeshTransform(ground, down);
+    Bind(world, ground, floor);
+  }, std::nullopt, kDepthLimit, true});
+  scenes.push_back({"shadow-cross-family", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    // An MToon caster over MMD's receiver, an MMD caster over
+    // PreviewSurface's and MToon's, a display-colour caster, under one key.
+    SetCamera(world, {0, 2.5F, 4.5F});
+    Bind(world, AddSphere(world, 0.5F, {-1, 0.3F, 0}), MToon({0.3F, 0.6F, 0.9F}, {0.1F, 0.2F, 0.45F}));
+    auto caster = Mmd({0.85F, 0.5F, 0.4F}, {0.3F, 0.2F, 0.2F});
+    caster.mmd.cast_self_shadow = true;
+    Bind(world, AddSphere(world, 0.5F, {0.6F, 0.3F, -0.3F}), caster);
+    world.SetMeshColor(AddSphere(world, 0.35F, {0.2F, 0.1F, 1}), {0.7F, 0.7F, 0.3F});
+    const struct {
+      float x;
+      Toon::ToonMaterial material;
+    } tiles[] = {
+        {-1.1F, Mmd({0.7F, 0.7F, 0.7F}, {0.3F, 0.3F, 0.3F})},
+        {0.0F, Preview({0.65F, 0.65F, 0.65F}, 0, 0.7F)},
+        {1.1F, MToon({0.75F, 0.75F, 0.75F}, {0.3F, 0.3F, 0.4F})},
+    };
+    for (const auto& tile : tiles) {
+      auto material = tile.material;
+      material.mmd.receive_self_shadow = true;
+      const auto ground = AddGround(world, 1.1F);
+      Toon::Matrix4 placed;
+      placed.m[12] = tile.x;
+      placed.m[13] = -0.4F;
+      world.SetMeshTransform(ground, placed);
+      Bind(world, ground, material);
+    }
+    Toon::ToonLight key;
+    key.type = Toon::ToonLightType::Directional;
+    key.color = {1, 1, 0.95F};
+    key.direction = {0.2F, -0.85F, -0.5F};
+    world.SetLight(world.CreateLight(), key);
+  }, std::nullopt, kDepthLimit, true});
+  scenes.push_back({"shadow-mask-caster", kTexturedLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    // A Mask plane of MToon cut by its texels' alpha as it casts, and one
+    // of PreviewSurface cut by its opacity, over an MToon ground.
+    SetCamera(world, {0, 2.5F, 3.5F});
+    const auto checker = AddChecker(world, Toon::ToonTextureEncoding::Srgb, 32, 4, true);
+    auto leaves = MToon({0.5F, 0.8F, 0.4F}, {0.2F, 0.35F, 0.2F});
+    leaves.base_texture.texture = checker;
+    leaves.alpha_mode = Toon::ToonAlphaMode::Mask;
+    leaves.alpha_cutoff = 0.5F;
+    leaves.double_sided = true;
+    auto lattice = Preview({0.8F, 0.6F, 0.4F}, 0, 0.6F);
+    lattice.base_texture.texture = checker;
+    lattice.preview.opacity_texture.texture = checker;
+    lattice.preview.inputs[0].connected = true;
+    lattice.preview.inputs[4].connected = true;
+    lattice.preview.inputs[4].channel = 3;
+    lattice.alpha_mode = Toon::ToonAlphaMode::Mask;
+    lattice.alpha_cutoff = 0.5F;
+    lattice.double_sided = true;
+    const struct {
+      float x;
+      const Toon::ToonMaterial* material;
+    } planes[] = {{-0.6F, &leaves}, {0.6F, &lattice}};
+    for (const auto& plane : planes) {
+      const auto mesh = AddGround(world, 1.1F);
+      Toon::Matrix4 raised;
+      raised.m[12] = plane.x;
+      raised.m[13] = 0.5F;
+      world.SetMeshTransform(mesh, raised);
+      Bind(world, mesh, *plane.material);
+    }
+    const auto ground = AddGround(world, 4);
+    Toon::Matrix4 down;
+    down.m[13] = -0.5F;
+    world.SetMeshTransform(ground, down);
+    Bind(world, ground, MToon({0.8F, 0.8F, 0.8F}, {0.3F, 0.3F, 0.4F}));
+    Toon::ToonLight key;
+    key.type = Toon::ToonLightType::Directional;
+    key.color = {1, 1, 1};
+    key.direction = {-0.3F, -0.9F, -0.3F};
+    world.SetLight(world.CreateLight(), key);
+  }, kMaskCoverageLimits, kDepthLimit, true});
+  scenes.push_back({"shadow-four-views-skinned", kLitLimits, [](Toon::RenderWorld& world, Toon::DrawList*) {
+    // Two directional and two spot views at once, and a skinned, morphed
+    // caster drawn at the position its surface draws.
+    SetCamera(world, {0, 2.5F, 4.5F});
+    const auto sphere = AddSphere(world, 0.6F, {0, 0.3F, 0});
+    const std::uint32_t points = 25U * 49U;
+    Toon::ToonSkin skin;
+    skin.influences_per_point = 1;
+    Toon::ToonMorph morph;
+    for (std::uint32_t point = 0; point < points; ++point) {
+      const bool upper = point / 49U < 12U;
+      skin.influences.push_back({upper ? 1U : 0U, 1});
+      const auto first = static_cast<std::uint32_t>(morph.offsets.size());
+      if (upper) morph.offsets.push_back({{0, 0.25F, 0}, 0, {0, 0, 0}, 0});
+      morph.ranges.push_back({first, upper ? 1U : 0U});
+    }
+    world.SetMeshSkin(sphere, skin);
+    Toon::Matrix4 leaning;
+    const float angle = 0.4F;
+    leaning.m[0] = std::cos(angle);
+    leaning.m[1] = std::sin(angle);
+    leaning.m[4] = -std::sin(angle);
+    leaning.m[5] = std::cos(angle);
+    world.SetMeshSkinPose(sphere, {{Toon::Matrix4{}, leaning}, {}});
+    world.SetMeshMorph(sphere, morph);
+    world.SetMeshMorphWeights(sphere, {0.8F});
+    Bind(world, sphere, MToon({0.85F, 0.7F, 0.55F}, {0.4F, 0.3F, 0.3F}));
+    const auto ground = AddGround(world, 6);
+    Toon::Matrix4 down;
+    down.m[13] = -0.6F;
+    world.SetMeshTransform(ground, down);
+    Bind(world, ground, Preview({0.6F, 0.6F, 0.6F}, 0, 0.8F));
+    const Toon::Float3 directions[] = {{-0.5F, -0.8F, -0.3F}, {0.6F, -0.7F, 0.2F}};
+    for (const auto& direction : directions) {
+      Toon::ToonLight key;
+      key.type = Toon::ToonLightType::Directional;
+      key.color = {0.45F, 0.45F, 0.5F};
+      key.direction = direction;
+      world.SetLight(world.CreateLight(), key);
+    }
+    const Toon::Float3 positions[] = {{-1.5F, 2.2F, 1.2F}, {1.6F, 2.4F, -0.8F}};
+    for (const auto& position : positions) {
+      Toon::ToonLight spot;
+      spot.type = Toon::ToonLightType::Spot;
+      spot.color = {5, 4, 3};
+      spot.position = position;
+      const float length = std::sqrt(position.x * position.x + position.y * position.y +
+                                     position.z * position.z);
+      spot.direction = {-position.x / length, -position.y / length, -position.z / length};
+      spot.cone_angle = 45;
+      spot.cone_softness = 0.25F;
+      world.SetLight(world.CreateLight(), spot);
+    }
+  }, std::nullopt, kDepthLimit, true});
   return scenes;
 }
 
@@ -536,8 +732,9 @@ Toon::ColorProduct Difference(const Toon::ColorProduct& a, const Toon::ColorProd
 // emission is white, so a pixel's resolved alpha is the samples it kept.
 // Shares in whole 255ths lie half a step from every threshold of the
 // reference driver's alpha to coverage (renderer report 92), so each pixel
-// of a 2 x 2 dither block must keep as many samples on both backends, and
-// its depth product, sample 0, must be covered alike.
+// of an 8 x 8 block, four periods of the 2 x 2 dither each way (report 93),
+// must keep as many samples on both backends, and its depth product,
+// sample 0, must be covered alike.
 bool CoverageProbe(std::unique_ptr<Toon::OffscreenRenderer>& vulkan,
     std::unique_ptr<Toon::OffscreenRenderer>& webgpu, std::ostream& summary) {
   Toon::RenderWorld world;
@@ -573,8 +770,8 @@ bool CoverageProbe(std::unique_ptr<Toon::OffscreenRenderer>& vulkan,
         !webgpu->Render(draws, kExtent, kExtent, wc, wd, error)) {
       throw std::runtime_error("coverage probe: " + error);
     }
-    for (std::uint32_t y = kExtent / 2U; y < kExtent / 2U + 2U; ++y) {
-      for (std::uint32_t x = kExtent / 2U; x < kExtent / 2U + 2U; ++x) {
+    for (std::uint32_t y = kExtent / 2U; y < kExtent / 2U + 8U; ++y) {
+      for (std::uint32_t x = kExtent / 2U; x < kExtent / 2U + 8U; ++x) {
         const std::size_t pixel = static_cast<std::size_t>(y) * kExtent + x;
         const int va = vc.payload[pixel * 4 + 3];
         const int wa = wc.payload[pixel * 4 + 3];
@@ -587,9 +784,9 @@ bool CoverageProbe(std::unique_ptr<Toon::OffscreenRenderer>& vulkan,
       }
     }
   }
-  summary << ",\n  \"coverage_probe\": {\"shares\": 256, \"pixels\": 4, \"partial\": " << partial
+  summary << ",\n  \"coverage_probe\": {\"shares\": 256, \"pixels\": 64, \"partial\": " << partial
           << ", \"mismatches\": " << mismatches << "}";
-  std::cout << "coverage probe: 256 shares x 4 pixels, " << partial << " partial, " << mismatches
+  std::cout << "coverage probe: 256 shares x 64 pixels, " << partial << " partial, " << mismatches
             << " mismatches\n";
   return mismatches == 0 && partial > 0;
 }
@@ -667,9 +864,8 @@ int main(int argc, char** argv) {
         Toon::RenderWorld world;
         scene.build(world, nullptr);
         Toon::DrawList draws = Toon::ExtractDrawList(world.Commit());
-        // Shared shadows arrive on WebGPU with stage 3; both draw none.
-        draws.shadows = false;
-        draws.mmd_self_shadow = false;
+        draws.shadows = scene.shadows;
+        draws.mmd_self_shadow = scene.shadows;
         Toon::BackgroundSettings background;
         background.mode = mode;
         if (!vulkan->SetBackground(background, error) || !webgpu->SetBackground(background, error)) {
@@ -686,9 +882,18 @@ int main(int argc, char** argv) {
         const Comparison c = Compare(vc, wc, vd, wd);
         const Limits& limits =
             samples > 1 && scene.multisampled ? *scene.multisampled : scene.limits;
+        // The views and their casters are the core's, so both backends
+        // draw exactly as many (WebGPU policy §9).
+        const Toon::OffscreenStatistics& vs = vulkan->statistics();
+        const Toon::OffscreenStatistics& ws = webgpu->statistics();
+        const bool shadows_alike = vs.shadow_views == ws.shadow_views &&
+                                   vs.shadow_caster_draws == ws.shadow_caster_draws &&
+                                   vs.shadow_draws == ws.shadow_draws &&
+                                   (!scene.shadows || ws.shadow_views > 0);
         const bool ok = c.max_difference <= limits.max_difference &&
-                        c.above_one <= limits.above_one && c.coverage_mismatch == 0 &&
-                        c.max_depth <= scene.depth_limit && c.covered > 0;
+                        c.above_one <= limits.above_one &&
+                        c.coverage_mismatch <= limits.coverage * kExtent * kExtent &&
+                        c.max_depth <= scene.depth_limit && c.covered > 0 && shadows_alike;
         passed = passed && ok;
         const std::string label = scene.name +
             (mode == Toon::BackgroundMode::Opaque ? "-opaque" : "-transparent") +
@@ -701,14 +906,21 @@ int main(int argc, char** argv) {
                 << ", \"covered\": " << c.covered
                 << ", \"coverage_mismatch\": " << c.coverage_mismatch
                 << ", \"max_depth_difference\": " << c.max_depth
+                << ", \"shadow_views\": " << ws.shadow_views
+                << ", \"shadow_caster_draws\": " << ws.shadow_caster_draws
+                << ", \"shadow_views_alike\": " << (shadows_alike ? "true" : "false")
                 << ", \"limit_max\": " << limits.max_difference
                 << ", \"limit_above_one\": " << limits.above_one
+                << ", \"limit_coverage\": " << limits.coverage
                 << ", \"limit_depth\": " << scene.depth_limit
                 << ", \"pass\": " << (ok ? "true" : "false") << "}";
         first = false;
         std::cout << label << ": max " << c.max_difference << " mean " << c.mean_difference
                   << " above-one " << c.above_one << " coverage-mismatch "
-                  << c.coverage_mismatch << " depth " << c.max_depth << (ok ? "" : "  FAIL")
+                  << c.coverage_mismatch << " depth " << c.max_depth << " views "
+                  << ws.shadow_views << '/' << vs.shadow_views << " casters "
+                  << ws.shadow_caster_draws << '/' << vs.shadow_caster_draws
+                  << (ok ? "" : "  FAIL")
                   << '\n';
         if (!images.empty()) {
           Toon::viewport::WriteForegroundPng((images / (label + "-vulkan.png")).string(), vc);

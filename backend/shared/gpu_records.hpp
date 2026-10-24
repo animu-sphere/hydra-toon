@@ -284,6 +284,16 @@ void WriteParameters(const ToonMaterial& material, const MaterialEntries& entrie
 void WriteFrame(const DrawList& draws, const std::vector<ShadowView>* views,
     std::span<float, kFrameBytes / sizeof(float)> frame);
 
+// Each of `views`' receiver parameters into `written`, one per view, and
+// MMD's reading of the view that is its self-shadow map into `mmd`, off
+// when no view is MMD's (shadow policy §5): every receiver reads in the
+// camera's view space, at `resolution` texels on a side of each view, and
+// MMD's compares in MMD units. `mmd` also says whether material morphs'
+// tints draw.
+void WriteShadowParameters(const DrawList& draws, const std::vector<ShadowView>& views,
+    std::uint32_t resolution, std::span<ShadowViewParameters> written,
+    MmdShadowParameters& mmd);
+
 // The parts a mesh draws in: its committed parts, or, for a mesh a
 // RenderWorld did not commit, `whole`, the mesh with its own material.
 [[nodiscard]] std::span<const MeshPart> PartsOf(const MeshSnapshot& mesh,

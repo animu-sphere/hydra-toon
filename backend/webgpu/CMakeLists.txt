@@ -3,6 +3,7 @@ toon_configure_webgpu_dependencies()
 add_library(toon-render-webgpu STATIC
   webgpu_backend.cpp
   webgpu_device.cpp
+  webgpu_present.cpp
   webgpu_scene.cpp)
 toon_configure_warnings(toon-render-webgpu)
 add_library(Toon::WebGPU ALIAS toon-render-webgpu)
@@ -24,6 +25,9 @@ toon_add_shader_library(toon-renderer-wgsl WGSL
   mmd/mmd.slang
   mmd/mmd_transparent.slang
   mmd/mmd_outline.slang
+  scene/shadow.slang
+  present/composite.slang
+  present/overlay.slang
   webgpu/mtoon_coverage.slang
   webgpu/mipmap.slang
   webgpu/depth_resolve.slang

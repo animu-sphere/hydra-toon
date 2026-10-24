@@ -66,7 +66,19 @@ else()
   target_compile_definitions(toon-viewport PRIVATE TOON_VIEWPORT_HAS_HYDRA=0)
 endif()
 
-toon_copy_shaders(toon-viewport)
+# With the WebGPU backend in the build, `--backend webgpu` presents through
+# Dawn (WebGPU policy §8); its WGSL and DXC's runtime sit beside the viewport.
+if(TOON_ENABLE_WEBGPU)
+  target_link_libraries(toon-viewport PRIVATE Toon::WebGPU)
+  # The window's HWND comes through GLFW's native header, which includes
+  # windows.h.
+  target_compile_definitions(toon-viewport PRIVATE TOON_VIEWPORT_HAS_WEBGPU=1 NOMINMAX)
+  toon_copy_shaders(toon-viewport WGSL)
+  toon_copy_webgpu_runtime(toon-viewport)
+else()
+  target_compile_definitions(toon-viewport PRIVATE TOON_VIEWPORT_HAS_WEBGPU=0)
+  toon_copy_shaders(toon-viewport)
+endif()
 
 # toon-viewport-avatar: the same viewport as an external host of
 # usd-avatar-runtime's real VRM providers (`--avatar-runtime`, roadmap
@@ -99,6 +111,7 @@ if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
   target_compile_definitions(toon-viewport-avatar PRIVATE
     TOON_VIEWPORT_HAS_HYDRA=1
     TOON_VIEWPORT_HAS_AVATAR_RUNTIME=1
+    TOON_VIEWPORT_HAS_WEBGPU=0
     NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
   toon_copy_shaders(toon-viewport-avatar)

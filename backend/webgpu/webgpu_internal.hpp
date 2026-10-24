@@ -69,6 +69,8 @@ using RenderPipeline = Object<WGPURenderPipeline, wgpuRenderPipelineRelease>;
 using CommandEncoder = Object<WGPUCommandEncoder, wgpuCommandEncoderRelease>;
 using CommandBuffer = Object<WGPUCommandBuffer, wgpuCommandBufferRelease>;
 using RenderPassEncoder = Object<WGPURenderPassEncoder, wgpuRenderPassEncoderRelease>;
+using Surface = Object<WGPUSurface, wgpuSurfaceRelease>;
+using QuerySet = Object<WGPUQuerySet, wgpuQuerySetRelease>;
 
 [[nodiscard]] WGPUStringView View(const char* text);
 [[nodiscard]] std::string Text(WGPUStringView view);
@@ -89,6 +91,8 @@ struct DeviceEvents {
 struct Gpu {
   std::unique_ptr<DeviceEvents> events = std::make_unique<DeviceEvents>();
   Instance instance;
+  // The window's, when one was asked for; released before the instance.
+  Surface surface;
   Adapter adapter;
   Device device;
   Queue queue;
@@ -97,11 +101,24 @@ struct Gpu {
   std::string driver;
   std::uint32_t vendor_id = 0;
   std::uint32_t device_id = 0;
+  // Whether the device writes timestamps at passes' ends, and inside them.
+  bool timestamps = false;
+  bool timestamps_inside_passes = false;
+};
+
+// What a host asks of the device beyond the WebGPU defaults: a Win32
+// window it presents to, whose surface the adapter must reach, and
+// timestamps where the adapter offers them (WebGPU policy §6, §8).
+struct GpuRequest {
+  void* hwnd = nullptr;
+  void* hinstance = nullptr;
+  bool timestamps = false;
 };
 
 // Skip when there is no adapter of the requested kind, Fail when one exists
 // but its device cannot be created.
-FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail);
+FrameStatus CreateGpu(WebGpuAdapter kind, Gpu& gpu, std::string& detail,
+    const GpuRequest& request = {});
 
 // Waits for `future` on `instance`, up to ten seconds.
 bool Wait(WGPUInstance instance, WGPUFuture future, const char* what,
@@ -118,6 +135,28 @@ Buffer CreateBuffer(WGPUDevice device, std::uint64_t size, WGPUBufferUsage usage
     const char* label);
 
 bool LoadWgsl(const std::string& path, std::string& source, std::string& detail);
+
+// webgpu.h's descriptors, filled for the backend's shader modules, layouts
+// and bind groups.
+ShaderModule CreateShader(WGPUDevice device, const std::string& source, const char* label);
+BindGroupLayout CreateLayout(WGPUDevice device,
+    const std::vector<WGPUBindGroupLayoutEntry>& entries, const char* label);
+WGPUBindGroupLayoutEntry BufferEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUBufferBindingType type, bool dynamic = false);
+WGPUBindGroupLayoutEntry TextureEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUTextureSampleType type, WGPUTextureViewDimension dimension);
+WGPUBindGroupLayoutEntry SamplerEntry(std::uint32_t binding, WGPUShaderStage stages,
+    WGPUSamplerBindingType type);
+BindGroup CreateGroup(WGPUDevice device, WGPUBindGroupLayout layout,
+    const std::vector<WGPUBindGroupEntry>& entries, const char* label);
+WGPUBindGroupEntry BufferBinding(std::uint32_t binding, WGPUBuffer buffer,
+    std::uint64_t size = WGPU_WHOLE_SIZE);
+WGPUBindGroupEntry ViewBinding(std::uint32_t binding, WGPUTextureView view);
+WGPUBindGroupEntry SamplerBinding(std::uint32_t binding, WGPUSampler sampler);
+PipelineLayout CreatePipelineLayout(WGPUDevice device,
+    const std::vector<WGPUBindGroupLayout>& layouts, const char* label);
+
+constexpr WGPUShaderStage kBothStages = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 
 // The WGSL each pipeline compiles, loaded before any device exists so a
 // missing file is a failure rather than a skip.
@@ -140,6 +179,12 @@ struct ShaderSources {
   std::string mmd_transparent_fragment;
   std::string mmd_outline_vertex;
   std::string mmd_outline_fragment;
+  std::string shadow_vertex;
+  std::string shadow_fragment;
+  std::string composite_vertex;
+  std::string composite_fragment;
+  std::string overlay_vertex;
+  std::string overlay_fragment;
   std::string mipmap_vertex;
   std::string mipmap_fragment;
   std::string depth_resolve_vertex;
@@ -207,6 +252,29 @@ constexpr WGPUTextureFormat kDepthFormat = WGPUTextureFormat_Depth32Float;
 // flips y.
 Matrix4 WebGpuClipFromWorld(const ToonView& view);
 
+// Where a caster draws into a shadow view: the view's clip space with y
+// flipped. A ShadowView's clip space keeps y up, and the receivers read
+// its image with the Vulkan backend's rows, row 0 at y = -1, which a
+// WebGPU target puts at the bottom; drawn flipped, every layer holds the
+// image the Vulkan backend's holds.
+Matrix4 WebGpuShadowClipFromWorld(const ShadowView& view);
+
+// The shared shadow views' image (shadow policy §5): depth32float, a layer
+// per view, as the Vulkan backend's D32 array.
+constexpr WGPUTextureFormat kShadowFormat = WGPUTextureFormat_Depth32Float;
+
+// Where a run of passes writes timestamps, in nanoseconds (WebGPU policy
+// §6): the first pass as it begins at `begin`, the last as it ends at
+// `end`. Without a set, or a run without passes, it writes none.
+struct PassTimestamps {
+  WGPUQuerySet set = nullptr;
+  std::uint32_t begin = 0;
+  std::uint32_t end = 0;
+  // The writes of pass `index` of `count`, in `writes`; nullptr for none.
+  [[nodiscard]] const WGPUPassTimestampWrites* Of(std::size_t index, std::size_t count,
+      WGPUPassTimestampWrites& writes) const;
+};
+
 // The scene's bind group layouts and pipelines (WebGPU policy §4). WebGPU
 // has no dynamic cull mode, front face, depth writes or vertex strides, so
 // each combination a draw needs is its own pipeline, created the first time
@@ -218,7 +286,11 @@ Matrix4 WebGpuClipFromWorld(const ToonView& view);
 // mmd_opaque, mmd_transparent and mmd_outline. Every surface kind shares
 // one layout, frame, material, deformation and draw, and reads four
 // streams: position, normal, UV and a fourth, the tangent frame,
-// MMD's sub-texture UV or its edge scale.
+// MMD's sub-texture UV or its edge scale. Shadow, the shared caster pass,
+// reads the position and UV, draws depth alone into one sample of a
+// shadow view, pushed back by the slope as on Vulkan, and has a frame
+// group of its own, the frame buffer alone: a pass drawing into a layer
+// of the views' image cannot also bind that image.
 class ScenePipelines {
 public:
   enum class Kind : std::uint8_t {
@@ -231,8 +303,9 @@ public:
     Mmd,
     MmdTransparent,
     MmdOutline,
+    Shadow,
   };
-  static constexpr std::size_t kKinds = 9;
+  static constexpr std::size_t kKinds = 10;
   struct Key {
     Kind kind = Kind::Mesh;
     WGPUCullMode cull = WGPUCullMode_None;
@@ -249,8 +322,17 @@ public:
       std::uint32_t samples, std::string& detail);
   // Nullptr on a creation failure, which `detail` explains.
   WGPURenderPipeline Get(const Key& key, std::string& detail);
+  // Draw at `samples` from now on: every pipeline is made again as a draw
+  // first needs it, and the layouts, samplers and so every bind group stay.
+  void SetSamples(std::uint32_t samples) {
+    samples_ = samples;
+    pipelines_.clear();
+  }
 
   [[nodiscard]] WGPUBindGroupLayout frame_layout() const { return frame_layout_.get(); }
+  [[nodiscard]] WGPUBindGroupLayout caster_frame_layout() const {
+    return caster_frame_layout_.get();
+  }
   [[nodiscard]] WGPUBindGroupLayout material_layout() const { return material_layout_.get(); }
   [[nodiscard]] WGPUBindGroupLayout empty_layout() const { return empty_layout_.get(); }
   [[nodiscard]] WGPUBindGroupLayout deformation_layout() const { return deformation_layout_.get(); }
@@ -265,17 +347,20 @@ private:
     ShaderModule vertex;
     ShaderModule fragment;
   };
+  WGPURenderPipeline CreateCaster(const Key& key, std::string& detail);
 
   WGPUDevice device_ = nullptr;
   std::uint32_t samples_ = 1;
   std::array<Stages, kKinds> stages_;
   BindGroupLayout frame_layout_;
+  BindGroupLayout caster_frame_layout_;
   BindGroupLayout material_layout_;
   BindGroupLayout empty_layout_;
   BindGroupLayout deformation_layout_;
   BindGroupLayout draw_layout_;
   PipelineLayout mesh_layout_;
   PipelineLayout surface_layout_;
+  PipelineLayout caster_layout_;
   std::array<Sampler, kSamplerCount> samplers_;
   Sampler shadow_sampler_;
   std::vector<std::pair<Key, RenderPipeline>> pipelines_;
@@ -315,7 +400,9 @@ public:
   // longer has. No frame that samples them may be in flight.
   bool Update(const DrawList& draws, std::string& detail);
   // Record the mip passes of this frame's uploads.
-  void RecordMipmaps(WGPUCommandEncoder encoder);
+  void RecordMipmaps(WGPUCommandEncoder encoder, const PassTimestamps& timestamps = {});
+  // Whether RecordMipmaps has passes to record.
+  [[nodiscard]] bool has_pending_mipmaps() const { return !pending_.empty(); }
   // The view a role samples: the white 1 x 1 when the texture is none or
   // has no pixels.
   [[nodiscard]] WGPUTextureView ViewOf(TextureId texture) const;
@@ -379,14 +466,19 @@ private:
   std::uint64_t uploads_ = 0;
 };
 
+class ShadowMap;
+class MeshCache;
+
 // One parameter slot per material in its model's storage buffer, MToon's,
 // MMD's or PreviewSurface's, one slot number in all three, as the Vulkan
-// backend's; the frame buffer and MMD's shadow parameters (group 0); and
-// each material's bind group (group 1): the three buffers and a texture
-// view and sampler per role of its model (WebGPU policy §4). A slot is
-// rewritten when its parameters revision changes or a texture it samples
-// becomes resident or leaves; a bind group is rebuilt only when a role's
-// view or sampler, or a buffer, changes.
+// backend's; the frame buffer and the frame group (group 0), which binds
+// it with the shadow map's image and parameters, and the caster pass's,
+// which binds it alone; and each material's bind group (group 1): the
+// three buffers and a texture view and sampler per role of its model
+// (WebGPU policy §4). A slot is rewritten when its parameters revision
+// changes or a texture it samples becomes resident or leaves; a bind group
+// is rebuilt only when a role's view or sampler, or a buffer, changes, and
+// the frame group when the shadow map's image is rebuilt.
 class MaterialCache {
 public:
   struct Entry {
@@ -421,21 +513,24 @@ public:
   };
 
   bool Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
-      const TextureCache& textures, std::string& detail);
+      const TextureCache& textures, const ShadowMap& shadow, std::string& detail);
   // Write whatever `draws.materials` changed, the frame buffer when
-  // `fast_values`, and free the slots of materials it no longer has.
+  // `fast_values`, its lights naming the views `shadow` fitted, and free
+  // the slots of materials it no longer has.
   bool Update(const DrawList& draws, const TextureCache& textures,
-      std::string& detail, bool fast_values = true);
+      const ShadowMap& shadow, std::string& detail, bool fast_values = true);
   [[nodiscard]] const Entry* Find(MaterialId material) const;
   // Group 1 for a draw with no material: the display colour, which reads
   // no slot or texture.
   [[nodiscard]] WGPUBindGroup display_group() const { return display_group_.get(); }
   [[nodiscard]] WGPUBindGroup frame_group() const { return frame_group_.get(); }
+  [[nodiscard]] WGPUBindGroup caster_frame_group() const { return caster_frame_group_.get(); }
   [[nodiscard]] std::uint64_t writes() const { return writes_; }
   [[nodiscard]] double parameter_write_ms() const { return parameter_write_ms_; }
 
 private:
   bool Reserve(std::uint32_t slots, std::string& detail);
+  bool BindFrame(const ShadowMap& shadow, std::string& detail);
   BindGroup MaterialGroup(const std::array<WGPUTextureView, kTextureRoles>& views,
       const std::array<std::uint32_t, kTextureRoles>& samplers) const;
 
@@ -451,11 +546,10 @@ private:
   std::vector<MmdParameters> mmd_slots_;
   std::vector<PreviewParameters> preview_slots_;
   Buffer frame_buffer_;
-  Texture shadow_map_;
-  TextureView shadow_view_;
-  Buffer shadow_views_;
-  Buffer mmd_shadow_;
   BindGroup frame_group_;
+  // The shadow map build the frame group binds.
+  std::uint64_t frame_shadow_build_ = 0;
+  BindGroup caster_frame_group_;
   BindGroup display_group_;
   std::uint32_t capacity_ = 0;
   std::uint32_t next_slot_ = 0;
@@ -464,6 +558,71 @@ private:
   std::uint64_t generation_ = 0;
   std::uint64_t writes_ = 0;
   double parameter_write_ms_ = 0;
+};
+
+// The shared shadow views (shadow policy §5), as the Vulkan backend's
+// ShadowMap: each frame the core's ShadowFit decides which views are
+// drawn and from where, and each is drawn before the scene by the shared
+// caster pass into its layer of one depth32float array. MMD's receivers
+// read the view of the scene's first direct light as MMD's self-shadow
+// map (material policy §10). The image, every view's parameters and MMD's
+// sit in the frame group at bindings 1, 2 and 4, which MaterialCache
+// rebuilds when the image is.
+class ShadowMap {
+public:
+  bool Initialize(const Gpu& gpu, std::string& detail);
+  // Fit this frame's views, timing the fit, size the image for them and
+  // write their parameters: another resolution rebuilds the image, and
+  // more views than it has layers grow it.
+  bool Update(const DrawList& draws, std::string& detail, double& fit_ms);
+  // Record a pass per view, outside any other pass, their draw constants
+  // into `constants` as MeshCache::Record's. A frame that draws no view
+  // records nothing: no light's entry names a layer, and MMD's
+  // parameters read none.
+  bool Record(WGPUCommandEncoder encoder, ScenePipelines& pipelines,
+      const MaterialCache& materials, const MeshCache& meshes, const DrawList& draws,
+      WGPUBindGroup ring, std::vector<std::uint8_t>& constants, std::string& detail,
+      const PassTimestamps& timestamps = {});
+
+  [[nodiscard]] const ShadowFit& fit() const { return fit_; }
+  // The last recorded frame's caster draws, every family's and MMD's.
+  [[nodiscard]] std::uint32_t caster_draws() const { return caster_draws_; }
+  [[nodiscard]] std::uint32_t mmd_draws() const { return mmd_draws_; }
+  // The image's texels on a side, its layers and their bytes, which
+  // WebGPU does not report, and how often it was built; the frame group
+  // binds the latest build.
+  [[nodiscard]] std::uint32_t resolution() const { return resolution_; }
+  [[nodiscard]] std::uint32_t layers() const {
+    return static_cast<std::uint32_t>(layer_views_.size());
+  }
+  [[nodiscard]] std::uint64_t memory_bytes() const {
+    return static_cast<std::uint64_t>(resolution_) * resolution_ * 4U * layers();
+  }
+  [[nodiscard]] std::uint64_t rebuilds() const { return rebuilds_; }
+  // Every layer, as the receivers read them, and one, as a pass draws
+  // into it.
+  [[nodiscard]] WGPUTextureView array_view() const { return array_view_.get(); }
+  [[nodiscard]] WGPUTextureView layer_view(std::uint32_t layer) const {
+    return layer_views_[layer].get();
+  }
+  [[nodiscard]] WGPUBuffer views_buffer() const { return views_buffer_.get(); }
+  [[nodiscard]] WGPUBuffer mmd_buffer() const { return mmd_buffer_.get(); }
+
+private:
+  bool Build(std::uint32_t resolution, std::uint32_t layers, std::string& detail);
+
+  WGPUDevice device_ = nullptr;
+  WGPUQueue queue_ = nullptr;
+  ShadowFit fit_;
+  Texture image_;
+  TextureView array_view_;
+  std::vector<TextureView> layer_views_;
+  std::uint32_t resolution_ = 0;
+  std::uint64_t rebuilds_ = 0;
+  Buffer views_buffer_;
+  Buffer mmd_buffer_;
+  std::uint32_t caster_draws_ = 0;
+  std::uint32_t mmd_draws_ = 0;
 };
 
 // What MeshCache::Record drew, counted as the Vulkan backend counts it.
@@ -487,22 +646,35 @@ public:
   bool Initialize(const Gpu& gpu, const ScenePipelines& pipelines,
       std::string& detail);
   bool Update(const DrawList& draws, std::string& detail, bool fast_values = true);
-  // The most draws Record can make of `draws`: three per part, a
-  // double-sided transparent MToon part's back, front and hull.
-  [[nodiscard]] static std::size_t DrawBound(const DrawList& draws);
+  // The most draws Record and RecordShadowCasters can make of `draws`
+  // into `shadow_views` views: three per part, a double-sided transparent
+  // MToon part's back, front and hull, and one per part and view.
+  [[nodiscard]] static std::size_t DrawBound(const DrawList& draws,
+      std::size_t shadow_views);
   // The Vulkan backend's order (its MeshCache::Record; material policy
   // §6): unlit draws; the hull of every opaque MToon draw that asks for
   // one; every opaque surface, MToon's multisampled through MToonCoverage;
   // the transparent draws by render queue, then as `draws` and each mesh's
   // parts list them, an MMD mesh's parts in MMD's material order, an MToon
   // surface followed by its hull; then MMD's edges. The draw constants of
-  // the frame go into `constants`, a draw's at kDrawStride times its index,
-  // which the caller writes to `ring` before the pass is submitted.
-  // `width` and `height` are the target's, for the hulls' occlusion test.
+  // the frame go into `constants`, after those already there, a draw's at
+  // kDrawStride times its index, which the caller writes to `ring` before
+  // the frame is submitted. `width` and `height` are the target's, for the
+  // hulls' occlusion test.
   bool Record(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
       const MaterialCache& materials, const DrawList& draws,
       std::uint32_t width, std::uint32_t height, WGPUBindGroup ring,
       std::vector<std::uint8_t>& constants, SceneRecord& record, std::string& detail);
+  // Draw every part that casts into a shadow view (ShadowFit::Casts)
+  // through the Shadow pipeline, inside `pass`, which draws into the view
+  // `clip_from_world` names, as the draws' poses and morphs place them;
+  // their constants go into `constants` as Record's do. Counts them in
+  // `casters` and, MMD's, in `mmd_casters`.
+  bool RecordShadowCasters(WGPURenderPassEncoder pass, ScenePipelines& pipelines,
+      const MaterialCache& materials, const DrawList& draws,
+      const Matrix4& clip_from_world, WGPUBindGroup ring,
+      std::vector<std::uint8_t>& constants, std::uint32_t& casters,
+      std::uint32_t& mmd_casters, std::string& detail) const;
 
   [[nodiscard]] std::uint64_t topology_uploads() const { return topology_uploads_; }
   [[nodiscard]] std::uint64_t point_uploads() const { return point_uploads_; }
