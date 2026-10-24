@@ -18,6 +18,7 @@ OWNERS = (
     "docs/design/MATERIAL_POLICY.md",
     "docs/design/RENDER_OUTPUT_POLICY.md",
     "docs/design/SHADOW_POLICY.md",
+    "docs/design/WEBGPU_POLICY.md",
     "docs/design/INTEGRATION_SCOPE_POLICY.md",
     "docs/architecture/PROJECT_LAYOUT.md",
     "docs/reference/CAPABILITY_MATRIX.md",

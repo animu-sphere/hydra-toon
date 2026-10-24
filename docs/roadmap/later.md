@@ -4,24 +4,6 @@ Unfinished work after shared shadows and lighting. Each milestone gets its
 own page when it becomes next; [the index](README.md) owns the sequence. All work below
 is owned by `hydra-toon`; upstream prerequisites are linked to their owners.
 
-## v0.7.0 — WebGPU
-
-Reproduce the Vulkan contracts through v0.6.0, the
-[shared shadows](../design/SHADOW_POLICY.md) included, in `backend/webgpu/`,
-following [the backend boundary](../design/DESIGN_POLICY.md#4-backends) and
-[project layout](../architecture/PROJECT_LAYOUT.md#3-where-new-code-goes).
-
-- Implement device/queue, resources, synchronization, presentation,
-  descriptors/bind groups and pass encoding.
-- Reproduce material, deformation, outline, shared lighting/shadow and
-  [output semantics](../design/RENDER_OUTPUT_POLICY.md) with the same core and
-  extraction path. Optimize from measured avatar p95/p99.
-
-**Done when** bounded canonical scenes establish Vulkan/WebGPU semantic and
-visual parity for transparent output, outline, Blend, normals, skinning,
-morphs and cross-material shadows, with practical performance evidence.
-Pixel identity is not required.
-
 ## Host and compositor integration (v0.8.0-scale)
 
 Start after WebGPU parity; the version assignment remains provisional.

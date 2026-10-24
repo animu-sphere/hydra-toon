@@ -31,6 +31,7 @@ owner: hydra-toon
 > | Consuming MToon, MMD and PreviewSurface materials; `ToonMaterial`; pipelines | [MATERIAL_POLICY.md](MATERIAL_POLICY.md) |
 > | Reusable RGBA, background, alpha, compositing and GPU output handoff | [RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md) |
 > | Shared shadows: shadowing lights, casters, views and their resources | [SHADOW_POLICY.md](SHADOW_POLICY.md) |
+> | The WebGPU backend: implementation, binding model, WGSL, hosts and parity | [WEBGPU_POLICY.md](WEBGPU_POLICY.md) |
 > | Targets, directories and dependency directions | [architecture/PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) |
 
 ---
