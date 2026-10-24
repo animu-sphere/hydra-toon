@@ -11,8 +11,8 @@ TangentVertexStageOutput vertex_main(TangentVertexInput input) {
 }
 
 [shader("fragment")]
-float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    float3 view_position : TEXCOORD1, float4 view_tangent : TEXCOORD2,
+float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD1,
+    float3 view_position : TEXCOORD2, float4 view_tangent : TEXCOORD3,
     bool front : SV_IsFrontFace) : SV_Target {
   PreviewParameters material;
   if ((draw.flags & kDrawDisplayColor) != 0) {
@@ -35,8 +35,8 @@ float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
   const float3 n = TangentMappedNormal(normalize(view_normal), view_tangent,
       view_position, st, map, 1.0, true) * (front ? 1.0 : -1.0);
   const float3 emission = max(PreviewColor(material, kPreviewEmissive, st, material.emissive.rgb), 0.0);
-  const float3 position_dx = ddx(view_position);
-  const float3 position_dy = ddy(view_position);
+  const float3 position_dx = DerivativeX(view_position);
+  const float3 position_dy = DerivativeY(view_position);
   // All implicit samples and frame derivatives precede divergent discard.
   if (material.surface.z >= 0.0 && opacity < material.surface.z) discard;
   const float3 v = ViewDirection(view_position);

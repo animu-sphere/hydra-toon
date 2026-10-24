@@ -50,3 +50,9 @@ float4 SampleRoleLevel(uint role, uint entry, uint sampler, float2 uv,
 float4 GatherShadow(float2 uv, float layer) {
   return shadow_map.Gather(samplers[4], float3(uv, layer));
 }
+
+// Screen-space derivatives, as the driver takes them (WebGPU policy §5);
+// names, so the SPIR-V is what plain ddx, ddy and fwidth give.
+#define DerivativeX ddx
+#define DerivativeY ddy
+#define DerivativeWidth fwidth

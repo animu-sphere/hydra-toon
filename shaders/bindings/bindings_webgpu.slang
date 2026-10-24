@@ -103,3 +103,29 @@ float4 SampleRoleLevel(uint role, uint entry, uint sampler, float2 uv,
 float4 GatherShadow(float2 uv, float layer) {
   return shadow_map.Gather(shadow_sampler, float3(uv, layer));
 }
+
+// Screen-space derivatives, fine: WGSL's plain ones are coarse on Dawn's
+// Direct3D 12 device, and the Vulkan backend's reference driver takes them
+// fine, which a multisampled Mask edge and a derivative tangent frame show
+// (renderer report 92). Slang has no WGSL spelling of its own for them.
+float DerivativeX(float value) {
+  __target_switch { case wgsl: __intrinsic_asm "dpdxFine($0)"; default: return ddx(value); }
+}
+float2 DerivativeX(float2 value) {
+  __target_switch { case wgsl: __intrinsic_asm "dpdxFine($0)"; default: return ddx(value); }
+}
+float3 DerivativeX(float3 value) {
+  __target_switch { case wgsl: __intrinsic_asm "dpdxFine($0)"; default: return ddx(value); }
+}
+float DerivativeY(float value) {
+  __target_switch { case wgsl: __intrinsic_asm "dpdyFine($0)"; default: return ddy(value); }
+}
+float2 DerivativeY(float2 value) {
+  __target_switch { case wgsl: __intrinsic_asm "dpdyFine($0)"; default: return ddy(value); }
+}
+float3 DerivativeY(float3 value) {
+  __target_switch { case wgsl: __intrinsic_asm "dpdyFine($0)"; default: return ddy(value); }
+}
+float DerivativeWidth(float value) {
+  __target_switch { case wgsl: __intrinsic_asm "fwidthFine($0)"; default: return fwidth(value); }
+}

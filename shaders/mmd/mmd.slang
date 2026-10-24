@@ -13,8 +13,8 @@ MmdVertexOutput vertex_main(MmdVertexInput input) {
 }
 
 [shader("fragment")]
-float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    float3 view_position : TEXCOORD1, float2 sub_uv : TEXCOORD2)
+float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD1,
+    float3 view_position : TEXCOORD2, float2 sub_uv : TEXCOORD3)
     : SV_Target {
   const MmdSurface surface = ShadeMmd(mmd_materials[draw.material_slot],
       view_normal, view_position, st, sub_uv);

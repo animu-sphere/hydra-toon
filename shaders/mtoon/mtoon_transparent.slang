@@ -13,8 +13,8 @@ TangentVertexStageOutput vertex_main(TangentVertexInput input) {
 }
 
 [shader("fragment")]
-float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD0,
-    float3 view_position : TEXCOORD1, float4 view_tangent : TEXCOORD2, bool front : SV_IsFrontFace)
+float4 fragment_main(float3 view_normal : NORMAL, float2 st : TEXCOORD1,
+    float3 view_position : TEXCOORD2, float4 view_tangent : TEXCOORD3, bool front : SV_IsFrontFace)
     : SV_Target {
   const MToonParameters material = materials[draw.material_slot];
   const MToonSurface surface =
