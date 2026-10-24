@@ -1,11 +1,11 @@
 ---
-status: proposed
+status: accepted
 owner: hydra-toon
 ---
 
 # WebGPU backend policy
 
-> The v0.7.0 WebGPU RFC, proposed on 2026-10-24. It expands
+> The v0.7.0 WebGPU RFC, accepted on 2026-10-24. It expands
 > [DESIGN_POLICY.md](DESIGN_POLICY.md) §4, §9 and §17–§19 for the second
 > backend and wins over it on WebGPU. What the backend reproduces stays with
 > the owners of those contracts: materials with
