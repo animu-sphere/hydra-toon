@@ -40,6 +40,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
+| `adapters/tessera/` | `toon-tessera-host` | — | Win32 example host: an avatar through the GPU handoff and Tessera UI in one swapchain ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)); optional (`TOON_ENABLE_TESSERA`), with the Hydra adapter; never installed |
 | `adapters/fast/` | `toon-avatar-state` | `Toon::AvatarState` | optional revision-4/5 runtime state consumer (`TOON_ENABLE_AVATAR_STATE`); only the runtime C headers are required, with snapshot calls supplied by the host |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
@@ -74,6 +75,7 @@ placement rule; it does not say the component exists.
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `vulkan_handoff.hpp`, `webgpu_backend.hpp`, `webgpu_present.hpp`) | `include/toon/` | — |
 | The Vulkan GPU handoff: a lent device, the product ring and its descriptors ([GPU handoff policy](../design/GPU_HANDOFF_POLICY.md)) | `backend/vulkan/vulkan_handoff.cpp` | `toon-render-vulkan` |
+| The Tessera example host: window, swapchain, frame loop, Tessera panel ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)) | `adapters/tessera/src/` | `toon-tessera-host` |
 
 The viewport keeps private implementation and headers in `adapters/viewport/src/`;
 fixtures, test executables and CMake/Python check drivers live in `tests/`,
@@ -436,12 +438,49 @@ as JSON. It lends a device of its own through `lending_host.hpp`, without
 the validation layer, so both paths draw on the same device and the
 layer's cost is not measured as the renderer's. Avatar stages are local
 data passed as arguments; its CTest runs a committed stage briefly. The
-Tessera host's placement follows with its opt-in intent in stage 3.
+stage's UsdImaging scene indices and `hdToon` delegate, synced into a
+`FrameSnapshot`, are `adapters/hydra2/tests/stage_scene.hpp`, shared by the
+measurement host and the Tessera host; test and example code only.
+
+The Tessera host of policy §9 is `adapters/tessera/` (`toon-tessera-host`),
+a Win32 executable built only with `TOON_ENABLE_TESSERA`, which requires the
+Hydra adapter, the Vulkan backend and Windows, and never installed.
+`src/main.cpp` owns the window, Win32 messages, instance, surface, device,
+swapchain and frame loop; `src/panel.*` owns the Tessera UI document, its
+layout and paint and its input; `src/compare.*` owns the smoke's
+comparison with the reference composite. It lends its device through
+`validation/lending_host.hpp`, which accepts the instance and device
+extensions a presenting host adds (surface and swapchain), and loads the
+avatar through `stage_scene.hpp` and the viewport's `camera.cpp`, as the
+measurement host does. Each frame renders a handoff frame, binds its slot's
+view to `tessera::VulkanRenderer` as a premultiplied image, records the
+product as one full-window `DrawImage` under the panel's draw list into the
+swapchain image's single render pass, waits for the handoff's timeline
+value at the fragment stage, and releases the slot with the host's own
+timeline value. The Tessera renderer retires the frame when the host's fence
+for it signals; each slot of a ring generation keeps one Tessera image
+handle, unbound only after Tessera has retired the last frame that drew it,
+so a resize unbinds the old generation's handles before their views go. A
+readback mode draws the
+same frames from `ColorProduct`s uploaded to a host image, so the host
+reports both paths' timings beside each other. Its smoke captures the
+presented image and compares the product's region with the CPU composite
+of the frame's capture; avatar stages are local arguments, and its CTest
+runs a committed stage briefly where a presenting device exists.
+
+Tessera is acquired by `toon_configure_tessera_dependencies()` in
+`cmake/ToonDependencies.cmake`: `FetchContent` from Tessera's repository at
+a pinned commit, embedded with `TESSERA_BUILD_VULKAN=ON` and its tests and
+examples off, linked as `tessera::vulkan`. Tessera checks its own `slangc`
+version; the project passes it the `slangc` it found. Tessera's SPIR-V
+artifacts are copied beside the executable at build time and read by the
+host, which passes their words to Tessera. No other target links Tessera,
+and the published package does not depend on it.
 
 ## 4. Dependency directions
 
 ```text
-adapters/{headless,viewport,hydra2,fast}
+adapters/{headless,viewport,hydra2,fast,tessera}
         │
         ▼
 backend/vulkan ──┐
@@ -463,8 +502,9 @@ backend/webgpu ──┘
    appears only in `backend/vulkan/`'s `.cpp` and private headers, in the
    viewport's `window_glfw.cpp` through GLFW for its surface, and in the
    lending hosts: `validation/lending_host.hpp`, the test host
-   `validation/handoff_test.cpp` and the measurement host
-   `adapters/hydra2/tests/handoff_measure.cpp`. `webgpu.h`
+   `validation/handoff_test.cpp`, the measurement host
+   `adapters/hydra2/tests/handoff_measure.cpp` and the Tessera host
+   `adapters/tessera/src/`. `webgpu.h`
    and Dawn appear only in `backend/webgpu/`'s `.cpp` files and its private
    `webgpu_internal.hpp`.
    `validation/check-core-boundary.cmake.in` enforces the boundary, WebGPU
@@ -483,7 +523,9 @@ backend/webgpu ──┘
    `src/hydra_scene.cpp` and provider-only `src/avatar_runtime.cpp`, with their
    private `src/hydra_scene_parts.hpp` bridge. They compile only with the Hydra
    adapter; the latter also requires runtime providers. Other viewport sources
-   include no OpenUSD header. GLFW, Dear ImGui and Native File Dialog Extended appear only under
+   include no OpenUSD header. The Tessera host includes OpenUSD only through
+   `stage_scene.hpp` and Tessera only in `adapters/tessera/src/`.
+   GLFW, Dear ImGui and Native File Dialog Extended appear only under
    `adapters/viewport/`; the file dialog is linked only in Hydra builds, with
    its zlib licence installed under `share/toon/licenses/nativefiledialog-extended`.
    The window returns a UTF-8 path to the frame loop, which prepares a new
@@ -566,16 +608,20 @@ backend/webgpu ──┘
 | viewport hosting Hydra | `ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>` | `lookdev` or `usd` | yes |
 | WebGPU backend | `ost build --intent webgpu` | `core` | none |
 | WebGPU viewport hosting Hydra | `ost build --profile lookdev --intent webgpu-usd` | `lookdev` or `usd` | yes |
+| Tessera host | `ost build --profile lookdev --intent tessera-usd` | `lookdev` or `usd` | yes |
 
 The `hydra` intent (`TOON_ENABLE_HYDRA2=ON`), the `viewport-usd` intent
 (`TOON_ENABLE_HYDRA2=ON`, `TOON_ENABLE_VIEWPORT=ON`) and the `webgpu` intent
 (`TOON_ENABLE_WEBGPU=ON`, `TOON_ENABLE_VIEWPORT=ON`) and the `webgpu-usd`
-intent (all three) are declared in `openstrata.toml`. The `webgpu` intent
+intent (all three) and the `tessera-usd` intent (`TOON_ENABLE_HYDRA2=ON`,
+`TOON_ENABLE_TESSERA=ON`) are declared in `openstrata.toml`. The `webgpu` intent
 downloads the pinned Dawn and DXC releases at configure time and adds
 `toon-headless --backend webgpu`, `toon-viewport --backend webgpu` and the
 WebGPU CTests; `webgpu-usd` adds the Hydra adapter, so the WebGPU viewport
 opens USD stages, and the USD parity and cost CTests. No other intent and
-not the published package links Dawn. `ost renderer view` and `ost renderer viewport` request
+not the published package links Dawn. The `tessera-usd` intent fetches the
+pinned Tessera commit at configure time and adds `toon-tessera-host` and its
+CTest; no other intent and not the published package links Tessera. `ost renderer view` and `ost renderer viewport` request
 their adapter through `OST_RENDERER_ADAPTERS` (`hydra2`, `viewport`); the
 project reads that list as adapters to add to what the intent's options
 enable, never as the whole set.
