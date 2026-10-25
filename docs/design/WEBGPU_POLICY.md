@@ -226,7 +226,8 @@ The Vulkan backend's descriptor layout does not change for WebGPU's sake
   the image wait report as unmeasured (`PresentStatistics::gpu_parts_timed`)
   ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)).
 - **Device loss** fails the frame with Dawn's reason; recreating the device
-  is host-integration work ([later](../roadmap/later.md#host-and-compositor-integration-v080-scale)).
+  is host-integration work, outside v0.8.0's Vulkan handoff
+  ([GPU handoff policy §12](GPU_HANDOFF_POLICY.md#12-outside-this-policy)).
 
 ## 7. Output semantics
 
