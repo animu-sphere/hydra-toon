@@ -198,24 +198,68 @@ if(TOON_ENABLE_HYDRA2)
     LABELS "gpu;viewport;presentation;hydra"
     ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
-  foreach(_toon_views IN ITEMS 1 4)
-    set(_toon_scene shadow-cost)
-    if(_toon_views EQUAL 4)
-      set(_toon_scene shadow-cost-4)
-    endif()
-    add_test(NAME toon-viewport-shadow-cost-${_toon_views}
-      COMMAND "${CMAKE_COMMAND}"
-        "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"
-        "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/${_toon_scene}.usda"
-        "-DVIEWS=${_toon_views}"
-        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${_toon_scene}"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_shadow_cost.cmake")
-    set_tests_properties(toon-viewport-shadow-cost-${_toon_views} PROPERTIES
-      SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
-      LABELS "gpu;viewport;presentation;hydra"
-      ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+  # With the WebGPU backend in the tree, the same fixtures on Dawn
+  # (toon-viewport-webgpu-shadow-cost-*) beside the Vulkan ones.
+  set(_toon_cost_backends vulkan)
+  if(TOON_ENABLE_WEBGPU)
+    list(APPEND _toon_cost_backends webgpu)
+  endif()
+  foreach(_toon_backend IN LISTS _toon_cost_backends)
+    foreach(_toon_views IN ITEMS 1 4)
+      set(_toon_scene shadow-cost)
+      if(_toon_views EQUAL 4)
+        set(_toon_scene shadow-cost-4)
+      endif()
+      set(_toon_name toon-viewport-shadow-cost-${_toon_views})
+      set(_toon_output ${_toon_scene})
+      set(_toon_labels "gpu;viewport;presentation;hydra")
+      if(_toon_backend STREQUAL "webgpu")
+        set(_toon_name toon-viewport-webgpu-shadow-cost-${_toon_views})
+        set(_toon_output ${_toon_scene}-webgpu)
+        list(APPEND _toon_labels webgpu)
+      endif()
+      add_test(NAME ${_toon_name}
+        COMMAND "${CMAKE_COMMAND}"
+          "-DVIEWPORT=$<TARGET_FILE:toon-viewport>"
+          "-DBACKEND=${_toon_backend}"
+          "-DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/${_toon_scene}.usda"
+          "-DVIEWS=${_toon_views}"
+          "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${_toon_output}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/check_shadow_cost.cmake")
+      set_tests_properties(${_toon_name} PROPERTIES
+        SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
+        LABELS "${_toon_labels}"
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    endforeach()
   endforeach()
+  # Vulkan/WebGPU parity of USD stages through Hydra (WebGPU policy §9):
+  # each drawn on both backends at 1x and 4x over both backgrounds, the
+  # scene, upload, draw, hull and shadow-view statistics equal and every
+  # channel within one linear step (report 94).
+  if(TOON_ENABLE_WEBGPU AND Python3_Interpreter_FOUND)
+    foreach(_toon_stage IN ITEMS
+        "adapters/hydra2/tests/preview-reference.usda"
+        "adapters/hydra2/tests/skinning.usda"
+        "adapters/hydra2/tests/geom-subsets.usda"
+        "adapters/hydra2/tests/avatar-provider.usda"
+        "adapters/viewport/tests/scene-lights.usda"
+        "adapters/viewport/tests/shadow-cost-4.usda")
+      get_filename_component(_toon_name "${_toon_stage}" NAME_WE)
+      add_test(NAME toon-viewport-webgpu-usd-parity-${_toon_name}
+        COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/check_webgpu_usd_parity.py"
+          --viewport "$<TARGET_FILE:toon-viewport>"
+          --scene "${PROJECT_SOURCE_DIR}/${_toon_stage}"
+          --output "${CMAKE_CURRENT_BINARY_DIR}/webgpu-usd-parity/${_toon_name}"
+          --max 1 --over-one 0)
+      set_tests_properties(toon-viewport-webgpu-usd-parity-${_toon_name} PROPERTIES
+        SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 180
+        LABELS "gpu;viewport;presentation;hydra;webgpu"
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:${TOON_PXR_ROOT}/bin;PATH=path_list_prepend:${TOON_PXR_ROOT}/lib")
+    endforeach()
+  endif()
   set_tests_properties(toon-viewport-playback PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIP:" TIMEOUT 60
     LABELS "gpu;viewport;presentation;hydra"
