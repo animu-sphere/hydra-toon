@@ -8,6 +8,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-25
+
 ### Added
 
 - The WebGPU backend's acceptance (renderer report 94): the `webgpu-usd`
