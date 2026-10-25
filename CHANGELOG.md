@@ -10,6 +10,15 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The Tessera host (renderer report 99): `toon-tessera-host`, built by the
+  new `tessera-usd` intent with Tessera fetched at a pinned commit, draws an
+  avatar through the GPU handoff and a Tessera panel into one swapchain
+  image, binding each handed-off slot as a premultiplied Tessera image.
+  Its smoke compares presented frames with the CPU composite of their
+  product, within one sRGB step, through a resize and a switch to the
+  readback path; `--measure` times both paths. `lending_host.hpp` takes a
+  presenting host's extensions, and the measurement host shares the new
+  `stage_scene.hpp`. Nothing installed links Tessera.
 - The GPU handoff (renderer report 98): `CreateHandoffRenderer` returns a
   `HandoffRenderer` whose `RenderHandoff` draws into a slot of a two-to-four
   slot ring and hands it off on the GPU with the policy's descriptor, no

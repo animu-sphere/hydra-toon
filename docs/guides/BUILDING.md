@@ -715,6 +715,30 @@ clocks to settle; renderer reports [97](../reports/renderer/97-2026-10-25-handof
 and [98](../reports/renderer/98-2026-10-25-handoff-stage-2.md) record the
 baseline and the handoff beside it.
 
+The Tessera host of policy §9, `toon-tessera-host`, is built by its own
+intent, which fetches Tessera at a pinned commit:
+
+```sh
+ost build --profile lookdev --intent tessera-usd --jobs auto
+ost test --profile lookdev --intent tessera-usd
+```
+
+It opens a window drawing a stage through the handoff under a Tessera
+panel; Space or the panel's switch changes to the readback path and back,
+right-drag orbits and the wheel dollies:
+
+```sh
+toon-tessera-host --shaders <build>/backend/vulkan/shaders \
+  --tessera-shaders <build>/adapters/tessera/tessera-shaders --stage <stage.usd>
+```
+
+`--smoke <dir>` instead runs a scripted check under validation, comparing
+presented frames with the CPU composite of their product through a resize
+and both paths, and `--measure <file> [--frames N] [--warmup N]` writes both
+paths' timings as JSON, presenting without vsync; `--width`, `--height` and
+`--samples` set the window and MSAA
+([report 99](../reports/renderer/99-2026-10-25-handoff-stage-3.md)).
+
 ## Late evaluated input and latency
 
 A host registers `LateFrameSource` through `OffscreenRenderer::SetLateFrameSource`

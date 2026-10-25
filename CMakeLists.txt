@@ -42,6 +42,9 @@ option(TOON_ENABLE_VIEWPORT "Build the optional GLFW/Vulkan viewport adapter"
 # and not the published package, links Dawn.
 option(TOON_ENABLE_WEBGPU "Build the optional WebGPU backend on Dawn" OFF)
 option(TOON_ENABLE_AVATAR_STATE "Build the optional avatar runtime state consumer" OFF)
+# The Tessera example host (GPU handoff policy §9): Win32, with the Hydra
+# adapter and the Vulkan backend; fetches a pinned Tessera. Never installed.
+option(TOON_ENABLE_TESSERA "Build the Tessera example host" OFF)
 option(TOON_AVATAR_RUNTIME_PROVIDERS
   "Build the Hydra host check over real usd-avatar-runtime VRM providers" OFF)
 if("hydra2" IN_LIST OST_RENDERER_ADAPTERS)
@@ -81,6 +84,12 @@ if(TOON_ENABLE_HYDRA2)
 endif()
 if(TOON_ENABLE_VIEWPORT)
   add_subdirectory(adapters/viewport)
+endif()
+if(TOON_ENABLE_TESSERA)
+  if(NOT TOON_ENABLE_HYDRA2)
+    message(FATAL_ERROR "TOON_ENABLE_TESSERA needs the Hydra adapter (TOON_ENABLE_HYDRA2)")
+  endif()
+  add_subdirectory(adapters/tessera)
 endif()
 
 if(TOON_BUILD_TESTS)

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // A host that lends its Vulkan device (GPU handoff policy §2): it creates its
 // instance and device with Vulkan itself, from the published requirements,
-// for the lending test host and the measurement host. Test code only.
+// for the lending test host, the measurement host and the Tessera host.
+// Test and example code only.
 #pragma once
 
 #include <toon/vulkan_handoff.hpp>
@@ -9,10 +10,12 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace toon_lending {
@@ -65,13 +68,27 @@ inline bool HasLayer(std::string_view name) {
   return false;
 }
 
+// What a presenting host adds to the device it lends: the instance and
+// device extensions for its surface and swapchain, a call made once the
+// instance exists (to create the surface), and which queue families can
+// present to it. The renderer enables none of these itself.
+struct Presenting {
+  std::vector<const char*> instance_extensions;
+  std::vector<const char*> device_extensions;
+  std::function<void(VkInstance)> created;
+  std::function<bool(VkPhysicalDevice, std::uint32_t)> presents;
+};
+
 // The lending host's own Vulkan objects, destroyed after every renderer.
 class Host {
 public:
   // With `validate`, the Khronos validation layer and synchronization
   // validation, when installed, report into messages().
-  Host(const Toon::VulkanDeviceRequirements& requirements, bool validate) {
+  Host(const Toon::VulkanDeviceRequirements& requirements, bool validate,
+      Presenting presenting = {})
+      : presenting_(std::move(presenting)) {
     CreateInstance(requirements, validate);
+    if (presenting_.created) presenting_.created(instance_);
     ChooseDevice(requirements);
     CreateDevice(requirements);
   }
@@ -99,6 +116,7 @@ public:
     return lent;
   }
   [[nodiscard]] bool validation() const { return messenger_ != VK_NULL_HANDLE; }
+  [[nodiscard]] VkInstance instance() const { return instance_; }
   [[nodiscard]] const Validation& messages() const { return messages_; }
   [[nodiscard]] std::uint32_t family_count() const { return family_count_; }
   [[nodiscard]] VkPhysicalDevice physical_device() const { return physical_; }
@@ -144,13 +162,15 @@ private:
     messenger.pfnUserCallback = OnMessage;
     messenger.pUserData = &messages_;
     messenger.pNext = &features;
+    std::vector<const char*> extensions = presenting_.instance_extensions;
+    if (validate) extensions.push_back(extension);
     VkInstanceCreateInfo create{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     create.pApplicationInfo = &application;
+    create.enabledExtensionCount = static_cast<std::uint32_t>(extensions.size());
+    create.ppEnabledExtensionNames = extensions.data();
     if (validate) {
       create.enabledLayerCount = 1;
       create.ppEnabledLayerNames = &layer;
-      create.enabledExtensionCount = 1;
-      create.ppEnabledExtensionNames = &extension;
       create.pNext = &messenger;
     }
     if (vkCreateInstance(&create, nullptr, &instance_) != VK_SUCCESS) {
@@ -196,7 +216,8 @@ private:
           families.data());
       for (std::uint32_t family = 0; family < family_count_; ++family) {
         if ((families[family].queueFlags & requirements.queue_flags) ==
-            requirements.queue_flags) {
+                requirements.queue_flags &&
+            (!presenting_.presents || presenting_.presents(device, family))) {
           physical_ = device;
           family_ = family;
           enabled_.alpha_to_one = core.features.alphaToOne == VK_TRUE;
@@ -232,6 +253,9 @@ private:
     create.pQueueCreateInfos = &queue;
     Require(requirements.device_extensions.empty(),
         "the renderer asks for device extensions this host does not enable");
+    create.enabledExtensionCount =
+        static_cast<std::uint32_t>(presenting_.device_extensions.size());
+    create.ppEnabledExtensionNames = presenting_.device_extensions.data();
     Require(vkCreateDevice(physical_, &create, nullptr, &device_) == VK_SUCCESS,
         "vkCreateDevice failed");
     vkGetDeviceQueue(device_, family_, 0, &queue_);
@@ -253,6 +277,7 @@ private:
   std::uint32_t api_version_ = 0;
   Toon::VulkanDeviceFeatures enabled_;
   Validation messages_;
+  Presenting presenting_;
 };
 
 } // namespace toon_lending
