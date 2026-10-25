@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [97](97-2026-10-25-handoff-stage-1.md) | GPU handoff stage 1: `vulkan_handoff.hpp` publishes device requirements and renders on a host-lent device, byte-identical to an owned one at 1x and 4x under validation and synchronization validation; a mip-blit hazard fixed; readback from uncached memory (73 ms at 1080p) moved to cached (1.6 ms); the §8 readback baseline on `shadow-cost`, AliciaSolid and the kitchen |
 | [96](96-2026-10-25-published-v070.md) | v0.7.0 release assets and GHCR pull verified; committed Formation re-pinned from v0.6.0; published headless GPU checks 31 PASS and 8 MMD and 16 MToon captures, shadows on and off, byte-identical to published v0.6.0 |
 | [95](95-2026-10-25-v070-preparation.md) | v0.7.0 release gate: OST core 23/23, hydra 37/37, viewport-usd 73/73, webgpu 52/52, webgpu-usd 99/99 with `ost validate`, plain CMake 23/23, a reproducible local `hydra` package without Dawn, DXC or WGSL; GPU evidence in reports 91–94 |
 | [94](94-2026-10-25-webgpu-acceptance.md) | WebGPU stage 4, acceptance: the `webgpu-usd` intent puts USD stages in the WebGPU viewport; twenty committed stages within one linear step of Vulkan at 1x and 4x, six as CTests; AliciaSolid, YYB Miku and a kitchen with both differ only on edges, byte-identical through Dawn's Vulkan adapter; `shadow-cost` and avatar p95/p99 beside Vulkan, whose host-visible vertex buffers cost the avatar 0.4 ms of GPU frame |

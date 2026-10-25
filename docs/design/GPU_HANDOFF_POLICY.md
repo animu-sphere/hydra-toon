@@ -58,7 +58,10 @@ destroys them before the host may destroy the device.
   rendering, Synchronization2, dynamic sampled-image indexing among them),
   `alphaToOne` as optional, and the colour/depth/shadow formats. A host
   device missing one is refused with the missing item named, as an owned
-  device is today. The renderer enables no extension the host did not.
+  device is today. Vulkan cannot report which features a created device
+  enabled, so the host states them when it lends the device; the renderer
+  checks that statement and the physical device's support. The renderer
+  enables no extension the host did not.
 - **Queue.** The host gives one queue and its family. The renderer submits
   to it only inside its own render call, on the caller's thread; the host
   does not submit to the same queue concurrently, which Vulkan's external
@@ -163,6 +166,12 @@ read back and producer-to-ready latency as p50/p95/p99, beside each other.
 The handoff must remove the readback bytes and the CPU wait for completion
 and must not raise GPU frame time beyond the measured cost of the ring's
 barriers.
+
+The measurement host lends its own device, without the validation layer, so
+both paths draw on the same device and the layer's cost is not counted as
+the renderer's. The fallback is measured as it should run: its readback
+buffers are in host-cached memory, which the CPU reads at memory speed
+rather than through uncached system memory.
 
 ## 9. Consumers
 

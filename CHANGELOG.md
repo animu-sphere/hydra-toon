@@ -8,6 +8,28 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Added
+
+- The GPU handoff's first stage (renderer report 97): `<toon/vulkan_handoff.hpp>`
+  publishes the device requirements (`VulkanHandoffRequirements`) and
+  creates the offscreen renderer on a device the host lends
+  (`CreateOffscreenRenderer(LentVulkanDevice, …)`), refusing a device that
+  lacks a requirement with the item named. It is the same renderer an owned
+  device gets and never destroys the device. `toon-handoff-gpu` finds its
+  products byte-identical to an owned device's at 1x and 4x, clean under
+  validation and synchronization validation; `toon-handoff-measure`, built
+  with the Hydra adapter, writes the readback path's timings as JSON.
+  `OffscreenStatistics` gains `gpu_timing`, `gpu_frame_ms` and
+  `readback_bytes`.
+
+### Fixed
+
+- The Vulkan offscreen renderer reads its products back from host-cached
+  memory: a 1,920 × 1,080 render call on a small scene took 73 ms, 1.6 ms
+  now, and `hdToon` reads back every frame this way.
+- A texture's mip levels are made ready for their blits as well as the copy
+  into level 0, a write-after-write hazard synchronization validation found.
+
 ### Changed
 
 - The committed VRM host Formation pins the published `toon` 0.7.0 package,

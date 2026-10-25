@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -99,6 +100,34 @@ bool SupportsSceneFeatures(VkPhysicalDevice device, std::string& detail);
 // offers no other.
 VkSampleCountFlagBits ChooseSampleCount(VkPhysicalDevice device,
     VkFormat color_format, VkFormat depth_format, std::uint32_t requested);
+
+// The offscreen renderer's colour product and depth formats, which the GPU
+// handoff publishes as device requirements.
+constexpr VkFormat kOffscreenColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+constexpr VkFormat kOffscreenDepthFormat = VK_FORMAT_D32_SFLOAT;
+
+// Whether `device` can draw both formats and copy them to the CPU.
+bool SupportsOffscreenTargets(VkPhysicalDevice device);
+
+// The device an offscreen renderer draws on: one it created, or one a host
+// lent (GPU handoff policy §2). The scene code below it is the same either
+// way.
+struct OffscreenDevice {
+  VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+  VkDevice device = VK_NULL_HANDLE;
+  VkQueue queue = VK_NULL_HANDLE;
+  std::uint32_t queue_family = 0;
+  // Whether the device was created with alphaToOne enabled.
+  bool alpha_to_one = false;
+};
+
+// An offscreen renderer on a device a host lent and the caller has checked
+// against the requirements. It destroys what it creates on the device and
+// never the device itself; a lent device's validation messages go to its
+// host's instance.
+std::unique_ptr<OffscreenRenderer> CreateLentOffscreenRenderer(
+    const OffscreenDevice& device, const SceneShaders& shaders,
+    const RenderOptions& options, FrameStatus& status, std::string& detail);
 
 // Clip-from-world for a ToonView: the view's OpenGL-convention projection,
 // then y flipped and z mapped from [-1, 1] to Vulkan's [0, 1].
@@ -243,9 +272,12 @@ struct HostBuffer {
   bool coherent = false;
 };
 
+// Host-visible memory, mapped; `preferred` when a memory type has it.
+// Coherent suits what the CPU writes, cached what it reads back.
 bool CreateHostBuffer(VkPhysicalDevice physical_device, VkDevice device,
     VkDeviceSize size, VkBufferUsageFlags usage, HostBuffer& buffer,
-    std::string& detail);
+    std::string& detail,
+    VkMemoryPropertyFlags preferred = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 void DestroyHostBuffer(VkDevice device, HostBuffer& buffer);
 bool FlushIfNeeded(VkDevice device, const HostBuffer& buffer,
     std::string& detail);

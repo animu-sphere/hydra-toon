@@ -136,6 +136,13 @@ struct OffscreenStatistics {
   std::uint64_t frames_rendered = 0;
   // The last completed frame's timeline value.
   std::uint64_t completion = 0;
+  // Whether the queue writes timestamps, and the last frame's GPU time from
+  // its first command to its last, readback copies included.
+  bool gpu_timing = false;
+  double gpu_frame_ms = 0;
+  // Bytes the last frame copied to the CPU: its colour and depth products
+  // (GPU handoff policy §8).
+  std::uint64_t readback_bytes = 0;
   std::uint32_t pipelines_created = 0;
   // Samples per pixel: RenderOptions' count, as far as the device offers it.
   std::uint32_t samples = 1;

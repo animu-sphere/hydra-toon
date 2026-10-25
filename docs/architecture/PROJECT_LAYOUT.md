@@ -418,14 +418,20 @@ never installed. It compares a lent device's products
 with an owned device's byte for byte over the
 [RGBA fixtures](../design/RENDER_OUTPUT_POLICY.md#6-evidence-boundary-and-additional-outputs),
 at 1x and 4x; from stage 2 it carries the reference consumer of policy §9.
+The fixtures' scenes are `validation/rgba_fixture_scenes.hpp`, which the
+fixture capture includes too, and creating the lent device from the
+published requirements is `validation/lending_host.hpp`, test code only.
 The measurements of policy §8 run in `adapters/hydra2/tests/handoff_measure.cpp`
-(`toon-handoff-measure`), built only with the Hydra adapter and never
-installed. It loads a USD stage through UsdImaging and `hdToon`'s delegate,
-extracts the committed draw list, renders it at the policy's extents and
-sample counts on the readback path and, from stage 2, the handoff, and
-writes the timings as JSON. Avatar stages are local data passed as
-arguments; its CTest runs a committed stage briefly. The Tessera host's
-placement follows with its opt-in intent in stage 3.
+(`toon-handoff-measure`), built only with the Hydra adapter and Vulkan and
+never installed. It loads a USD stage through UsdImaging and `hdToon`'s
+delegate, frames the committed draw list with the viewport's
+`camera.cpp`, and renders it at the policy's extents and sample counts on
+the readback path and, from stage 2, the handoff, and writes the timings
+as JSON. It lends a device of its own through `lending_host.hpp`, without
+the validation layer, so both paths draw on the same device and the
+layer's cost is not measured as the renderer's. Avatar stages are local
+data passed as arguments; its CTest runs a committed stage briefly. The
+Tessera host's placement follows with its opt-in intent in stage 3.
 
 ## 4. Dependency directions
 
@@ -451,7 +457,9 @@ backend/webgpu ──┘
    (`WebGpuShaders`) and the Dawn adapter choice for WebGPU. `vulkan.h`
    appears only in `backend/vulkan/`'s `.cpp` and private headers, in the
    viewport's `window_glfw.cpp` through GLFW for its surface, and in the
-   lending test host `validation/handoff_test.cpp`. `webgpu.h`
+   lending hosts: `validation/lending_host.hpp`, the test host
+   `validation/handoff_test.cpp` and the measurement host
+   `adapters/hydra2/tests/handoff_measure.cpp`. `webgpu.h`
    and Dawn appear only in `backend/webgpu/`'s `.cpp` files and its private
    `webgpu_internal.hpp`.
    `validation/check-core-boundary.cmake.in` enforces the boundary, WebGPU

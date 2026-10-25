@@ -5,6 +5,7 @@ set(public_headers
   "@PROJECT_SOURCE_DIR@/include/toon/backend.hpp"
   "@PROJECT_SOURCE_DIR@/include/toon/vulkan_backend.hpp"
   "@PROJECT_SOURCE_DIR@/include/toon/vulkan_present.hpp"
+  "@PROJECT_SOURCE_DIR@/include/toon/vulkan_handoff.hpp"
   "@PROJECT_SOURCE_DIR@/include/toon/webgpu_backend.hpp")
 set(forbidden_tokens "vulkan/" "pxr/" "Qt" "windows.h" "d3d" "Metal/" "webgpu/" "webgpu.h" "dawn/"
   "avatarRuntime/")

@@ -783,7 +783,7 @@ void BeginSceneRendering(VkCommandBuffer command,
 
 bool CreateHostBuffer(VkPhysicalDevice physical_device, VkDevice device,
     VkDeviceSize size, VkBufferUsageFlags usage, HostBuffer& buffer,
-    std::string& detail) {
+    std::string& detail, VkMemoryPropertyFlags preferred) {
   VkBufferCreateInfo create{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
   create.size = size;
   create.usage = usage;
@@ -796,7 +796,7 @@ bool CreateHostBuffer(VkPhysicalDevice physical_device, VkDevice device,
   vkGetBufferMemoryRequirements(device, buffer.buffer, &requirements);
   const std::uint32_t memory_type = FindMemoryType(physical_device,
       requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.coherent);
+      preferred, &buffer.coherent);
   if (memory_type == std::numeric_limits<std::uint32_t>::max()) {
     detail = "no host-visible buffer memory type is available";
     return false;
@@ -975,9 +975,12 @@ bool TextureCache::Update(const DrawList& draws, std::string& detail) {
 
 void TextureCache::RecordUploads(VkCommandBuffer command) {
   for (const Upload& upload : pending_) {
+    // Level 0 is copied and the levels below it blitted, so the layout
+    // transition comes before both.
     Barrier(command, MipBarrier(upload.image, 0, upload.mip_levels,
                          VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-                         VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+                         VK_ACCESS_2_TRANSFER_WRITE_BIT,
                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
     VkBufferImageCopy copy{};
     copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;

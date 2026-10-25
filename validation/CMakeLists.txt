@@ -155,6 +155,16 @@ if(TOON_WITH_VULKAN)
     set_tests_properties(toon-rgba-fixtures-gpu PROPERTIES
       SKIP_RETURN_CODE 77 LABELS "gpu;rgba" TIMEOUT 90)
   endif()
+  # The host that lends its device (GPU handoff policy §2, §9): it creates
+  # the device with Vulkan itself and compares lent with owned products.
+  add_executable(toon-handoff-test handoff_test.cpp)
+  toon_configure_warnings(toon-handoff-test)
+  target_link_libraries(toon-handoff-test PRIVATE Toon::Vulkan Vulkan::Vulkan)
+  add_dependencies(toon-handoff-test toon-renderer-shaders)
+  add_test(NAME toon-handoff-gpu COMMAND toon-handoff-test
+    "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+  set_tests_properties(toon-handoff-gpu PROPERTIES
+    SKIP_RETURN_CODE 77 LABELS "gpu;handoff" TIMEOUT 120)
 endif()
 
 # The headless evidence run on the WebGPU backend (WebGPU policy §8); its
