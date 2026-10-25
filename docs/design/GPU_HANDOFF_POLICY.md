@@ -1,11 +1,11 @@
 ---
-status: proposed
+status: accepted
 owner: hydra-toon
 ---
 
 # GPU handoff policy
 
-> The v0.8.0 host-integration RFC, proposed on 2026-10-25. It realizes the
+> The v0.8.0 host-integration RFC, accepted on 2026-10-25. It realizes the
 > logical contract of [RENDER_OUTPUT_POLICY.md §7](RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff)
 > for one integration, an in-process Vulkan image handoff on a device the
 > host owns, and wins over it on that integration. What the product contains
@@ -90,7 +90,8 @@ header.
 - **Ring.** The renderer keeps a small ring of product slots, each an image
   with `COLOR_ATTACHMENT`, `SAMPLED` and `TRANSFER_SRC` usage and one view.
   A frame renders into a slot no consumer holds; the depth used to draw it
-  stays internal. The default depth is HOST-Q1 (§11).
+  stays internal. The ring has three slots unless the host asks for two to
+  four when it creates the renderer (HOST-Q1, §11).
 - **Layout.** A handed-off slot is in `SHADER_READ_ONLY_OPTIMAL`, made so by
   the frame's own commands. Consumers sample it in that layout and must not
   transition it. The renderer moves it back to an attachment layout only
@@ -174,9 +175,9 @@ barriers.
   synchronization validation clean.
 - **Tessera host.** A Win32 example host draws an avatar through the
   handoff and Tessera UI through `tessera::vulkan` into one swapchain image,
-  binding the product with `bind_image` and retiring it with Tessera's
-  frames. Where it lives and how premultiplied alpha meets Tessera's
-  straight-alpha image pipeline are HOST-Q2 and HOST-Q3.
+  binding the product with `bind_image` as a premultiplied image and
+  retiring it with Tessera's frames. It is an example in this repository
+  behind an opt-in intent with a pinned Tessera (HOST-Q2 and HOST-Q3, §11).
 - **Not consumers here.** `hdToon` in `usdview` keeps CPU readback: the
   canonical `lookdev` runtime ships HgiGL only, so a zero-copy Hydra path is
   Vulkan-to-OpenGL interop, a later integration (§12). The standalone
@@ -193,16 +194,11 @@ host's frames inspected and compared with the reference consumer's.
 
 ## 11. Open questions
 
-- **HOST-Q1 — ring depth.** Two slots (one rendering, one held) or three (a
-  consumer may hold one while another is pending); and whether a host may
-  choose.
-- **HOST-Q2 — premultiplied alpha in Tessera.** Tessera's image pipeline
-  samples straight alpha. Either Tessera gains a per-image premultiplied
-  flag, which its owner decides, or the Tessera host converts the product in
-  its own pass before binding it.
-- **HOST-Q3 — where the Tessera host lives.** An example in this repository
-  behind an opt-in intent with a pinned Tessera, or an example in Tessera's
-  repository consuming a published `toon` package.
+| ID | Question | Proposal |
+| --- | --- | --- |
+| HOST-Q1 | Ring depth: two slots (one rendering, one held) or three (a consumer may hold one while another is pending), and whether a host may choose | Settled 2026-10-25: three slots by default, so two consumers holding different slots leave one to render into; a host may ask for two to four when it creates the renderer, two suiting a single consumer that wants the memory back |
+| HOST-Q2 | How premultiplied alpha meets Tessera's straight-alpha image pipeline: a per-image premultiplied flag in Tessera, or a conversion pass in the Tessera host | Settled 2026-10-25: Tessera gains a per-image premultiplied option on `bind_image`, blending such an image as premultiplied, through a change in Tessera's repository. The host binds the product as it is, without a conversion pass whose unpremultiplication would lose 8-bit precision at low alpha and bleed at edges, so its frames stay comparable with the reference consumer |
+| HOST-Q3 | Where the Tessera host lives: an example in this repository behind an opt-in intent with a pinned Tessera, or an example in Tessera's repository consuming a published `toon` package | Settled 2026-10-25: an example in this repository behind its own opt-in intent, with Tessera pinned to a commit. The handoff API ships first in v0.8.0, so a host consuming a published `toon` package could not be part of this milestone's acceptance |
 
 ## 12. Outside this policy
 
