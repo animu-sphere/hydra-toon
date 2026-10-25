@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <toon/vulkan_backend.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <cmath>
 #include <filesystem>
@@ -12,6 +13,9 @@
 #if defined(TOON_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 
+#include <toon/vulkan_handoff.hpp>
+
+#include "handoff_ring.hpp"
 #include "vulkan_internal.hpp"
 #include "vulkan_scene.hpp"
 #endif
@@ -101,6 +105,8 @@ using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
 using vulkan_internal::OffscreenDevice;
+using vulkan_internal::ProductRing;
+using vulkan_internal::ProductSlot;
 using vulkan_internal::ShadowMap;
 using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
@@ -136,7 +142,7 @@ std::optional<std::uint32_t> FindGraphicsQueue(VkPhysicalDevice device) {
   return std::nullopt;
 }
 
-class VulkanOffscreenRenderer final : public OffscreenRenderer {
+class VulkanOffscreenRenderer final : public HandoffRenderer {
 public:
   ~VulkanOffscreenRenderer() override {
     Destroy();
@@ -145,26 +151,70 @@ public:
   // Creates the renderer's own instance and device and chooses the physical
   // device: the owned path. Skip when this environment cannot render.
   FrameStatus CreateDevice(OffscreenDevice& device, std::string& detail);
-  // Everything the renderer draws with, on its own device or a lent one.
+  // Everything the renderer draws with, on its own device or a lent one,
+  // with a product ring of `slots` slots.
   FrameStatus Initialize(const OffscreenDevice& device,
       const SceneShaders& shaders, const RenderOptions& options,
-      std::string& detail);
+      std::uint32_t slots, std::string& detail);
 
   [[nodiscard]] bool Render(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, ColorProduct& color, DepthProduct& depth,
+      std::string& error) override;
+  [[nodiscard]] HandoffStatus RenderHandoff(const DrawList& draws,
+      std::uint32_t width, std::uint32_t height, HandoffImage& image,
+      std::string& error) override;
+  [[nodiscard]] bool Acquire(HandoffImage& image) override;
+  [[nodiscard]] bool Release(const HandoffImage& image,
+      std::uintptr_t semaphore, std::uint64_t value,
+      std::string& error) override;
+  void RequestCapture() override { capture_requested_ = true; }
+  [[nodiscard]] bool TakeCapture(ColorProduct& color,
       std::string& error) override;
 
   [[nodiscard]] const OffscreenStatistics& statistics() const override {
     return statistics_;
   }
+  [[nodiscard]] const HandoffStatistics& handoff_statistics() const override {
+    return handoff_;
+  }
   void SetLateFrameSource(LateFrameSource source) override { late_.source = source; }
   bool SetBackground(const BackgroundSettings& settings, std::string& error) override;
 
 private:
+  // What follows the pass once it has drawn the frame's colour.
+  enum class Finish {
+    // Colour and depth copied for the CPU: Render.
+    Readback,
+    // The slot made ready for consumers: RenderHandoff.
+    Handoff,
+    // The slot copied for the CPU, then made ready for consumers.
+    Capture,
+  };
+
+  // The previous frame completed, the extent's targets, and every buffer
+  // the frame reads written; `frame` is the draw list it draws.
+  bool Prepare(const DrawList& extracted, std::uint32_t width,
+      std::uint32_t height, const DrawList*& frame, std::string& error);
+  // Records the frame: the scene into `color`, resolved into it when
+  // multisampled, then `finish`.
+  bool Record(const DrawList& draws, VkImage color, VkImageView color_view,
+      Finish finish, std::string& error);
+  // Submits the recorded frame, ordered after the previous one and after
+  // `waits` on the GPU.
+  bool Submit(const std::vector<VkSemaphoreSubmitInfo>& waits,
+      std::string& error);
+  void UpdateStatistics();
+  void UpdateHandoffStatistics();
+  // False on failure; VK_ERROR_DEVICE_LOST also marks the device lost.
+  bool Check(VkResult result, const char* operation, std::string& error);
   bool EnsureTargets(std::uint32_t width, std::uint32_t height,
       std::string& error);
   void DestroyTargets();
-  bool WaitForCompletion(std::string& error);
+  bool EnsureCapture(std::uint32_t width, std::uint32_t height,
+      std::string& error);
+  // Waits on the CPU until frame `value` has completed.
+  bool WaitFor(std::uint64_t value, std::string& error);
+  bool WaitForCompletion(std::string& error) { return WaitFor(submitted_, error); }
   void WriteTimestamp(std::uint32_t index);
   void ReadTimestamps();
   void Destroy();
@@ -176,13 +226,18 @@ private:
   VkDevice device_ = VK_NULL_HANDLE;
   // Whether `device_` is the renderer's own to destroy.
   bool owns_device_ = false;
+  // Set once the device is lost; every later frame reports it.
+  bool lost_ = false;
   VkQueue queue_ = VK_NULL_HANDLE;
+  std::uint32_t queue_family_ = 0;
   VkCommandPool command_pool_ = VK_NULL_HANDLE;
   VkCommandBuffer command_ = VK_NULL_HANDLE;
   // Null when the queue writes no timestamps.
   VkQueryPool timestamps_ = VK_NULL_HANDLE;
   double timestamp_period_ = 0.0;
   std::uint64_t timestamp_mask_ = 0;
+  // The frame whose timestamps are not read yet, 0 for none.
+  std::uint64_t timed_frame_ = 0;
   // One timeline semaphore carries every frame's completion; frame N signals
   // value N.
   VkSemaphore timeline_ = VK_NULL_HANDLE;
@@ -196,13 +251,24 @@ private:
   std::uint32_t height_ = 0;
   // The products, read back: single-sampled, the pass's own attachments;
   // multisampled, what the pass resolves `color_samples_` and
-  // `depth_samples_` into.
+  // `depth_samples_` into. A handoff frame draws its colour into a slot
+  // instead and keeps its depth internal.
   DeviceImage color_;
   DeviceImage depth_;
   DeviceImage color_samples_;
   DeviceImage depth_samples_;
   HostBuffer color_readback_;
   HostBuffer depth_readback_;
+  // The handoff (GPU handoff policy §4–§7).
+  ProductRing ring_;
+  HandoffStatistics handoff_;
+  bool capture_requested_ = false;
+  // The frame that copied its slot for TakeCapture, 0 for none, its extent
+  // and the copy.
+  std::uint64_t capture_frame_ = 0;
+  std::uint32_t capture_width_ = 0;
+  std::uint32_t capture_height_ = 0;
+  HostBuffer capture_readback_;
   OffscreenStatistics statistics_;
   vulkan_internal::LateFrameState late_;
   BackgroundSettings background_;
@@ -275,11 +341,14 @@ FrameStatus VulkanOffscreenRenderer::CreateDevice(OffscreenDevice& device,
 
 FrameStatus VulkanOffscreenRenderer::Initialize(const OffscreenDevice& device,
     const SceneShaders& shaders, const RenderOptions& options,
-    std::string& detail) {
+    std::uint32_t slots, std::string& detail) {
   physical_device_ = device.physical_device;
   device_ = device.device;
   queue_ = device.queue;
+  queue_family_ = device.queue_family;
   pipelines_.alpha_to_one = device.alpha_to_one;
+  ring_.Initialize(physical_device_, device_, slots);
+  handoff_.slots = slots;
   SceneShaderWords words;
   if (!LoadSceneShaders(shaders, words, detail)) {
     return FrameStatus::Fail;
@@ -399,6 +468,175 @@ bool VulkanOffscreenRenderer::SetBackground(const BackgroundSettings& settings,
 bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
     std::uint32_t width, std::uint32_t height, ColorProduct& color,
     DepthProduct& depth, std::string& error) {
+  if (lost_) {
+    error = "the Vulkan device was lost";
+    return false;
+  }
+  const DrawList* frame = nullptr;
+  if (!Prepare(extracted, width, height, frame, error) ||
+      !Record(*frame, color_.image, color_.view, Finish::Readback, error) ||
+      !Submit({}, error)) {
+    return false;
+  }
+
+  // The caller wants this frame's pixels, so the readback waits here.
+  if (!WaitForCompletion(error) ||
+      !InvalidateIfNeeded(device_, color_readback_, error) ||
+      !InvalidateIfNeeded(device_, depth_readback_, error)) {
+    return false;
+  }
+  color.width = width_;
+  color.height = height_;
+  color.row_pitch = width_ * 4U;
+  color.pixel_format = "rgba8-unorm";
+  color.origin = "top-left";
+  color.color_space = "linear";
+  color.transfer_function = "linear";
+  color.alpha_convention = "premultiplied";
+  color.payload.resize(static_cast<std::size_t>(width_) * height_ * 4U);
+  std::memcpy(color.payload.data(), color_readback_.mapped,
+      color.payload.size());
+  depth.width = width_;
+  depth.height = height_;
+  depth.row_pitch = width_ * static_cast<std::uint32_t>(sizeof(float));
+  depth.pixel_format = "d32-sfloat";
+  depth.origin = "top-left";
+  depth.payload.resize(static_cast<std::size_t>(width_) * height_);
+  std::memcpy(depth.payload.data(), depth_readback_.mapped,
+      depth.payload.size() * sizeof(float));
+
+  ++statistics_.frames_rendered;
+  statistics_.readback_bytes = color.payload.size() +
+                               depth.payload.size() * sizeof(float);
+  UpdateStatistics();
+  return true;
+}
+
+HandoffStatus VulkanOffscreenRenderer::RenderHandoff(const DrawList& extracted,
+    std::uint32_t width, std::uint32_t height, HandoffImage& image,
+    std::string& error) {
+  const std::int64_t started = SteadyNanoseconds();
+  const auto failed = [this] {
+    return lost_ ? HandoffStatus::DeviceLost : HandoffStatus::Failed;
+  };
+  if (lost_) {
+    error = "the Vulkan device was lost";
+    return HandoffStatus::DeviceLost;
+  }
+  if (width == 0 || height == 0) {
+    error = "the render extent must be non-zero";
+    return HandoffStatus::Failed;
+  }
+  // The previous frame has completed, and with it the last frame of every
+  // retired slot.
+  if (!WaitForCompletion(error)) {
+    return failed();
+  }
+  ring_.Collect();
+  if (!ring_.Ensure(width, height, error)) {
+    return failed();
+  }
+  ProductSlot* slot = ring_.Free();
+  if (slot == nullptr) {
+    ++handoff_.no_free_slot;
+    UpdateHandoffStatistics();
+    error = "every product slot is held";
+    return HandoffStatus::NoFreeSlot;
+  }
+  const bool capture = capture_requested_;
+  const DrawList* frame = nullptr;
+  if (!Prepare(extracted, width, height, frame, error) ||
+      (capture && !EnsureCapture(width, height, error)) ||
+      !Record(*frame, slot->image.image, slot->image.view,
+          capture ? Finish::Capture : Finish::Handoff, error) ||
+      !Submit(slot->waits, error)) {
+    return failed();
+  }
+  handoff_.release_waits += slot->waits.size();
+  slot->waits.clear();
+
+  HandoffImage handed;
+  handed.image = reinterpret_cast<std::uintptr_t>(slot->image.image);
+  handed.view = reinterpret_cast<std::uintptr_t>(slot->image.view);
+  handed.width = width;
+  handed.height = height;
+  handed.format = static_cast<std::uint32_t>(kColorFormat);
+  handed.slot = slot->index;
+  handed.generation = slot->generation;
+  handed.semaphore = reinterpret_cast<std::uintptr_t>(timeline_);
+  handed.value = submitted_;
+  handed.layout = static_cast<std::uint32_t>(
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  handed.queue_family = queue_family_;
+  handed.frame = submitted_;
+  handed.scene_revision = frame->source_revision;
+  handed.late_sample_applied = statistics_.latency.late_sample_applied;
+  handed.inputs = frame->inputs;
+  handed.render_started = started;
+  handed.submitted = statistics_.latency.submitted;
+  ring_.Publish(*slot, handed);
+  image = handed;
+  if (capture) {
+    capture_requested_ = false;
+    capture_frame_ = submitted_;
+    capture_width_ = width;
+    capture_height_ = height;
+    ++handoff_.captures;
+  }
+
+  ++statistics_.frames_rendered;
+  statistics_.readback_bytes =
+      capture ? std::uint64_t{width} * height * 4U : 0U;
+  ++handoff_.frames_handed_off;
+  UpdateStatistics();
+  UpdateHandoffStatistics();
+  return HandoffStatus::Rendered;
+}
+
+bool VulkanOffscreenRenderer::Acquire(HandoffImage& image) {
+  const bool acquired = ring_.Acquire(image);
+  UpdateHandoffStatistics();
+  return acquired;
+}
+
+bool VulkanOffscreenRenderer::Release(const HandoffImage& image,
+    std::uintptr_t semaphore, std::uint64_t value, std::string& error) {
+  const bool released = ring_.Release(image,
+      reinterpret_cast<VkSemaphore>(semaphore), value, error);
+  UpdateHandoffStatistics();
+  return released;
+}
+
+bool VulkanOffscreenRenderer::TakeCapture(ColorProduct& color,
+    std::string& error) {
+  if (capture_frame_ == 0) {
+    error = "no captured frame is pending";
+    return false;
+  }
+  // An explicit readback: the CPU waits for the captured frame.
+  if (!WaitFor(capture_frame_, error) ||
+      !InvalidateIfNeeded(device_, capture_readback_, error)) {
+    return false;
+  }
+  color.width = capture_width_;
+  color.height = capture_height_;
+  color.row_pitch = capture_width_ * 4U;
+  color.pixel_format = "rgba8-unorm";
+  color.origin = "top-left";
+  color.color_space = "linear";
+  color.transfer_function = "linear";
+  color.alpha_convention = "premultiplied";
+  color.payload.resize(
+      static_cast<std::size_t>(capture_width_) * capture_height_ * 4U);
+  std::memcpy(color.payload.data(), capture_readback_.mapped,
+      color.payload.size());
+  capture_frame_ = 0;
+  return true;
+}
+
+bool VulkanOffscreenRenderer::Prepare(const DrawList& extracted,
+    std::uint32_t width, std::uint32_t height, const DrawList*& frame,
+    std::string& error) {
   if (width == 0 || height == 0) {
     error = "the render extent must be non-zero";
     return false;
@@ -414,7 +652,6 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
           !materials_.Update(extracted, textures_, error, false)))) {
     return false;
   }
-  const DrawList* frame = nullptr;
   if (!late_.Read(extracted, frame, statistics_, error)) return false;
   const DrawList& draws = *frame;
   if (!meshes_.Update(draws, error) ||
@@ -427,7 +664,11 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   statistics_.latency.pose_write_ms = meshes_.pose_write_ms() - pose_before;
   statistics_.latency.morph_write_ms = meshes_.morph_write_ms() - morph_before;
   statistics_.latency.material_write_ms = materials_.parameter_write_ms() - material_before;
+  return true;
+}
 
+bool VulkanOffscreenRenderer::Record(const DrawList& draws, VkImage color,
+    VkImageView color_view, Finish finish, std::string& error) {
   if (!VulkanOk(vkResetCommandBuffer(command_, 0), "vkResetCommandBuffer",
           error)) {
     return false;
@@ -456,7 +697,9 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
 
   // Every attachment is cleared, so none keeps its contents. Multisampled,
   // the depth product is written by the resolve, at the colour output stage
-  // as a colour attachment write; single-sampled, by the depth tests.
+  // as a colour attachment write; single-sampled, by the depth tests. The
+  // colour target's transition follows the colour output stage, which a
+  // slot's release waits are for.
   const bool multisampled = color_samples_.image != VK_NULL_HANDLE;
   const VkPipelineStageFlags2 depth_product_stage =
       multisampled ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
@@ -468,21 +711,29 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
   const auto color_to_attachment = [](VkImage image) {
     return ImageBarrier(image, VK_IMAGE_ASPECT_COLOR_BIT,
-        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_ACCESS_2_NONE,
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   };
+  // A depth target's last use was the previous frame's: its tests, its
+  // resolve or the readback's copy. The transition follows those stages,
+  // which the wait for the previous frame orders it after.
   const auto depth_to_attachment = [](VkImage image,
                                        VkPipelineStageFlags2 stage,
                                        VkAccessFlags2 access) {
     return ImageBarrier(image, VK_IMAGE_ASPECT_DEPTH_BIT,
-        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, stage, access,
-        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_ACCESS_2_NONE, stage, access, VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
   };
   const VkImageMemoryBarrier2 to_attachment[] = {
-      color_to_attachment(color_.image),
+      color_to_attachment(color),
       depth_to_attachment(depth_.image, depth_product_stage,
           depth_product_access),
       color_to_attachment(color_samples_.image),
@@ -497,9 +748,9 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   dependency.pImageMemoryBarriers = to_attachment;
   vkCmdPipelineBarrier2(command_, &dependency);
 
-  SceneAttachments attachments{color_.view, depth_.view};
+  SceneAttachments attachments{color_view, depth_.view};
   if (multisampled) {
-    attachments = {color_samples_.view, depth_samples_.view, color_.view,
+    attachments = {color_samples_.view, depth_samples_.view, color_view,
         depth_.view};
   }
   BeginSceneRendering(command_, attachments, {width_, height_}, background_);
@@ -508,47 +759,80 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   statistics_.outline_draws = record.hulls;
   vkCmdEndRendering(command_);
 
-  const VkImageMemoryBarrier2 to_transfer[] = {
-      ImageBarrier(color_.image, VK_IMAGE_ASPECT_COLOR_BIT,
-          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
-          VK_ACCESS_2_TRANSFER_READ_BIT,
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
-      ImageBarrier(depth_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
-          depth_product_stage, depth_product_access,
-          VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
-  };
-  dependency.imageMemoryBarrierCount = 2;
-  dependency.pImageMemoryBarriers = to_transfer;
-  vkCmdPipelineBarrier2(command_, &dependency);
-
   VkBufferImageCopy copy{};
   copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   copy.imageSubresource.layerCount = 1;
   copy.imageExtent = {width_, height_, 1};
-  vkCmdCopyImageToBuffer(command_, color_.image,
-      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, color_readback_.buffer, 1, &copy);
-  copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-  vkCmdCopyImageToBuffer(command_, depth_.image,
-      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, depth_readback_.buffer, 1, &copy);
-
-  VkMemoryBarrier2 to_host{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
-  to_host.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-  to_host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-  to_host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
-  to_host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
-  VkDependencyInfo host_dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-  host_dependency.memoryBarrierCount = 1;
-  host_dependency.pMemoryBarriers = &to_host;
-  vkCmdPipelineBarrier2(command_, &host_dependency);
-  WriteTimestamp(1);
-  if (!VulkanOk(vkEndCommandBuffer(command_), "vkEndCommandBuffer", error)) {
-    return false;
+  const auto color_to_transfer = [&] {
+    return ImageBarrier(color, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_ACCESS_2_TRANSFER_READ_BIT,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  };
+  if (finish == Finish::Readback) {
+    const VkImageMemoryBarrier2 to_transfer[] = {
+        color_to_transfer(),
+        ImageBarrier(depth_.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+            depth_product_stage, depth_product_access,
+            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
+    };
+    dependency.imageMemoryBarrierCount = 2;
+    dependency.pImageMemoryBarriers = to_transfer;
+    vkCmdPipelineBarrier2(command_, &dependency);
+    vkCmdCopyImageToBuffer(command_, color,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, color_readback_.buffer, 1, &copy);
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    vkCmdCopyImageToBuffer(command_, depth_.image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, depth_readback_.buffer, 1, &copy);
+  } else {
+    // The slot leaves in SHADER_READ_ONLY_OPTIMAL, made visible to
+    // consumers by the timeline signal their reads wait for (GPU handoff
+    // policy §4, §5); a capture copies it on the way.
+    VkImageMemoryBarrier2 to_consumers = ImageBarrier(color,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (finish == Finish::Capture) {
+      const VkImageMemoryBarrier2 to_transfer = color_to_transfer();
+      dependency.imageMemoryBarrierCount = 1;
+      dependency.pImageMemoryBarriers = &to_transfer;
+      vkCmdPipelineBarrier2(command_, &dependency);
+      vkCmdCopyImageToBuffer(command_, color,
+          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, capture_readback_.buffer, 1,
+          &copy);
+      to_consumers.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+      to_consumers.srcAccessMask = VK_ACCESS_2_NONE;
+      to_consumers.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    }
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &to_consumers;
+    vkCmdPipelineBarrier2(command_, &dependency);
   }
 
+  if (finish != Finish::Handoff) {
+    VkMemoryBarrier2 to_host{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    to_host.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    to_host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    to_host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    to_host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo host_dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    host_dependency.memoryBarrierCount = 1;
+    host_dependency.pMemoryBarriers = &to_host;
+    vkCmdPipelineBarrier2(command_, &host_dependency);
+  }
+  WriteTimestamp(1);
+  return VulkanOk(vkEndCommandBuffer(command_), "vkEndCommandBuffer", error);
+}
+
+bool VulkanOffscreenRenderer::Submit(
+    const std::vector<VkSemaphoreSubmitInfo>& waits, std::string& error) {
   VkCommandBufferSubmitInfo command_submit{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
   command_submit.commandBuffer = command_;
@@ -560,56 +844,35 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   // copies are ordered only before the host's reads. Waiting for its value
   // here too orders it before this frame on the queue itself, which a
   // queue another host shares and synchronization validation can see.
-  VkSemaphoreSubmitInfo previous{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
-  previous.semaphore = timeline_;
-  previous.value = submitted_;
-  previous.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  std::vector<VkSemaphoreSubmitInfo> all_waits;
+  all_waits.reserve(waits.size() + 1U);
+  if (submitted_ != 0) {
+    VkSemaphoreSubmitInfo previous{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    previous.semaphore = timeline_;
+    previous.value = submitted_;
+    previous.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    all_waits.push_back(previous);
+  }
+  all_waits.insert(all_waits.end(), waits.begin(), waits.end());
   VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
-  submit.waitSemaphoreInfoCount = submitted_ != 0 ? 1U : 0U;
-  submit.pWaitSemaphoreInfos = &previous;
+  submit.waitSemaphoreInfoCount = static_cast<std::uint32_t>(all_waits.size());
+  submit.pWaitSemaphoreInfos = all_waits.data();
   submit.commandBufferInfoCount = 1;
   submit.pCommandBufferInfos = &command_submit;
   submit.signalSemaphoreInfoCount = 1;
   submit.pSignalSemaphoreInfos = &signal;
-  if (!VulkanOk(vkQueueSubmit2(queue_, 1, &submit, VK_NULL_HANDLE),
+  if (!Check(vkQueueSubmit2(queue_, 1, &submit, VK_NULL_HANDLE),
           "vkQueueSubmit2", error)) {
     return false;
   }
   ++submitted_;
+  timed_frame_ = timestamps_ != VK_NULL_HANDLE ? submitted_ : 0U;
   statistics_.latency.frame = submitted_;
   statistics_.latency.submitted = SteadyNanoseconds();
+  return true;
+}
 
-  // The caller wants this frame's pixels, so the readback waits here.
-  if (!WaitForCompletion(error) ||
-      !InvalidateIfNeeded(device_, color_readback_, error) ||
-      !InvalidateIfNeeded(device_, depth_readback_, error)) {
-    return false;
-  }
-  ReadTimestamps();
-  color.width = width_;
-  color.height = height_;
-  color.row_pitch = width_ * 4U;
-  color.pixel_format = "rgba8-unorm";
-  color.origin = "top-left";
-  color.color_space = "linear";
-  color.transfer_function = "linear";
-  color.alpha_convention = "premultiplied";
-  color.payload.resize(static_cast<std::size_t>(width_) * height_ * 4U);
-  std::memcpy(color.payload.data(), color_readback_.mapped,
-      color.payload.size());
-  depth.width = width_;
-  depth.height = height_;
-  depth.row_pitch = width_ * static_cast<std::uint32_t>(sizeof(float));
-  depth.pixel_format = "d32-sfloat";
-  depth.origin = "top-left";
-  depth.payload.resize(static_cast<std::size_t>(width_) * height_);
-  std::memcpy(depth.payload.data(), depth_readback_.mapped,
-      depth.payload.size() * sizeof(float));
-
-  ++statistics_.frames_rendered;
-  statistics_.completion = submitted_;
-  statistics_.readback_bytes = color.payload.size() +
-                               depth.payload.size() * sizeof(float);
+void VulkanOffscreenRenderer::UpdateStatistics() {
   statistics_.topology_uploads = meshes_.topology_uploads();
   statistics_.point_uploads = meshes_.point_uploads();
   statistics_.material_writes = materials_.writes();
@@ -622,19 +885,57 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   if (!validation_.first_message.empty()) {
     statistics_.validation_detail = validation_.first_message;
   }
-  return true;
 }
 
-bool VulkanOffscreenRenderer::WaitForCompletion(std::string& error) {
-  if (submitted_ == 0) {
+void VulkanOffscreenRenderer::UpdateHandoffStatistics() {
+  handoff_.slots = ring_.slots();
+  handoff_.generation = ring_.generation();
+  handoff_.held = ring_.held();
+  handoff_.retired = ring_.retired();
+  handoff_.slots_created = ring_.created();
+  handoff_.slots_destroyed = ring_.destroyed();
+}
+
+bool VulkanOffscreenRenderer::Check(VkResult result, const char* operation,
+    std::string& error) {
+  if (result == VK_ERROR_DEVICE_LOST) {
+    lost_ = true;
+  }
+  return VulkanOk(result, operation, error);
+}
+
+bool VulkanOffscreenRenderer::EnsureCapture(std::uint32_t width,
+    std::uint32_t height, std::string& error) {
+  const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * 4U;
+  if (capture_readback_.buffer != VK_NULL_HANDLE &&
+      capture_readback_.capacity == bytes) {
+    return true;
+  }
+  // The previous frame, which may have captured into it, has completed.
+  DestroyHostBuffer(device_, capture_readback_);
+  capture_frame_ = 0;
+  return CreateHostBuffer(physical_device_, device_, bytes,
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT, capture_readback_, error,
+      kReadbackMemory);
+}
+
+bool VulkanOffscreenRenderer::WaitFor(std::uint64_t value, std::string& error) {
+  if (value == 0) {
     return true;
   }
   VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
   wait.semaphoreCount = 1;
   wait.pSemaphores = &timeline_;
-  wait.pValues = &submitted_;
-  return VulkanOk(vkWaitSemaphores(device_, &wait, kFrameTimeoutNs),
-      "vkWaitSemaphores", error);
+  wait.pValues = &value;
+  if (!Check(vkWaitSemaphores(device_, &wait, kFrameTimeoutNs),
+          "vkWaitSemaphores", error)) {
+    return false;
+  }
+  statistics_.completion = std::max(statistics_.completion, value);
+  if (timed_frame_ != 0 && timed_frame_ <= value) {
+    ReadTimestamps();
+  }
+  return true;
 }
 
 void VulkanOffscreenRenderer::WriteTimestamp(std::uint32_t index) {
@@ -645,18 +946,17 @@ void VulkanOffscreenRenderer::WriteTimestamp(std::uint32_t index) {
 }
 
 void VulkanOffscreenRenderer::ReadTimestamps() {
-  if (timestamps_ == VK_NULL_HANDLE) {
-    return;
-  }
-  // The frame has completed, so both timestamps are available.
+  // The timed frame has completed, so both timestamps are available.
   std::uint64_t ticks[kTimestampCount] = {};
+  const std::uint64_t frame = timed_frame_;
+  timed_frame_ = 0;
   if (vkGetQueryPoolResults(device_, timestamps_, 0, kTimestampCount,
           sizeof(ticks), ticks, sizeof(std::uint64_t),
           VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
-    statistics_.gpu_frame_ms = 0;
     return;
   }
   const std::uint64_t elapsed = (ticks[1] - ticks[0]) & timestamp_mask_;
+  statistics_.gpu_frame = frame;
   statistics_.gpu_frame_ms =
       static_cast<double>(elapsed) * timestamp_period_ * 1e-6;
 }
@@ -728,6 +1028,8 @@ void VulkanOffscreenRenderer::Destroy() {
       std::string ignored;
       (void)WaitForCompletion(ignored);
     }
+    ring_.Destroy();
+    DestroyHostBuffer(device_, capture_readback_);
     shadow_.Destroy();
     meshes_.Destroy();
     textures_.Destroy();
@@ -747,11 +1049,12 @@ void VulkanOffscreenRenderer::Destroy() {
 
 } // namespace
 
-std::unique_ptr<OffscreenRenderer> vulkan_internal::CreateLentOffscreenRenderer(
+std::unique_ptr<HandoffRenderer> vulkan_internal::CreateLentRenderer(
     const OffscreenDevice& device, const SceneShaders& shaders,
-    const RenderOptions& options, FrameStatus& status, std::string& detail) {
+    const RenderOptions& options, std::uint32_t slots, FrameStatus& status,
+    std::string& detail) {
   auto renderer = std::make_unique<VulkanOffscreenRenderer>();
-  status = renderer->Initialize(device, shaders, options, detail);
+  status = renderer->Initialize(device, shaders, options, slots, detail);
   if (status != FrameStatus::Pass) {
     return nullptr;
   }
@@ -773,7 +1076,8 @@ std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
   OffscreenDevice device;
   status = renderer->CreateDevice(device, detail);
   if (status == FrameStatus::Pass) {
-    status = renderer->Initialize(device, shaders, options, detail);
+    status = renderer->Initialize(device, shaders, options,
+        HandoffOptions{}.slots, detail);
   }
   if (status != FrameStatus::Pass) {
     return nullptr;
