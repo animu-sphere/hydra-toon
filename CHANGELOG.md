@@ -10,6 +10,15 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The WebGPU backend's acceptance (renderer report 94): the `webgpu-usd`
+  intent builds the Hydra adapter beside the WebGPU backend, so
+  `toon-viewport --backend webgpu --usd <stage>` draws USD stages through
+  Dawn. Every committed stage agrees with Vulkan within one linear step at
+  1x and 4x over both backgrounds with the same scene, upload, draw, hull
+  and shadow-view statistics (`toon-viewport-webgpu-usd-parity-*`, through
+  `check_webgpu_usd_parity.py`), and the `shadow-cost` fixtures record
+  their p95/p99 on WebGPU (`toon-viewport-webgpu-shadow-cost-1`, `-4`;
+  `check_shadow_cost.cmake` takes a `BACKEND`).
 - The WebGPU backend's third stage (renderer report 93): the shared shadow
   views, drawn by the caster pass into a depth32float array and read by
   MToon, PreviewSurface and MMD receivers, MMD's self-shadow among them;

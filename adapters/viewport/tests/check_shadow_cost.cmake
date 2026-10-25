@@ -7,7 +7,8 @@
 # The run must draw VIEWS views and records in OUTPUT.json the scene, the
 # device, the samples, the views' resolution, layers and memory, and the
 # mean, p95 and p99 of the GPU shadow pass, the GPU work, the CPU fit and
-# the CPU submit.
+# the CPU submit. BACKEND, vulkan by default, names the viewport's backend
+# (WebGPU policy §9 compares the two from one tree).
 foreach(required IN ITEMS VIEWPORT SCENE VIEWS OUTPUT)
   if(NOT DEFINED ${required})
     message(FATAL_ERROR "${required} is required")
@@ -16,8 +17,11 @@ endforeach()
 if(NOT DEFINED FRAMES)
   set(FRAMES 64)
 endif()
+if(NOT DEFINED BACKEND)
+  set(BACKEND vulkan)
+endif()
 
-execute_process(COMMAND "${VIEWPORT}" --hidden --width 256 --height 256
+execute_process(COMMAND "${VIEWPORT}" --backend ${BACKEND} --hidden --width 256 --height 256
   --frames ${FRAMES} --vsync off --overlay off --usd "${SCENE}"
   --time 1 --time-step 0.25 --expect-draws 17
   --telemetry-output "${OUTPUT}-telemetry.json"
@@ -61,6 +65,7 @@ file(READ "${OUTPUT}-telemetry.json" telemetry)
 get_filename_component(scene "${SCENE}" NAME)
 set(record "{}")
 string(JSON record SET "${record}" scene "\"${scene}\"")
+string(JSON record SET "${record}" backend "\"${BACKEND}\"")
 string(JSON record SET "${record}" device "\"${device}\"")
 string(JSON record SET "${record}" width 256)
 string(JSON record SET "${record}" height 256)
@@ -93,5 +98,5 @@ if(shadow LESS_EQUAL 0)
   message(FATAL_ERROR "the GPU shadow pass took no time: ${telemetry}")
 endif()
 file(WRITE "${OUTPUT}.json" "${record}\n")
-message("${scene} on ${device}, ${samples} samples, ${views} views of ${resolution} texels, "
+message("${scene} on ${BACKEND}, ${device}, ${samples} samples, ${views} views of ${resolution} texels, "
   "${memory} bytes; mean/p95/p99 ms:${summary}")

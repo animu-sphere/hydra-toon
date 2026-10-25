@@ -22,7 +22,9 @@ owner: hydra-toon
 > stage 2 and WGPU-Q1's multisampled classes
 > [report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md), and
 > stage 3, shadows and presentation,
-> [report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md).
+> [report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md), and
+> stage 4, acceptance,
+> [report 94](../reports/renderer/94-2026-10-25-webgpu-acceptance.md).
 
 ## 1. Purpose and decisions
 
@@ -63,7 +65,8 @@ the project on 2026-10-24 and shape the rest:
   it requires the viewport or headless runner that consumes it. The `core`,
   `hydra` and `viewport-usd` intents and the published `toon` package do not
   change, and no Dawn binary enters the Formation. A `webgpu` build intent is
-  added when the backend first builds (§10).
+  added when the backend first builds (§10), and a `webgpu-usd` intent adds
+  the Hydra adapter for USD stages in the WebGPU viewport (stage 4).
 - **Dawn's adapter.** The default request is a high-performance Direct3D 12
   adapter. Dawn's Vulkan adapter may be selected for diagnosis; parity
   evidence names which one ran. The Direct3D 11 and null adapters are not
@@ -323,7 +326,7 @@ large gap is reported with its pass.
 
 | ID | Question | Proposal |
 | --- | --- | --- |
-| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class is measured against these and gets a limit of its own only with a report that explains the difference. MToon and MMD hold them at 1x and 4x ([report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md)) but for two multisampled classes and the hulls' depth: at 4x a scene with outline hulls at most two steps on at most 2e-4 of its pixels, a sample at a thin hull's edge falling on its other side; MToon Mask at most one sample (64 steps) on at most 2e-4 of its pixels, a share on a coverage threshold, coverage identical; a hull's depth within 5e-6, its bias's slope term being the driver's. Shadows measured in stage 3 ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)): six scenes of one to four views across every family, a Mask caster and a skinned one, identical at 1x through either adapter and at 4x within one step, depth within 1.8e-7, but for the Mask class, whose share on a threshold can keep sample 0, the second kept, so that class lets sample 0's coverage differ on at most 2e-4 of its pixels |
+| WGPU-Q1 | Visual parity thresholds per scene class | Settled 2026-10-24 ([report 91](../reports/renderer/91-2026-10-24-webgpu-stage-1.md)): unlit output exact; lit and textured output at most one 8-bit step apart, with no pixel more than one step apart; coverage identical and depth within 1e-6. Measured exact on every stage 1 scene but one textured pixel at one step, through Dawn's Direct3D 12 and Vulkan adapters. A later class is measured against these and gets a limit of its own only with a report that explains the difference. MToon and MMD hold them at 1x and 4x ([report 92](../reports/renderer/92-2026-10-25-webgpu-stage-2.md)) but for two multisampled classes and the hulls' depth: at 4x a scene with outline hulls at most two steps on at most 2e-4 of its pixels, a sample at a thin hull's edge falling on its other side; MToon Mask at most one sample (64 steps) on at most 2e-4 of its pixels, a share on a coverage threshold, coverage identical; a hull's depth within 5e-6, its bias's slope term being the driver's. Shadows measured in stage 3 ([report 93](../reports/renderer/93-2026-10-25-webgpu-stage-3.md)): six scenes of one to four views across every family, a Mask caster and a skinned one, identical at 1x through either adapter and at 4x within one step, depth within 1.8e-7, but for the Mask class, whose share on a threshold can keep sample 0, the second kept, so that class lets sample 0's coverage differ on at most 2e-4 of its pixels. USD stages in the viewport measured in stage 4 ([report 94](../reports/renderer/94-2026-10-25-webgpu-acceptance.md)): a presented or exported image is compared in the linear steps of the scene target it was encoded from; twenty committed stages hold the lit and textured limits at 1x and 4x. Dense avatars through Dawn's Direct3D 12 adapter differ on mesh and hull edges, a pixel centre or sample on an edge falling on the other side (at most 4e-4 of their pixels at 4x, a few pixels at 1x), and are byte-identical through its Vulkan adapter; recorded, not limited, as they cannot be committed |
 | WGPU-Q2 | Whether the bindings module is selected by a preprocessor define or by Slang link-time modules | Settled 2026-10-24: the `TOON_WEBGPU` preprocessor define selects `bindings_webgpu.slang`; `slangc` stays one invocation per entry point, and nothing needed link-time modules |
 | WGPU-Q3 | How often the Dawn pin moves | Only for a fix or feature the backend needs, each with a parity rerun report; no tracking of Dawn's daily releases |
 

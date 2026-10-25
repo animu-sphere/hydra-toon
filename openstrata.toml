@@ -25,3 +25,11 @@ cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true }, TOON_ENABLE_VIEW
 # pinned download; nothing else links it.
 [build.intents.webgpu]
 cache = { TOON_ENABLE_WEBGPU = { type = "BOOL", value = true }, TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true } }
+
+# The WebGPU viewport with the Hydra adapter, so `toon-viewport --backend
+# webgpu --usd <stage>` draws a USD stage through Dawn beside the Vulkan
+# session from the same tree: WebGPU stage 4's parity scenes and timings
+# (docs/design/WEBGPU_POLICY.md §9). Needs `--profile lookdev`; the `webgpu`
+# intent stays OpenUSD-free.
+[build.intents.webgpu-usd]
+cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true }, TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true }, TOON_ENABLE_WEBGPU = { type = "BOOL", value = true } }
