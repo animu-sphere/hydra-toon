@@ -31,5 +31,12 @@ cache = { TOON_ENABLE_WEBGPU = { type = "BOOL", value = true }, TOON_ENABLE_VIEW
 # session from the same tree: WebGPU stage 4's parity scenes and timings
 # (docs/design/WEBGPU_POLICY.md §9). Needs `--profile lookdev`; the `webgpu`
 # intent stays OpenUSD-free.
+# The Tessera host (docs/design/GPU_HANDOFF_POLICY.md §9): an avatar through
+# the GPU handoff and Tessera UI in one window, `toon-tessera-host`, and its
+# smoke CTest. Fetches a pinned Tessera; needs `--profile lookdev`. Nothing
+# else, and not the published package, links Tessera.
+[build.intents.tessera-usd]
+cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true }, TOON_ENABLE_TESSERA = { type = "BOOL", value = true } }
+
 [build.intents.webgpu-usd]
 cache = { TOON_ENABLE_HYDRA2 = { type = "BOOL", value = true }, TOON_ENABLE_VIEWPORT = { type = "BOOL", value = true }, TOON_ENABLE_WEBGPU = { type = "BOOL", value = true } }

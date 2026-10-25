@@ -7,18 +7,11 @@
 // latency from the render call's start to the product being ready, and
 // writes their p50/p95/p99 as JSON, for the readback path and, beside it on
 // the same renderer, the handoff.
-#include "adapter.hpp"
 #include "camera.hpp"
 #include "lending_host.hpp"
+#include "stage_scene.hpp"
 
-#include <pxr/imaging/hd/renderIndex.h>
-#include <pxr/imaging/hd/rprimCollection.h>
-#include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usdGeom/metrics.h>
-#include <pxr/usd/usdGeom/tokens.h>
-#include <pxr/usdImaging/usdImaging/sceneIndices.h>
-#include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
 
 #include <toon/vulkan_handoff.hpp>
 
@@ -88,40 +81,6 @@ Arguments Parse(int argc, char** argv) {
   return arguments;
 }
 
-// The stage through UsdImaging into hdToon's delegate, synced once.
-struct Scene {
-  HdToonRenderDelegate delegate;
-  UsdImagingSceneIndices indices;
-  std::unique_ptr<HdRenderIndex> index;
-  Toon::viewport::UpAxis up = Toon::viewport::UpAxis::Y;
-
-  explicit Scene(const UsdStageRefPtr& stage) {
-    UsdImagingCreateSceneIndicesInfo info;
-    info.stage = stage;
-    indices = UsdImagingCreateSceneIndices(info);
-    index.reset(HdRenderIndex::New(&delegate, {}));
-    Require(index != nullptr, "could not create the Hydra render index");
-    index->InsertSceneIndex(indices.finalSceneIndex, SdfPath::AbsoluteRootPath());
-    indices.stageSceneIndex->SetTime(stage->HasAuthoredTimeCodeRange()
-                                         ? UsdTimeCode(stage->GetStartTimeCode())
-                                         : UsdTimeCode::Default());
-    up = UsdGeomGetStageUpAxis(stage) == UsdGeomTokens->z
-             ? Toon::viewport::UpAxis::Z
-             : Toon::viewport::UpAxis::Y;
-  }
-  ~Scene() { index.reset(); }
-
-  Toon::FrameSnapshot Sync() {
-    indices.stageSceneIndex->ApplyPendingUpdates();
-    index->EnqueueCollectionToSync(HdRprimCollection(HdTokens->geometry,
-        HdReprSelector(HdReprTokens->smoothHull)));
-    HdTaskSharedPtrVector tasks;
-    HdTaskContext context;
-    index->SyncAll(&tasks, &context);
-    return delegate.CommitScene();
-  }
-};
-
 struct Series {
   std::vector<double> values;
 
@@ -168,7 +127,7 @@ int main(int argc, char** argv) {
     const Arguments arguments = Parse(argc, argv);
     const auto stage = UsdStage::Open(arguments.stage);
     Require(stage != nullptr, "cannot open " + arguments.stage);
-    Scene scene(stage);
+    toon_stage::Scene scene(stage);
     const Toon::FrameSnapshot snapshot = scene.Sync();
     Toon::viewport::OrbitCamera camera(scene.up);
     camera.Frame(Toon::viewport::SceneBounds(snapshot));

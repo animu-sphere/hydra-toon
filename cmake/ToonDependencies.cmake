@@ -119,6 +119,34 @@ function(toon_configure_webgpu_dependencies)
     "${dxc_SOURCE_DIR}/LICENCE-MIT.txt" PARENT_SCOPE)
 endfunction()
 
+# Tessera for the Tessera host (GPU handoff policy §9, HOST-Q3): its
+# repository at a pinned commit, embedded with only its optional Vulkan
+# module, linked as tessera::vulkan. The commit is the one that gives
+# bind_image its per-binding ImageAlpha (HOST-Q2); a pin moves only with a
+# report that reruns the host's smoke. Tessera checks its own slangc version
+# and is passed the one this project found. FETCHCONTENT_SOURCE_DIR_TESSERA
+# may name a checkout of the same commit.
+function(toon_configure_tessera_dependencies)
+  if(NOT WIN32)
+    message(FATAL_ERROR "TOON_ENABLE_TESSERA builds a Win32 example host")
+  endif()
+  if(NOT TOON_WITH_VULKAN)
+    message(FATAL_ERROR "TOON_ENABLE_TESSERA needs the Vulkan backend and slangc")
+  endif()
+  include(FetchContent)
+  set(TESSERA_BUILD_VULKAN ON CACHE BOOL "" FORCE)
+  set(TESSERA_BUILD_FONTS OFF CACHE BOOL "" FORCE)
+  set(TESSERA_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  set(TESSERA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(TESSERA_SLANGC "${TOON_SLANGC_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+  FetchContent_Declare(tessera
+    GIT_REPOSITORY https://github.com/animu-sphere/tessera.git
+    GIT_TAG c999a27a3a5c4ae28c5e68133a1460cc5c63fbdd) # main after #116
+  FetchContent_MakeAvailable(tessera)
+  set(TOON_TESSERA_SHADERS "${tessera_BINARY_DIR}/backends/vulkan/shaders"
+    PARENT_SCOPE)
+endfunction()
+
 # Copies what an executable linking the WebGPU backend loads at run time
 # next to it: DXC's dxcompiler.dll.
 function(toon_copy_webgpu_runtime target)
