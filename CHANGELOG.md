@@ -10,6 +10,17 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The GPU handoff (renderer report 98): `CreateHandoffRenderer` returns a
+  `HandoffRenderer` whose `RenderHandoff` draws into a slot of a two-to-four
+  slot ring and hands it off on the GPU with the policy's descriptor, no
+  readback; consumers `Acquire` and `Release` frames with their own timeline
+  semaphores, which the slot's next use waits for on the GPU. Held slots,
+  resize generations, several consumers, capture and a `DeviceLost` status
+  follow the policy. `toon-handoff-gpu` carries the reference consumer,
+  byte-identical to the CPU composite of the readback product at 1x and 4x;
+  `toon-handoff-measure` measures the handoff beside readback.
+  `OffscreenStatistics::gpu_frame` names the frame `gpu_frame_ms` belongs to.
+
 - The GPU handoff's first stage (renderer report 97): `<toon/vulkan_handoff.hpp>`
   publishes the device requirements (`VulkanHandoffRequirements`) and
   creates the offscreen renderer on a device the host lends

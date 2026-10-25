@@ -687,16 +687,19 @@ records the accepted v0.2.0 baseline and its limitations.
 
 A host that lends its Vulkan device includes `<toon/vulkan_handoff.hpp>`,
 creates the device from `VulkanHandoffRequirements()`, and passes it, with
-the features it enabled, to `CreateOffscreenRenderer(LentVulkanDevice, …)`
+the features it enabled, to `CreateOffscreenRenderer(LentVulkanDevice, …)`,
+or to `CreateHandoffRenderer` to receive frames on the GPU through
+`RenderHandoff`, `Acquire` and `Release`
 ([GPU handoff policy](../design/GPU_HANDOFF_POLICY.md)). The lending host's
-check runs in any Vulkan build:
+check, with its reference consumer, runs in any Vulkan build:
 
 ```sh
 ctest --test-dir build/plain-cmake -R toon-handoff-gpu --output-on-failure
 ```
 
 It turns on validation and synchronization validation on its own instance
-when the Khronos layer is installed. The readback baseline of policy §8 is
+when the Khronos layer is installed. The measurements of policy §8, the
+readback path and the handoff on the same renderer, are
 `toon-handoff-measure`, built with the Hydra adapter; on the policy's
 extents and sample counts:
 
@@ -708,8 +711,9 @@ toon-handoff-measure --shaders <build>/backend/vulkan/shaders \
 `--extent WxH` and `--samples N`, each repeatable, replace the defaults. A
 stage needing format or imaging plugins runs in an environment that
 registers them, as `usdview` would. Keep the warmup long enough for the GPU
-clocks to settle; [renderer report 97](../reports/renderer/97-2026-10-25-handoff-stage-1.md)
-records the baseline.
+clocks to settle; renderer reports [97](../reports/renderer/97-2026-10-25-handoff-stage-1.md)
+and [98](../reports/renderer/98-2026-10-25-handoff-stage-2.md) record the
+baseline and the handoff beside it.
 
 ## Late evaluated input and latency
 

@@ -108,12 +108,19 @@ header.
 - **Readiness.** The renderer's existing timeline semaphore carries every
   frame's completion: frame N signals value N. The descriptor names the
   semaphore and N; a consumer waits for N before the stage that samples the
-  image. The CPU waits for nothing (design policy §19).
+  image. The CPU waits for nothing of frame N (design policy §19); as every
+  frame does, the next render call waits for frame N before reusing what it
+  wrote, which is the one frame in flight below.
 - **Release.** A consumer releases a slot by giving the renderer its own
   timeline semaphore and the value it signals once its last read of that
   slot has executed. The renderer makes its next use of the slot wait for
-  that value on the GPU. Several consumers each release; the slot returns to
-  the ring only when every consumer that acquired it has.
+  that value on the GPU, at the colour output stage where its transition
+  is; a value already reached when a render call starts is forgotten, and
+  so the consumer's semaphore must stay valid only until then, or until the
+  renderer is destroyed, whose teardown waits for values not yet reached.
+  Several consumers each release; the slot returns to the ring only when
+  every consumer that acquired it has. A consumer that did not read the
+  slot releases it without a semaphore.
 - **Holding.** A consumer may hold the latest slot across several producer
   frames. When every slot is held, the next render call does not overwrite
   one: it reports that no slot is free and draws nothing, so the host
@@ -134,7 +141,7 @@ Every handoff descriptor carries:
 | Readiness | Encoded timeline `VkSemaphore` and the value N to wait for |
 | State | `SHADER_READ_ONLY_OPTIMAL`, the queue family index |
 | Identity | Frame number N, the render world's scene revision, the late sample applied, if any |
-| Timing | Producer steady-clock nanoseconds at render start and submit, and GPU time when timestamps exist, in the clock [DESIGN_POLICY §23](DESIGN_POLICY.md#23-performance-kpis) names |
+| Timing | Producer steady-clock nanoseconds at render start and submit, in the clock [DESIGN_POLICY §23](DESIGN_POLICY.md#23-performance-kpis) names; the GPU time, when timestamps exist, is known only once the frame completes, so the renderer's statistics carry it with its frame number after the next render call |
 
 Consumers needing straight alpha or display encoding convert at their own
 boundary ([render output policy §5](RENDER_OUTPUT_POLICY.md#5-hydra-and-viewport-boundaries)).
@@ -151,10 +158,11 @@ boundary ([render output policy §5](RENDER_OUTPUT_POLICY.md#5-hydra-and-viewpor
 - **Several consumers.** Any number of consumers on the same device may
   acquire the same slot; each releases independently (§5). Consumers on
   another device or process are outside v0.8.0 (§12).
-- **Capture.** The explicit readback stays: a capture request copies the
-  same slot into a `ColorProduct` and is byte-identical to what consumers
-  sample. Screenshots and the CPU fallback use it; ordinary handoff frames
-  read nothing back.
+- **Capture.** The explicit readback stays: a capture request makes the
+  next handoff frame copy its slot on its way to consumers, and taking the
+  capture waits for that frame and returns a `ColorProduct` byte-identical
+  to what consumers sample. Screenshots and the CPU fallback use it;
+  ordinary handoff frames read nothing back.
 
 ## 8. Readback fallback and measurement
 
