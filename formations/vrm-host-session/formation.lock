@@ -3,7 +3,7 @@
   "resolution": {
     "schema": "openstrata.formation-resolved/v1alpha1",
     "name": "hydra-toon-vrm-host-session",
-    "manifest_digest": "sha256:4ea7a64e96b5efd8d823d09688b86d448bd07cd319bc224f522e0afbb810083a",
+    "manifest_digest": "sha256:ec306221345c46520255f0dc5276625cc4f2df4fcec2abb37e487788a377daa2",
     "target": "cy2026-windows-x86_64-msvc143-py313-lookdev",
     "runtime": {
       "kind": "runtime",
@@ -40,8 +40,8 @@
         "declared_kind": "renderer",
         "kind": "package",
         "name": "toon",
-        "version": "0.6.0",
-        "digest": "sha256:179dece66c1c7d2a67e3380c0760e24576e391ef5b03f630ffaa056004633f20",
+        "version": "0.7.0",
+        "digest": "sha256:2a7bfa45383a91edcf78fed8c59027bc7c9e45abc6709e4484b71a2c06f49a3b",
         "target": "cy2026-windows-x86_64-py313-lookdev",
         "profile": "lookdev",
         "runtime_id": "openstrata-cy2026-windows-x86_64-py313-lookdev",

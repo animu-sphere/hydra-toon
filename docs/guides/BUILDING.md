@@ -170,14 +170,14 @@ runtime pulled as above and a host Python 3.13:
 
 ```sh
 ost artifact pull oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:84dbb7e550c55d249798f7288066de3589c383a75a35a6268328a497f147dda8     --expect-artifact sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667
-ost artifact pull oci://ghcr.io/animu-sphere/hydra-toon@sha256:eec2c09c74a2b489ed3e1af3b3fb574a6ab115b4355984fad85ad85a5cd94f6f     --expect-artifact sha256:179dece66c1c7d2a67e3380c0760e24576e391ef5b03f630ffaa056004633f20
+ost artifact pull oci://ghcr.io/animu-sphere/hydra-toon@sha256:1e1cb5823c8b47612535c165f428ca6ce92b47c49d32b30d49865153e1da91c6     --expect-artifact sha256:2a7bfa45383a91edcf78fed8c59027bc7c9e45abc6709e4484b71a2c06f49a3b
 cd formations/vrm-host-session
 ost formation doctor formation.toml
 ost formation run formation.toml
 ```
 
-The published v0.6.0 package is verified on the RTX A5000 in
-[renderer report 89](../reports/renderer/89-2026-10-24-published-v060.md).
+The published v0.7.0 package is verified on the RTX A5000 in
+[renderer report 96](../reports/renderer/96-2026-10-25-published-v070.md).
 The declared command opens `testusdview` on the committed
 `material-probe.usda` and asserts that its VRM material selected MToon; it
 fails if `vrmImaging` is missing. To draw an avatar instead, override the

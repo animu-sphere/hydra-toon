@@ -17,11 +17,11 @@ id = "vrmImaging"
 kind = "plugin"
 artifact = "sha256:894fd616f1414d5b393ff0d50abbf7ef18cb603562133c72e642493b48f71667"
 
-# hydra-toon v0.6.0 (toon-package-pins.json)
+# hydra-toon v0.7.0 (toon-package-pins.json)
 [[components]]
 id = "toon"
 kind = "renderer"
-artifact = "sha256:179dece66c1c7d2a67e3380c0760e24576e391ef5b03f630ffaa056004633f20"
+artifact = "sha256:2a7bfa45383a91edcf78fed8c59027bc7c9e45abc6709e4484b71a2c06f49a3b"
 
 [command]
 program = "testusdview"
