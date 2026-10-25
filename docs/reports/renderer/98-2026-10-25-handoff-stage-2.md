@@ -1,5 +1,7 @@
 # GPU handoff stage 2: the product ring and the reference consumer
 
+> The kitchen's tails in §5 are one event a few seconds into each run, not either path's: [report 100](100-2026-10-25-handoff-acceptance.md#3-the-handoff-beside-readback).
+
 - Date: 2026-10-25
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000, driver 597.16; MSVC 14.51 /
   Visual Studio 18, CMake 4.4.3

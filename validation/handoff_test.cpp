@@ -7,7 +7,7 @@
 // owns, at 1x and 4x, comparing both products byte for byte. Its reference
 // consumer samples handed-off frames on the GPU and must equal the CPU
 // composite of the readback product exactly, through capture, several
-// consumers, held slots and resize.
+// consumers, held slots, resize and rings of two and four slots.
 #include <toon/vulkan_handoff.hpp>
 #include "lending_host.hpp"
 #include "rgba_fixture_scenes.hpp"
@@ -866,6 +866,54 @@ void Handoff(const Host& host, const Toon::SceneShaders& shaders,
       "Vulkan validation messages on the lent device: " + host.messages().first);
 }
 
+// The ring sizes a host may ask for besides the default (HOST-Q1): as many
+// acquisitions as slots fill the ring, the next call draws nothing, and a
+// released slot takes the next frame, which the consumer samples exactly.
+void Rings(const Host& host, const Toon::SceneShaders& shaders,
+    std::uint32_t samples) {
+  Toon::FrameStatus status = Toon::FrameStatus::Fail;
+  std::string error;
+  Consumer consumer(host, shaders);
+  const auto draws = Fixture("avatar");
+  for (const std::uint32_t slots : {2U, 4U}) {
+    const std::string tag = std::to_string(samples) + "x, " +
+                            std::to_string(slots) + " slots: ";
+    auto renderer = Toon::CreateHandoffRenderer(host.Lend(), shaders, status, error,
+        {samples}, {slots});
+    Require(renderer != nullptr, tag + error);
+    Require(renderer->SetBackground({Toon::BackgroundMode::Transparent, {}}, error),
+        error);
+    Toon::ColorProduct product;
+    Toon::DepthProduct depth;
+    Require(renderer->Render(draws, 256, 256, product, depth, error), error);
+    const auto& stats = renderer->handoff_statistics();
+    std::vector<Toon::HandoffImage> held;
+    for (std::uint32_t slot = 0; slot < slots; ++slot) {
+      held.push_back(HandOff(*renderer, draws, 256, 256));
+    }
+    Require(stats.slots == slots && stats.held == slots,
+        tag + "the acquisitions do not hold every slot");
+    Toon::HandoffImage none;
+    Require(renderer->RenderHandoff(draws, 256, 256, none, error) ==
+                Toon::HandoffStatus::NoFreeSlot,
+        tag + "a render call with every slot held drew");
+    Release(*renderer, held.front(), nullptr, 0);
+    const auto next = HandOff(*renderer, draws, 256, 256);
+    Require(next.slot == held.front().slot, tag + "a frame went into a held slot");
+    const auto value = consumer.Submit(next, kBackgrounds[2]);
+    Release(*renderer, next, &consumer, value);
+    Require(consumer.Read() == Composite(product, kBackgrounds[2]),
+        tag + "the frame after a full ring differs from the readback product");
+    for (std::size_t at = 1; at < held.size(); ++at) {
+      Release(*renderer, held[at], nullptr, 0);
+    }
+    Require(stats.held == 0, tag + "a released frame is still held");
+    std::cout << tag << "full ring, release and reuse passed\n";
+  }
+  Require(host.messages().count == 0,
+      "Vulkan validation messages on the lent device: " + host.messages().first);
+}
+
 // Device loss is not reproducible on demand; the host's recovery is: it
 // destroys the renderer and its device, creates both again and acquires.
 void Recreate(const Toon::SceneShaders& shaders) {
@@ -909,6 +957,7 @@ int main(int argc, char** argv) {
     for (const std::uint32_t samples : {1U, 4U}) {
       Compare(host, shaders, samples);
       Handoff(host, shaders, samples);
+      Rings(host, shaders, samples);
     }
     // Every renderer and consumer has gone; the device and what the host
     // made remain the host's, and destroying the device reports nothing

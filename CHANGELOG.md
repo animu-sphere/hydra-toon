@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- The GPU handoff's acceptance (renderer report 100): every piece of the
+  policy's evidence rerun from one commit, the Tessera host's frames
+  compared at 1x as well as 4x and inspected, and the measurements over 300
+  frames. `toon-handoff-gpu` also fills, releases and reuses rings of two
+  and four slots. The kitchen's GPU-frame tails in reports 98 and 99 are
+  one event a few seconds into each run, not the handoff's.
 - The Tessera host (renderer report 99): `toon-tessera-host`, built by the
   new `tessera-usd` intent with Tessera fetched at a pinned commit, draws an
   avatar through the GPU handoff and a Tessera panel into one swapchain
