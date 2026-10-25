@@ -58,6 +58,28 @@ BackendCapability ProbeVulkanBackend() {
 }
 
 #if defined(TOON_HAS_VULKAN)
+namespace vulkan_internal {
+
+bool SupportsOffscreenTargets(VkPhysicalDevice device) {
+  VkFormatProperties color_properties{};
+  VkFormatProperties depth_properties{};
+  vkGetPhysicalDeviceFormatProperties(device, kOffscreenColorFormat,
+      &color_properties);
+  vkGetPhysicalDeviceFormatProperties(device, kOffscreenDepthFormat,
+      &depth_properties);
+  const VkFormatFeatureFlags color_required =
+      VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+  const VkFormatFeatureFlags depth_required =
+      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+      VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+  return (color_properties.optimalTilingFeatures & color_required) ==
+             color_required &&
+         (depth_properties.optimalTilingFeatures & depth_required) ==
+             depth_required;
+}
+
+} // namespace vulkan_internal
+
 namespace {
 
 using vulkan_internal::BeginSceneRendering;
@@ -78,19 +100,27 @@ using vulkan_internal::InvalidateIfNeeded;
 using vulkan_internal::LoadSceneShaders;
 using vulkan_internal::MaterialCache;
 using vulkan_internal::MeshCache;
+using vulkan_internal::OffscreenDevice;
 using vulkan_internal::ShadowMap;
 using vulkan_internal::SceneAttachments;
 using vulkan_internal::SceneDeviceFeatures;
 using vulkan_internal::SceneShaderWords;
 using vulkan_internal::ScenePipelines;
+using vulkan_internal::SupportsOffscreenTargets;
 using vulkan_internal::SupportsSceneFeatures;
 using vulkan_internal::TextureCache;
 using vulkan_internal::ValidationState;
 using vulkan_internal::VulkanOk;
 
-constexpr VkFormat kColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
-constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+constexpr VkFormat kColorFormat = vulkan_internal::kOffscreenColorFormat;
+constexpr VkFormat kDepthFormat = vulkan_internal::kOffscreenDepthFormat;
 constexpr std::uint64_t kFrameTimeoutNs = 10'000'000'000ULL;
+// The CPU reads the products back, which uncached memory makes slow
+// (GPU handoff policy §8).
+constexpr VkMemoryPropertyFlags kReadbackMemory =
+    VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+// A frame's first and last command each write a timestamp.
+constexpr std::uint32_t kTimestampCount = 2;
 
 std::optional<std::uint32_t> FindGraphicsQueue(VkPhysicalDevice device) {
   std::uint32_t count = 0;
@@ -106,30 +136,19 @@ std::optional<std::uint32_t> FindGraphicsQueue(VkPhysicalDevice device) {
   return std::nullopt;
 }
 
-bool SupportsTargetFormats(VkPhysicalDevice device) {
-  VkFormatProperties color_properties{};
-  VkFormatProperties depth_properties{};
-  vkGetPhysicalDeviceFormatProperties(device, kColorFormat, &color_properties);
-  vkGetPhysicalDeviceFormatProperties(device, kDepthFormat, &depth_properties);
-  const VkFormatFeatureFlags color_required =
-      VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
-  const VkFormatFeatureFlags depth_required =
-      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
-      VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
-  return (color_properties.optimalTilingFeatures & color_required) ==
-             color_required &&
-         (depth_properties.optimalTilingFeatures & depth_required) ==
-             depth_required;
-}
-
 class VulkanOffscreenRenderer final : public OffscreenRenderer {
 public:
   ~VulkanOffscreenRenderer() override {
     Destroy();
   }
 
-  FrameStatus Initialize(const SceneShaders& shaders,
-      const RenderOptions& options, std::string& detail);
+  // Creates the renderer's own instance and device and chooses the physical
+  // device: the owned path. Skip when this environment cannot render.
+  FrameStatus CreateDevice(OffscreenDevice& device, std::string& detail);
+  // Everything the renderer draws with, on its own device or a lent one.
+  FrameStatus Initialize(const OffscreenDevice& device,
+      const SceneShaders& shaders, const RenderOptions& options,
+      std::string& detail);
 
   [[nodiscard]] bool Render(const DrawList& draws, std::uint32_t width,
       std::uint32_t height, ColorProduct& color, DepthProduct& depth,
@@ -146,15 +165,24 @@ private:
       std::string& error);
   void DestroyTargets();
   bool WaitForCompletion(std::string& error);
+  void WriteTimestamp(std::uint32_t index);
+  void ReadTimestamps();
   void Destroy();
 
+  // Null for a lent device, whose instance is its host's.
   InstanceState instance_;
   ValidationState validation_;
   VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
   VkDevice device_ = VK_NULL_HANDLE;
+  // Whether `device_` is the renderer's own to destroy.
+  bool owns_device_ = false;
   VkQueue queue_ = VK_NULL_HANDLE;
   VkCommandPool command_pool_ = VK_NULL_HANDLE;
   VkCommandBuffer command_ = VK_NULL_HANDLE;
+  // Null when the queue writes no timestamps.
+  VkQueryPool timestamps_ = VK_NULL_HANDLE;
+  double timestamp_period_ = 0.0;
+  std::uint64_t timestamp_mask_ = 0;
   // One timeline semaphore carries every frame's completion; frame N signals
   // value N.
   VkSemaphore timeline_ = VK_NULL_HANDLE;
@@ -180,13 +208,8 @@ private:
   BackgroundSettings background_;
 };
 
-FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
-    const RenderOptions& options, std::string& detail) {
-  SceneShaderWords words;
-  if (!LoadSceneShaders(shaders, words, detail)) {
-    return FrameStatus::Fail;
-  }
-
+FrameStatus VulkanOffscreenRenderer::CreateDevice(OffscreenDevice& device,
+    std::string& detail) {
   if (!CreateInstanceWithValidation("toon-offscreen", {}, &validation_,
           instance_, detail)) {
     return FrameStatus::Skip;
@@ -212,12 +235,12 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     if (!candidate || !SupportsSceneFeatures(physical, rejection)) {
       continue;
     }
-    if (!SupportsTargetFormats(physical)) {
+    if (!SupportsOffscreenTargets(physical)) {
       rejection = "required RGBA8/depth32 attachment readback formats are "
                   "unavailable";
       continue;
     }
-    physical_device_ = physical;
+    device.physical_device = physical;
     queue_family = candidate;
     break;
   }
@@ -233,20 +256,38 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
   queue_create.pQueuePriorities = &priority;
   SceneDeviceFeatures features;
   VkDeviceCreateInfo device_create{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-  device_create.pNext = features.EnableRequired(physical_device_);
-  pipelines_.alpha_to_one = features.core.features.alphaToOne == VK_TRUE;
+  device_create.pNext = features.EnableRequired(device.physical_device);
   device_create.queueCreateInfoCount = 1;
   device_create.pQueueCreateInfos = &queue_create;
-  if (!VulkanOk(vkCreateDevice(physical_device_, &device_create, nullptr,
-                    &device_),
+  if (!VulkanOk(vkCreateDevice(device.physical_device, &device_create, nullptr,
+                    &device.device),
           "vkCreateDevice", detail)) {
     return FrameStatus::Fail;
   }
-  vkGetDeviceQueue(device_, *queue_family, 0, &queue_);
+  // Owned from here, so Destroy releases it whatever fails next.
+  device_ = device.device;
+  owns_device_ = true;
+  vkGetDeviceQueue(device.device, *queue_family, 0, &device.queue);
+  device.queue_family = *queue_family;
+  device.alpha_to_one = features.core.features.alphaToOne == VK_TRUE;
+  return FrameStatus::Pass;
+}
+
+FrameStatus VulkanOffscreenRenderer::Initialize(const OffscreenDevice& device,
+    const SceneShaders& shaders, const RenderOptions& options,
+    std::string& detail) {
+  physical_device_ = device.physical_device;
+  device_ = device.device;
+  queue_ = device.queue;
+  pipelines_.alpha_to_one = device.alpha_to_one;
+  SceneShaderWords words;
+  if (!LoadSceneShaders(shaders, words, detail)) {
+    return FrameStatus::Fail;
+  }
 
   VkCommandPoolCreateInfo pool_create{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   pool_create.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-  pool_create.queueFamilyIndex = *queue_family;
+  pool_create.queueFamilyIndex = device.queue_family;
   if (!VulkanOk(vkCreateCommandPool(device_, &pool_create, nullptr,
                     &command_pool_),
           "vkCreateCommandPool", detail)) {
@@ -273,6 +314,32 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
     return FrameStatus::Fail;
   }
 
+  std::uint32_t family_count = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &family_count,
+      nullptr);
+  std::vector<VkQueueFamilyProperties> families(family_count);
+  vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &family_count,
+      families.data());
+  VkPhysicalDeviceProperties properties{};
+  vkGetPhysicalDeviceProperties(physical_device_, &properties);
+  const std::uint32_t valid_bits =
+      device.queue_family < family_count
+          ? families[device.queue_family].timestampValidBits
+          : 0U;
+  if (valid_bits != 0 && properties.limits.timestampPeriod > 0.0F) {
+    VkQueryPoolCreateInfo query_create{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    query_create.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    query_create.queryCount = kTimestampCount;
+    if (!VulkanOk(vkCreateQueryPool(device_, &query_create, nullptr,
+                      &timestamps_),
+            "vkCreateQueryPool(timestamps)", detail)) {
+      return FrameStatus::Fail;
+    }
+    timestamp_period_ = properties.limits.timestampPeriod;
+    timestamp_mask_ = valid_bits >= 64U ? ~0ULL : (1ULL << valid_bits) - 1U;
+    statistics_.gpu_timing = true;
+  }
+
   const VkSampleCountFlagBits samples = ChooseSampleCount(physical_device_,
       kColorFormat, kDepthFormat, options.samples);
   if (!CreateScenePipelines(device_, words, kColorFormat, kDepthFormat,
@@ -290,8 +357,6 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
   statistics_.pipelines_created += ScenePipelines::kCount;
   statistics_.samples = static_cast<std::uint32_t>(samples);
 
-  VkPhysicalDeviceProperties properties{};
-  vkGetPhysicalDeviceProperties(physical_device_, &properties);
   statistics_.device_name = properties.deviceName;
   statistics_.vendor_id = properties.vendorID;
   statistics_.device_id = properties.deviceID;
@@ -302,7 +367,10 @@ FrameStatus VulkanOffscreenRenderer::Initialize(const SceneShaders& shaders,
               << VK_API_VERSION_PATCH(properties.apiVersion);
   statistics_.api_version = api_version.str();
   statistics_.validation_available = instance_.validation_available;
-  statistics_.validation_detail = instance_.validation_detail;
+  statistics_.validation_detail =
+      owns_device_ ? instance_.validation_detail
+                   : "a lent device's validation messages go to its host's "
+                     "instance";
   return FrameStatus::Pass;
 }
 
@@ -370,6 +438,10 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
           error)) {
     return false;
   }
+  if (timestamps_ != VK_NULL_HANDLE) {
+    vkCmdResetQueryPool(command_, timestamps_, 0, kTimestampCount);
+  }
+  WriteTimestamp(0);
   textures_.RecordUploads(command_);
   shadow_.Record(command_, pipelines_, materials_, meshes_, draws);
   statistics_.shadow_draws = shadow_.mmd_draws();
@@ -472,6 +544,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   host_dependency.memoryBarrierCount = 1;
   host_dependency.pMemoryBarriers = &to_host;
   vkCmdPipelineBarrier2(command_, &host_dependency);
+  WriteTimestamp(1);
   if (!VulkanOk(vkEndCommandBuffer(command_), "vkEndCommandBuffer", error)) {
     return false;
   }
@@ -483,7 +556,17 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
   signal.semaphore = timeline_;
   signal.value = submitted_ + 1;
   signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  // The previous frame has completed, as the CPU waited for it, but its
+  // copies are ordered only before the host's reads. Waiting for its value
+  // here too orders it before this frame on the queue itself, which a
+  // queue another host shares and synchronization validation can see.
+  VkSemaphoreSubmitInfo previous{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  previous.semaphore = timeline_;
+  previous.value = submitted_;
+  previous.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = submitted_ != 0 ? 1U : 0U;
+  submit.pWaitSemaphoreInfos = &previous;
   submit.commandBufferInfoCount = 1;
   submit.pCommandBufferInfos = &command_submit;
   submit.signalSemaphoreInfoCount = 1;
@@ -502,6 +585,7 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
       !InvalidateIfNeeded(device_, depth_readback_, error)) {
     return false;
   }
+  ReadTimestamps();
   color.width = width_;
   color.height = height_;
   color.row_pitch = width_ * 4U;
@@ -524,6 +608,8 @@ bool VulkanOffscreenRenderer::Render(const DrawList& extracted,
 
   ++statistics_.frames_rendered;
   statistics_.completion = submitted_;
+  statistics_.readback_bytes = color.payload.size() +
+                               depth.payload.size() * sizeof(float);
   statistics_.topology_uploads = meshes_.topology_uploads();
   statistics_.point_uploads = meshes_.point_uploads();
   statistics_.material_writes = materials_.writes();
@@ -551,6 +637,30 @@ bool VulkanOffscreenRenderer::WaitForCompletion(std::string& error) {
       "vkWaitSemaphores", error);
 }
 
+void VulkanOffscreenRenderer::WriteTimestamp(std::uint32_t index) {
+  if (timestamps_ != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp2(command_, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        timestamps_, index);
+  }
+}
+
+void VulkanOffscreenRenderer::ReadTimestamps() {
+  if (timestamps_ == VK_NULL_HANDLE) {
+    return;
+  }
+  // The frame has completed, so both timestamps are available.
+  std::uint64_t ticks[kTimestampCount] = {};
+  if (vkGetQueryPoolResults(device_, timestamps_, 0, kTimestampCount,
+          sizeof(ticks), ticks, sizeof(std::uint64_t),
+          VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
+    statistics_.gpu_frame_ms = 0;
+    return;
+  }
+  const std::uint64_t elapsed = (ticks[1] - ticks[0]) & timestamp_mask_;
+  statistics_.gpu_frame_ms =
+      static_cast<double>(elapsed) * timestamp_period_ * 1e-6;
+}
+
 bool VulkanOffscreenRenderer::EnsureTargets(std::uint32_t width,
     std::uint32_t height, std::string& error) {
   if (width == width_ && height == height_ && color_.image != VK_NULL_HANDLE) {
@@ -568,9 +678,11 @@ bool VulkanOffscreenRenderer::EnsureTargets(std::uint32_t width,
               VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
           VK_IMAGE_ASPECT_DEPTH_BIT, width, height, depth_, error) ||
       !CreateHostBuffer(physical_device_, device_, pixels * 4U,
-          VK_BUFFER_USAGE_TRANSFER_DST_BIT, color_readback_, error) ||
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT, color_readback_, error,
+          kReadbackMemory) ||
       !CreateHostBuffer(physical_device_, device_, pixels * sizeof(float),
-          VK_BUFFER_USAGE_TRANSFER_DST_BIT, depth_readback_, error)) {
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT, depth_readback_, error,
+          kReadbackMemory)) {
     DestroyTargets();
     return false;
   }
@@ -607,23 +719,44 @@ void VulkanOffscreenRenderer::DestroyTargets() {
 
 void VulkanOffscreenRenderer::Destroy() {
   if (device_ != VK_NULL_HANDLE) {
-    // Teardown, not an ordinary frame: waiting for the device is allowed here.
-    vkDeviceWaitIdle(device_);
+    // Teardown, not an ordinary frame: waiting is allowed here. A lent
+    // device's other queues are its host's, so only this renderer's own
+    // last frame is waited for there.
+    if (owns_device_) {
+      vkDeviceWaitIdle(device_);
+    } else {
+      std::string ignored;
+      (void)WaitForCompletion(ignored);
+    }
     shadow_.Destroy();
     meshes_.Destroy();
     textures_.Destroy();
     materials_.Destroy();
     DestroyTargets();
     DestroyScenePipelines(device_, pipelines_);
+    vkDestroyQueryPool(device_, timestamps_, nullptr);
     vkDestroySemaphore(device_, timeline_, nullptr);
     vkDestroyCommandPool(device_, command_pool_, nullptr);
-    vkDestroyDevice(device_, nullptr);
+    if (owns_device_) {
+      vkDestroyDevice(device_, nullptr);
+    }
     device_ = VK_NULL_HANDLE;
   }
   DestroyInstance(instance_);
 }
 
 } // namespace
+
+std::unique_ptr<OffscreenRenderer> vulkan_internal::CreateLentOffscreenRenderer(
+    const OffscreenDevice& device, const SceneShaders& shaders,
+    const RenderOptions& options, FrameStatus& status, std::string& detail) {
+  auto renderer = std::make_unique<VulkanOffscreenRenderer>();
+  status = renderer->Initialize(device, shaders, options, detail);
+  if (status != FrameStatus::Pass) {
+    return nullptr;
+  }
+  return renderer;
+}
 #endif
 
 std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
@@ -637,7 +770,11 @@ std::unique_ptr<OffscreenRenderer> CreateOffscreenRenderer(
   return nullptr;
 #else
   auto renderer = std::make_unique<VulkanOffscreenRenderer>();
-  status = renderer->Initialize(shaders, options, detail);
+  OffscreenDevice device;
+  status = renderer->CreateDevice(device, detail);
+  if (status == FrameStatus::Pass) {
+    status = renderer->Initialize(device, shaders, options, detail);
+  }
   if (status != FrameStatus::Pass) {
     return nullptr;
   }

@@ -1,5 +1,6 @@
 add_library(toon-render-vulkan STATIC
   vulkan_backend.cpp
+  vulkan_handoff.cpp
   vulkan_present.cpp)
 toon_configure_warnings(toon-render-vulkan)
 add_library(Toon::Vulkan ALIAS toon-render-vulkan)

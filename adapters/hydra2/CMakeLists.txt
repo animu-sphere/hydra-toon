@@ -160,6 +160,24 @@ if(TOON_BUILD_TESTS)
   target_compile_definitions(toon-hydra2-primvar-test PRIVATE NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
+  # The GPU handoff's measurements (GPU handoff policy §8): a host that lends
+  # its own device renders a stage's draw list and writes timings as JSON.
+  # Never installed; avatar stages are local arguments.
+  if(TOON_WITH_VULKAN)
+    add_executable(toon-handoff-measure tests/handoff_measure.cpp
+      ../viewport/src/camera.cpp)
+    toon_configure_warnings(toon-handoff-measure)
+    target_include_directories(toon-handoff-measure PRIVATE
+      "${PROJECT_SOURCE_DIR}/adapters/viewport/src"
+      "${PROJECT_SOURCE_DIR}/validation")
+    target_link_libraries(toon-handoff-measure PRIVATE
+      toon-hydra2-runtime usdImaging usdGeom usd Toon::Vulkan Vulkan::Vulkan)
+    target_compile_features(toon-handoff-measure PRIVATE cxx_std_20)
+    target_compile_definitions(toon-handoff-measure PRIVATE NOMINMAX
+      _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    add_dependencies(toon-handoff-measure toon-renderer-shaders)
+  endif()
+
   toon_openusd_root(TOON_PXR_ROOT)
   add_executable(toon-hydra2-light-test tests/light_test.cpp)
   toon_configure_warnings(toon-hydra2-light-test)
@@ -214,6 +232,19 @@ if(TOON_BUILD_TESTS)
       "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
   set_tests_properties(toon-renderer-hydra-morph-normals PROPERTIES
     LABELS "gpu" SKIP_RETURN_CODE 77)
+  if(TOON_WITH_VULKAN)
+    # A brief run on a committed stage; real measurements use the policy's
+    # extents and an avatar stage.
+    add_test(NAME toon-handoff-measure-gpu
+      COMMAND toon-handoff-measure
+        --shaders "${CMAKE_BINARY_DIR}/backend/vulkan/shaders"
+        --stage "${CMAKE_CURRENT_SOURCE_DIR}/tests/skinning.usda"
+        --output "${CMAKE_CURRENT_BINARY_DIR}/handoff-measure.json"
+        --frames 4 --warmup 1 --extent 320x180 --samples 1 --samples 4)
+    set_tests_properties(toon-handoff-measure-gpu PROPERTIES
+      LABELS "gpu;handoff" SKIP_RETURN_CODE 77
+      ENVIRONMENT_MODIFICATION "${_toon_pxr_runtime_modifications}")
+  endif()
   set_tests_properties(
     toon-renderer-plugin-discovery
     toon-renderer-delegate-creation

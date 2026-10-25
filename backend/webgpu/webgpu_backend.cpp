@@ -421,6 +421,7 @@ bool WebGpuOffscreenRenderer::Render(const DrawList& extracted, std::uint32_t wi
 
   ++statistics_.frames_rendered;
   statistics_.completion = submitted_;
+  statistics_.readback_bytes = 2U * static_cast<std::uint64_t>(pitch) * height_;
   statistics_.topology_uploads = meshes_.topology_uploads();
   statistics_.point_uploads = meshes_.point_uploads();
   statistics_.material_writes = materials_.writes();
