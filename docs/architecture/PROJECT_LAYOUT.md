@@ -33,7 +33,7 @@ that moment every file is project-owned; the template is not re-applied.
 | --- | --- | --- | --- |
 | `core/render-world/` | `toon-render-world` | `Toon::RenderWorld` | host-neutral scene state |
 | `core/render-extraction/` | `toon-render-extraction` | `Toon::RenderExtraction` | scene state → draw work |
-| `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer, swapchain presentation, the shared mesh pipeline; compiles the Slang shaders to SPIR-V |
+| `backend/vulkan/` | `toon-render-vulkan` | `Toon::Vulkan` | Vulkan backend: persistent offscreen renderer on an owned or a host-lent device, swapchain presentation, the shared mesh pipeline; compiles the Slang shaders to SPIR-V |
 | `backend/webgpu/` | `toon-render-webgpu` | `Toon::WebGPU` | WebGPU backend on Dawn ([WebGPU policy](../design/WEBGPU_POLICY.md)): persistent offscreen renderer and present session; compiles the shaders it uses to Tint-validated WGSL; optional (`TOON_ENABLE_WEBGPU`), Windows only, linked into the headless runner, the viewport and their tests, never exported |
 | `backend/shared/` | `toon-render-backend-shared` | `Toon::BackendShared` | what both backends share below their GPU APIs (§3): the shader contract's records and flags in C++, and the CPU code that fills them; no GPU API type, no public header |
 | `shaders/` | `toon-renderer-shaders`, `toon-renderer-wgsl` | — | the Slang shading source both backends compile, by role (§3) |
@@ -72,7 +72,8 @@ placement rule; it does not say the component exists.
 | Public evaluated avatar state → renderer-private values | `adapters/fast/` | `toon-avatar-state` |
 | Viewport camera, debug controls, timing and statistics display, image capture | `adapters/viewport/src/` | `toon-viewport` |
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
-| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `webgpu_backend.hpp`, `webgpu_present.hpp`) | `include/toon/` | — |
+| Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `vulkan_handoff.hpp`, `webgpu_backend.hpp`, `webgpu_present.hpp`) | `include/toon/` | — |
+| The Vulkan GPU handoff: a lent device, the product ring and its descriptors ([GPU handoff policy](../design/GPU_HANDOFF_POLICY.md)) | `backend/vulkan/vulkan_handoff.cpp` | `toon-render-vulkan` |
 
 The viewport keeps private implementation and headers in `adapters/viewport/src/`;
 fixtures, test executables and CMake/Python check drivers live in `tests/`,
@@ -392,6 +393,40 @@ The existing render-buffer test executable also drives a real UsdImaging
 scene through the Hydra render pass for 1x/4x RGBA checks; no installed
 target or new backend boundary is added.
 
+The GPU handoff of the [GPU handoff policy](../design/GPU_HANDOFF_POLICY.md)
+belongs to the Vulkan backend. `include/toon/vulkan_handoff.hpp` includes
+`vulkan_backend.hpp` and adds only what a host that lends its device
+consumes: the published device requirements (policy §2), the lent device —
+encoded instance, physical device, device, queue and queue family, and the
+optional features the host enabled — and the factory of an offscreen
+renderer on it; from stage 2, the product ring's options, the handoff
+descriptor of policy §6, acquisition and release. Handles and enumerations
+travel as integers, as in `vulkan_present.hpp`, and the header joins the
+core-boundary check's list in the change that adds it. Its code lives in
+`backend/vulkan/vulkan_handoff.cpp` within `toon-render-vulkan`. A lent and
+an owned device initialize the same offscreen renderer: choosing and
+creating the device move out of its initialization, which receives a device
+either way, and destruction leaves what the host owns. The scene code,
+caches and pipelines below it do not tell the two apart. Neither core nor
+the Hydra adapter includes the header; `hdToon` keeps its owned device and
+readback (policy §9).
+
+`validation/handoff_test.cpp` (`toon-handoff-test`) is the host that lends.
+It creates its instance and device with Vulkan itself, links the Vulkan
+loader privately, is built only when the backend found Vulkan, and is
+never installed. It compares a lent device's products
+with an owned device's byte for byte over the
+[RGBA fixtures](../design/RENDER_OUTPUT_POLICY.md#6-evidence-boundary-and-additional-outputs),
+at 1x and 4x; from stage 2 it carries the reference consumer of policy §9.
+The measurements of policy §8 run in `adapters/hydra2/tests/handoff_measure.cpp`
+(`toon-handoff-measure`), built only with the Hydra adapter and never
+installed. It loads a USD stage through UsdImaging and `hdToon`'s delegate,
+extracts the committed draw list, renders it at the policy's extents and
+sample counts on the readback path and, from stage 2, the handoff, and
+writes the timings as JSON. Avatar stages are local data passed as
+arguments; its CTest runs a committed stage briefly. The Tessera host's
+placement follows with its opt-in intent in stage 3.
+
 ## 4. Dependency directions
 
 ```text
@@ -411,8 +446,12 @@ backend/webgpu ──┘
    `OffscreenRenderer`, `PresentSession`, `LateFrameSource`, the products,
    options and statistics — and a backend's own header includes it and adds
    only its factories and the inputs only it consumes: SPIR-V paths
-   (`SceneShaders`) and `PresentSurfaceProvider` for Vulkan, WGSL paths
-   (`WebGpuShaders`) and the Dawn adapter choice for WebGPU. `webgpu.h`
+   (`SceneShaders`), `PresentSurfaceProvider` and the lent device and
+   handoff descriptors (`vulkan_handoff.hpp`) for Vulkan, WGSL paths
+   (`WebGpuShaders`) and the Dawn adapter choice for WebGPU. `vulkan.h`
+   appears only in `backend/vulkan/`'s `.cpp` and private headers, in the
+   viewport's `window_glfw.cpp` through GLFW for its surface, and in the
+   lending test host `validation/handoff_test.cpp`. `webgpu.h`
    and Dawn appear only in `backend/webgpu/`'s `.cpp` files and its private
    `webgpu_internal.hpp`.
    `validation/check-core-boundary.cmake.in` enforces the boundary, WebGPU
