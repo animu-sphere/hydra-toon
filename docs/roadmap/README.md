@@ -10,7 +10,7 @@ This page is the navigation entry point; no `current.md` is needed.
 
 | Milestone | Focus | Work |
 | --- | --- | --- |
-| v0.8.0-scale (provisional) | Host/compositor integration and GPU texture handoff | [later.md](later.md#host-and-compositor-integration-v080-scale) |
+| v0.8.0 | Host integration: the RGBA product handed to a host on the GPU, Vulkan, Tessera first | [v0.8.0.md](v0.8.0.md) |
 | Later, on demand | Platforms, materials and measurement-driven candidates | [later.md](later.md#platform-and-gpu-coverage) · [candidates](later.md#after-v070) · [unassigned work](later.md#not-yet-in-a-milestone) |
 
 Finish the current scope before adding a feature family. Settle shared scene

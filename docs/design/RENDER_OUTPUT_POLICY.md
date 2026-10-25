@@ -152,7 +152,9 @@ are prospective consumers. Concrete API and synchronization choices belong
 to their integration work; this policy does not assert those integrations
 exist or promise a universal cross-API handle. The integration also
 states what happens on resize, device loss, several consumers and capture,
-and keeps a measurable readback fallback.
+and keeps a measurable readback fallback. The first integration, an
+in-process Vulkan image on a host-owned device, is the
+[GPU handoff policy](GPU_HANDOFF_POLICY.md).
 
 ## 8. Sequencing
 

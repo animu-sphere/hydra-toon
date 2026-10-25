@@ -4,24 +4,6 @@ Unfinished work after shared shadows and lighting. Each milestone gets its
 own page when it becomes next; [the index](README.md) owns the sequence. All work below
 is owned by `hydra-toon`; upstream prerequisites are linked to their owners.
 
-## Host and compositor integration (v0.8.0-scale)
-
-Start after WebGPU parity; the version assignment remains provisional.
-
-- Deliver the RGBA product to an intended host without per-frame CPU
-  `HdRenderBuffer` readback, using the
-  [GPU handoff contract](../design/RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff).
-- Select an integration from actual consumer needs: Vulkan image handoff,
-  Hgi interop, shared textures, external memory/semaphores or compositor APIs.
-  Mimikuri and Tessera are prospective consumers.
-- Validate resize, device loss, multiple consumers and capture, retaining a
-  measurable readback fallback. Keep orchestration and avatar evaluation at
-  their owning boundaries.
-
-**Done when** one foreground product reaches an intended host without CPU
-readback and its viewport/compositor results are checked. Actual display
-latency is the separate measurement task [below](#not-yet-in-a-milestone).
-
 ## Platform and GPU coverage
 
 Take up Linux x86_64 and NVIDIA/AMD/Intel Vulkan after WebGPU and host

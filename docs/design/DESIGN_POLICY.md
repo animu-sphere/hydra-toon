@@ -32,6 +32,7 @@ owner: hydra-toon
 > | Reusable RGBA, background, alpha, compositing and GPU output handoff | [RENDER_OUTPUT_POLICY.md](RENDER_OUTPUT_POLICY.md) |
 > | Shared shadows: shadowing lights, casters, views and their resources | [SHADOW_POLICY.md](SHADOW_POLICY.md) |
 > | The WebGPU backend: implementation, binding model, WGSL, hosts and parity | [WEBGPU_POLICY.md](WEBGPU_POLICY.md) |
+> | The Vulkan GPU handoff to a host application | [GPU_HANDOFF_POLICY.md](GPU_HANDOFF_POLICY.md) |
 > | Targets, directories and dependency directions | [architecture/PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) |
 
 ---
@@ -194,7 +195,8 @@ GPU texture, and the renderer-native presentation path. Latency is judged on
 the renderer-native path, in the dedicated viewport (§31), not through a
 Hydra host. CPU readback remains acceptable while the reusable RGBA semantics
 are established; zero-copy consumption follows WebGPU parity. The logical
-handoff contract is owned by [render output policy §7](RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff).
+handoff contract is owned by [render output policy §7](RENDER_OUTPUT_POLICY.md#7-gpu-texture-handoff);
+the in-process Vulkan image handoff by the [GPU handoff policy](GPU_HANDOFF_POLICY.md).
 
 ## 7. Renderer core
 
