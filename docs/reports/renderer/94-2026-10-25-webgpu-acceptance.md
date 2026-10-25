@@ -8,7 +8,7 @@
   pinned in [report 91](91-2026-10-24-webgpu-stage-1.md); `ost` 0.23.14
 - Source: branch `claude/v070-webgpu-stage-4` from `main` at `e7b686e`
 - Occasion: stage 4 of the [WebGPU policy](../../design/WEBGPU_POLICY.md#10-stages),
-  the acceptance item of the [v0.7.0 roadmap](../../roadmap/v0.7.0.md)
+  the acceptance item of the [v0.7.0 roadmap](../../releases/v0.7.0.md)
 
 ## TL;DR
 

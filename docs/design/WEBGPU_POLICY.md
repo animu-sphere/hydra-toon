@@ -14,7 +14,7 @@ owner: hydra-toon
 > [SHADOW_POLICY.md](SHADOW_POLICY.md). Placement follows
 > [PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md). Implementation
 > status belongs to the [capability matrix](../reference/CAPABILITY_MATRIX.md);
-> the milestone's remaining work is the [v0.7.0 roadmap](../roadmap/v0.7.0.md).
+> the milestone's acceptance is recorded in the [v0.7.0 release record](../releases/v0.7.0.md).
 > The toolchain measurements behind this page are
 > [report 90](../reports/renderer/90-2026-10-24-webgpu-toolchain-probe.md);
 > stage 1 and the settled WGPU-Q1 and WGPU-Q2 are
@@ -320,7 +320,7 @@ large gap is reported with its pass.
    viewport's surface, composite, overlay, capture and timing.
 4. **Acceptance.** The §9 scenes, cross-family shadows, avatar and
    `shadow-cost` p95/p99, and the done-when condition of the
-   [v0.7.0 milestone](../roadmap/v0.7.0.md).
+   [v0.7.0 milestone](../releases/v0.7.0.md).
 
 ## 11. Open questions
 

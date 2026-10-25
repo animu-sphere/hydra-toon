@@ -35,7 +35,7 @@ and the document is a bug. When a summary disagrees with
 | Targets, names, directories, dependency directions, build intents, install tree | [architecture/PROJECT_LAYOUT.md](architecture/PROJECT_LAYOUT.md) |
 | Implemented capabilities — the only statement of current status | [reference/CAPABILITY_MATRIX.md](reference/CAPABILITY_MATRIX.md) |
 | Measured platforms and runtimes | [reference/SUPPORTED_CONFIGURATIONS.md](reference/SUPPORTED_CONFIGURATIONS.md) |
-| Unfinished milestone actions and acceptance criteria; later work | [roadmap/v0.7.0.md](roadmap/v0.7.0.md) and [roadmap/later.md](roadmap/later.md); sequence/navigation in [roadmap/README.md](roadmap/README.md) |
+| Unfinished milestone actions and acceptance criteria; later work | [roadmap/later.md](roadmap/later.md); sequence/navigation in [roadmap/README.md](roadmap/README.md) |
 | Dated experiments, performance and reference evidence | [reports/renderer/](reports/renderer/) |
 | Versioning, release gate and released achievements | [releases/](releases/) |
 | Short dated change entries | [CHANGELOG.md](../CHANGELOG.md) |
