@@ -7,7 +7,7 @@ link resolving. What comes next is the [roadmap](../roadmap/).
 
 | Version | Record | Milestone |
 | --- | --- | --- |
-| v0.7.0 | [v0.7.0.md](v0.7.0.md) | WebGPU: a second, optional backend on pinned Dawn reproducing the Vulkan contracts from the same extraction, shaders shared through per-backend bindings; offscreen and viewport parity within WGPU-Q1 on canonical scenes and USD stages, avatars differing only on edges through Direct3D 12, p95/p99 beside Vulkan |
+| v0.7.0 | [v0.7.0.md](v0.7.0.md) | WebGPU: a second, optional backend on pinned Dawn reproducing the Vulkan contracts from the same extraction, shaders shared through per-backend bindings; offscreen and viewport parity within WGPU-Q1 on canonical scenes and USD stages, avatars differing only on edges through Direct3D 12, p95/p99 beside Vulkan; published package GPU-verified in [report 96](../reports/renderer/96-2026-10-25-published-v070.md) |
 | v0.6.0 | [v0.6.0.md](v0.6.0.md) | Shared shadows: one map per shadowing light from one caster pass, up to four directional and spot views, received by MToon, MMD and PreviewSurface; MAT-Q7 resolved, MMD frames unchanged, bounded cost fixtures; published package GPU-verified in [report 89](../reports/renderer/89-2026-10-24-published-v060.md) |
 | v0.5.0 | [v0.5.0.md](v0.5.0.md) | Reusable premultiplied RGBA, Hydra AOV preservation, viewport compositing/PNG export, PreviewSurface interoperability and shared tangent frames; bounded acceptance with explicit host/reference limitations |
 | v0.4.0 | [v0.4.0.md](v0.4.0.md) | MMD realization: MMD materials, edges, self-shadow and morphs from the canonical stage, each settled against MikuMikuDance's own frames, MAT-Q1 to MAT-Q6 resolved |

@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [96](96-2026-10-25-published-v070.md) | v0.7.0 release assets and GHCR pull verified; committed Formation re-pinned from v0.6.0; published headless GPU checks 31 PASS and 8 MMD and 16 MToon captures, shadows on and off, byte-identical to published v0.6.0 |
 | [95](95-2026-10-25-v070-preparation.md) | v0.7.0 release gate: OST core 23/23, hydra 37/37, viewport-usd 73/73, webgpu 52/52, webgpu-usd 99/99 with `ost validate`, plain CMake 23/23, a reproducible local `hydra` package without Dawn, DXC or WGSL; GPU evidence in reports 91–94 |
 | [94](94-2026-10-25-webgpu-acceptance.md) | WebGPU stage 4, acceptance: the `webgpu-usd` intent puts USD stages in the WebGPU viewport; twenty committed stages within one linear step of Vulkan at 1x and 4x, six as CTests; AliciaSolid, YYB Miku and a kitchen with both differ only on edges, byte-identical through Dawn's Vulkan adapter; `shadow-cost` and avatar p95/p99 beside Vulkan, whose host-visible vertex buffers cost the avatar 0.4 ms of GPU frame |
 | [93](93-2026-10-25-webgpu-stage-3.md) | WebGPU stage 3: the shared shadow views drawn by the caster pass and read by every family, MMD's self-shadow among them; `toon-viewport --backend webgpu` with composite, captures, overlay, sample changes and pass-level GPU timing; six shadow parity scenes identical at 1x, the presented image byte-identical to Vulkan's at 1x and 4x, the Mask class's sample 0 explained, Dawn's timestamp quantization off |
