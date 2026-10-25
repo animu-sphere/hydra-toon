@@ -38,6 +38,10 @@ bool Equal(const std::shared_ptr<const std::vector<T>>& a,
 bool Valid(const ArStateView& s, std::string& error) {
   if (s.abi_version != AR_ABI_VERSION || s.struct_size < sizeof(ArStateView))
     return Fail(error, "incompatible runtime state ABI");
+#if AR_ABI_VERSION >= 5
+  if (s.vertex_uv_count)
+    return Fail(error, "runtime primary UV output requires an unsupported fast-path binding");
+#endif
   if (!s.instance || !s.generation || !Name(s.layout_id) || !s.layout_version || !std::isfinite(s.evaluation_seconds) ||
       !Array(s.joints, s.joint_count) || !Array(s.blend_shapes, s.blend_shape_count) ||
       !Array(s.materials, s.material_count) || !Array(s.visibility, s.visibility_count) ||
