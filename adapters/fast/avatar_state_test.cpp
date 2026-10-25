@@ -397,6 +397,15 @@ void State() {
   structural.materials[0].material.alpha_mode = Toon::ToonAlphaMode::Blend;
   reject(changed.View(3), structural, 1);
   // Malformed values are refused before exposing a retained view.
+#if AR_ABI_VERSION >= 5
+  ArVertexUv unsupportedUv{"mesh", 0, {.25, .75}};
+  auto uvState = changed.View(3);
+  uvState.vertex_uvs = &unsupportedUv; uvState.vertex_uv_count = 1;
+  Fake::entries[998] = {uvState, 0};
+  Toon::RetainedAvatarSnapshot uvSnapshot;
+  Check(!uvSnapshot.Reset(Fake::Api(), 998, error) && Fake::entries.at(998).second == 0,
+      "unsupported primary UV output was silently dropped or leaked retention");
+#endif
   auto refs = Fake::entries.at(1).second;
   Values invalid = changed;
   invalid.joints[0].local.rotation[3] = 2;
