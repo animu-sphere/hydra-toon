@@ -513,13 +513,16 @@ backend/webgpu ──┘
 | standalone viewport | `ost renderer viewport` | `core` | none |
 | viewport hosting Hydra | `ost renderer viewport --intent viewport-usd --profile lookdev -- --usd <stage>` | `lookdev` or `usd` | yes |
 | WebGPU backend | `ost build --intent webgpu` | `core` | none |
+| WebGPU viewport hosting Hydra | `ost build --profile lookdev --intent webgpu-usd` | `lookdev` or `usd` | yes |
 
 The `hydra` intent (`TOON_ENABLE_HYDRA2=ON`), the `viewport-usd` intent
 (`TOON_ENABLE_HYDRA2=ON`, `TOON_ENABLE_VIEWPORT=ON`) and the `webgpu` intent
-(`TOON_ENABLE_WEBGPU=ON`, `TOON_ENABLE_VIEWPORT=ON`) are declared in
-`openstrata.toml`. The `webgpu` intent downloads the pinned Dawn and DXC
-releases at configure time and adds `toon-headless --backend webgpu`,
-`toon-viewport --backend webgpu` and the WebGPU CTests; no other intent and
+(`TOON_ENABLE_WEBGPU=ON`, `TOON_ENABLE_VIEWPORT=ON`) and the `webgpu-usd`
+intent (all three) are declared in `openstrata.toml`. The `webgpu` intent
+downloads the pinned Dawn and DXC releases at configure time and adds
+`toon-headless --backend webgpu`, `toon-viewport --backend webgpu` and the
+WebGPU CTests; `webgpu-usd` adds the Hydra adapter, so the WebGPU viewport
+opens USD stages, and the USD parity and cost CTests. No other intent and
 not the published package links Dawn. `ost renderer view` and `ost renderer viewport` request
 their adapter through `OST_RENDERER_ADAPTERS` (`hydra2`, `viewport`); the
 project reads that list as adapters to add to what the intent's options

@@ -92,6 +92,30 @@ build/cy2026-windows-x86_64-py313-core--webgpu/adapters/viewport/toon-viewport -
 Hydra in the intent it draws the bootstrap scene; the `toon-viewport-webgpu-*`
 CTests present, capture and compare its image with the Vulkan session's.
 
+The `webgpu-usd` intent adds the Hydra adapter, so the WebGPU viewport opens
+USD stages beside the Vulkan session from one tree:
+
+```sh
+ost build --profile lookdev --intent webgpu-usd --jobs auto
+ost test --profile lookdev --intent webgpu-usd
+```
+
+Its tree adds `toon-viewport-webgpu-shadow-cost-1` and `-4` and the
+`toon-viewport-webgpu-usd-parity-*` CTests, which run
+`adapters/viewport/tests/check_webgpu_usd_parity.py` on six committed stages.
+The script draws a stage on both backends at 1x and 4x over both
+backgrounds, requires equal scene, upload, draw, hull and shadow-view
+statistics, compares the presented image and the foreground PNG in linear
+8-bit steps and writes a JSON record; `--max` and `--over-one` set its
+limits, and arguments after `--` go to both viewports, so
+
+```sh
+python adapters/viewport/tests/check_webgpu_usd_parity.py --viewport <toon-viewport>   --scene <stage.usda> --output <dir>/<name> -- --time 1
+```
+
+compares any stage, with its plugins on `PXR_PLUGINPATH_NAME`
+([report 94](../reports/renderer/94-2026-10-25-webgpu-acceptance.md)).
+
 ## The Hydra adapter
 
 The adapter needs a real OpenUSD imaging runtime. This repository is measured
@@ -733,9 +757,13 @@ moved by pose and weight alone. In the `viewport-usd` tree,
 vsync off, fails if a pose or weight uploads a static resource, and writes
 `adapters/viewport/tests/shadow-cost*.json` with the device, samples, the
 views' resolution and memory, and mean, p95 and p99 of the GPU shadow pass,
-GPU work, CPU fit and CPU submit. Run the same stages with `--telemetry-output`
-for larger measurements; [report 87](../reports/renderer/87-2026-10-21-shared-shadow-acceptance.md)
-records them.
+GPU work, CPU fit and CPU submit. In the `webgpu-usd` tree
+`ctest -R toon-viewport-webgpu-shadow-cost` runs the same fixtures on WebGPU
+and writes `shadow-cost*-webgpu.json`; each record names its `backend`. Run
+the same stages with `--telemetry-output` for larger measurements;
+[report 87](../reports/renderer/87-2026-10-21-shared-shadow-acceptance.md)
+records them, and [report 94](../reports/renderer/94-2026-10-25-webgpu-acceptance.md)
+both backends side by side.
 
 In a USD viewport session, expand `Materials` to inspect effective normalized
 values, renderer material ids and the meshes bound to them. Expand a material
