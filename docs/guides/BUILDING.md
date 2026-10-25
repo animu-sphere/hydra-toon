@@ -683,6 +683,34 @@ omit the overlay and perturb timing, so use separate uncaptured performance
 runs. [Report 32](../reports/renderer/32-2026-10-04-vrm-reproduction.md)
 records the accepted v0.2.0 baseline and its limitations.
 
+## GPU handoff
+
+A host that lends its Vulkan device includes `<toon/vulkan_handoff.hpp>`,
+creates the device from `VulkanHandoffRequirements()`, and passes it, with
+the features it enabled, to `CreateOffscreenRenderer(LentVulkanDevice, …)`
+([GPU handoff policy](../design/GPU_HANDOFF_POLICY.md)). The lending host's
+check runs in any Vulkan build:
+
+```sh
+ctest --test-dir build/plain-cmake -R toon-handoff-gpu --output-on-failure
+```
+
+It turns on validation and synchronization validation on its own instance
+when the Khronos layer is installed. The readback baseline of policy §8 is
+`toon-handoff-measure`, built with the Hydra adapter; on the policy's
+extents and sample counts:
+
+```sh
+toon-handoff-measure --shaders <build>/backend/vulkan/shaders \
+  --stage <stage.usd> --output readback.json --frames 120 --warmup 60
+```
+
+`--extent WxH` and `--samples N`, each repeatable, replace the defaults. A
+stage needing format or imaging plugins runs in an environment that
+registers them, as `usdview` would. Keep the warmup long enough for the GPU
+clocks to settle; [renderer report 97](../reports/renderer/97-2026-10-25-handoff-stage-1.md)
+records the baseline.
+
 ## Late evaluated input and latency
 
 A host registers `LateFrameSource` through `OffscreenRenderer::SetLateFrameSource`
