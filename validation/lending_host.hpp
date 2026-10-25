@@ -101,6 +101,10 @@ public:
   [[nodiscard]] bool validation() const { return messenger_ != VK_NULL_HANDLE; }
   [[nodiscard]] const Validation& messages() const { return messages_; }
   [[nodiscard]] std::uint32_t family_count() const { return family_count_; }
+  [[nodiscard]] VkPhysicalDevice physical_device() const { return physical_; }
+  [[nodiscard]] VkDevice device() const { return device_; }
+  [[nodiscard]] VkQueue queue() const { return queue_; }
+  [[nodiscard]] std::uint32_t queue_family() const { return family_; }
   // Destroys the device: the validation layer reports any object a renderer
   // left on it.
   void DestroyDevice() {

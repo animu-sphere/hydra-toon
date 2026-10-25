@@ -5,8 +5,8 @@
 // validation layer, at each extent and sample count. Per frame it records
 // the render call's CPU time, the GPU frame time, the bytes read back and the
 // latency from the render call's start to the product being ready, and
-// writes their p50/p95/p99 as JSON. Stage 1 measures the readback path, the
-// baseline the handoff is set beside.
+// writes their p50/p95/p99 as JSON, for the readback path and, beside it on
+// the same renderer, the handoff.
 #include "adapter.hpp"
 #include "camera.hpp"
 #include "lending_host.hpp"
@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
     for (const std::uint32_t samples : arguments.samples) {
       Toon::FrameStatus status = Toon::FrameStatus::Fail;
       std::string error;
-      auto renderer = Toon::CreateOffscreenRenderer(host.Lend(), shaders, status,
+      auto renderer = Toon::CreateHandoffRenderer(host.Lend(), shaders, status,
           error, {samples});
       Require(renderer != nullptr, error);
       const auto& statistics = renderer->statistics();
@@ -194,45 +194,85 @@ int main(int argc, char** argv) {
       driver = statistics.driver_version;
       for (const auto& [width, height] : arguments.extents) {
         draws.view = camera.View(static_cast<float>(width) / height);
-        Toon::ColorProduct color;
-        Toon::DepthProduct depth;
-        Series cpu;
-        Series gpu;
-        Series ready;
-        Series submit_to_ready;
-        std::uint64_t readback_bytes = 0;
-        for (std::uint32_t frame = 0; frame < arguments.warmup + arguments.frames;
-             ++frame) {
-          const std::int64_t start = Toon::SteadyNanoseconds();
-          Require(renderer->Render(draws, width, height, color, depth, error), error);
-          // The readback path's product is ready when the call returns.
-          const std::int64_t end = Toon::SteadyNanoseconds();
-          if (frame < arguments.warmup) continue;
-          cpu.values.push_back(Milliseconds(start, end));
-          ready.values.push_back(Milliseconds(start, end));
-          submit_to_ready.values.push_back(
-              Milliseconds(statistics.latency.submitted, end));
-          if (statistics.gpu_timing) gpu.values.push_back(statistics.gpu_frame_ms);
-          readback_bytes = statistics.readback_bytes;
+        for (const bool handoff : {false, true}) {
+          Toon::ColorProduct color;
+          Toon::DepthProduct depth;
+          Series cpu;
+          Series gpu;
+          Series ready;
+          Series submit_to_ready;
+          std::uint64_t readback_bytes = 0;
+          std::uint64_t previous = 0;
+          for (std::uint32_t frame = 0; frame < arguments.warmup + arguments.frames;
+               ++frame) {
+            const std::int64_t start = Toon::SteadyNanoseconds();
+            std::int64_t end = 0;
+            std::int64_t done = 0;
+            std::int64_t submitted = 0;
+            if (handoff) {
+              Toon::HandoffImage image;
+              Require(renderer->RenderHandoff(draws, width, height, image, error) ==
+                          Toon::HandoffStatus::Rendered,
+                  error);
+              end = Toon::SteadyNanoseconds();
+              submitted = image.submitted;
+              // A consumer that reads nothing: acquired and released at
+              // once. The product is ready when its value is signalled,
+              // which this host waits for on the CPU only to time it.
+              Toon::HandoffImage acquired;
+              Require(renderer->Acquire(acquired) &&
+                          renderer->Release(acquired, 0, 0, error),
+                  error);
+              const auto semaphore = reinterpret_cast<VkSemaphore>(image.semaphore);
+              VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+              wait.semaphoreCount = 1;
+              wait.pSemaphores = &semaphore;
+              wait.pValues = &image.value;
+              Require(vkWaitSemaphores(host.device(), &wait, 10'000'000'000ULL) ==
+                          VK_SUCCESS,
+                  "waiting for a handed-off frame failed");
+              done = Toon::SteadyNanoseconds();
+            } else {
+              Require(renderer->Render(draws, width, height, color, depth, error),
+                  error);
+              // The readback path's product is ready when the call returns.
+              end = done = Toon::SteadyNanoseconds();
+              submitted = statistics.latency.submitted;
+            }
+            // A handed-off frame's GPU time is read by the next call.
+            const bool timed = statistics.gpu_timing &&
+                               statistics.gpu_frame ==
+                                   (handoff ? previous : statistics.latency.frame);
+            previous = statistics.latency.frame;
+            if (frame < arguments.warmup) continue;
+            cpu.values.push_back(Milliseconds(start, end));
+            ready.values.push_back(Milliseconds(start, done));
+            submit_to_ready.values.push_back(Milliseconds(submitted, done));
+            if (timed) gpu.values.push_back(statistics.gpu_frame_ms);
+            readback_bytes = statistics.readback_bytes;
+          }
+          const char* path = handoff ? "handoff" : "readback";
+          runs << (first ? "" : ",\n") << "    {\"path\": \"" << path
+               << "\", \"width\": " << width << ", \"height\": " << height
+               << ", \"samples\": " << statistics.samples << ", \"frames\": "
+               << arguments.frames << ", \"gpu_timing\": "
+               << (statistics.gpu_timing ? "true" : "false")
+               << ", \"readback_bytes_per_frame\": " << readback_bytes << ",\n      ";
+          cpu.Write(runs, "cpu_render_ms");
+          runs << ",\n      ";
+          gpu.Write(runs, "gpu_frame_ms");
+          runs << ",\n      ";
+          ready.Write(runs, "producer_to_ready_ms");
+          runs << ",\n      ";
+          submit_to_ready.Write(runs, "submit_to_ready_ms");
+          runs << '}';
+          first = false;
+          std::cout << path << ' ' << width << 'x' << height << ' '
+                    << statistics.samples << "x: cpu p50 " << cpu.Percentile(50)
+                    << " ms, gpu p50 " << gpu.Percentile(50) << " ms, ready p50 "
+                    << ready.Percentile(50) << " ms, " << readback_bytes
+                    << " bytes\n";
         }
-        runs << (first ? "" : ",\n") << "    {\"path\": \"readback\", \"width\": "
-             << width << ", \"height\": " << height << ", \"samples\": "
-             << statistics.samples << ", \"frames\": " << arguments.frames
-             << ", \"gpu_timing\": " << (statistics.gpu_timing ? "true" : "false")
-             << ", \"readback_bytes_per_frame\": " << readback_bytes << ",\n      ";
-        cpu.Write(runs, "cpu_render_ms");
-        runs << ",\n      ";
-        gpu.Write(runs, "gpu_frame_ms");
-        runs << ",\n      ";
-        ready.Write(runs, "producer_to_ready_ms");
-        runs << ",\n      ";
-        submit_to_ready.Write(runs, "submit_to_ready_ms");
-        runs << '}';
-        first = false;
-        std::cout << "readback " << width << 'x' << height << ' '
-                  << statistics.samples << "x: cpu p50 " << cpu.Percentile(50)
-                  << " ms, gpu p50 " << gpu.Percentile(50) << " ms, "
-                  << readback_bytes << " bytes\n";
       }
     }
 

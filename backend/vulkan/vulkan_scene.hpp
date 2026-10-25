@@ -121,13 +121,6 @@ struct OffscreenDevice {
   bool alpha_to_one = false;
 };
 
-// An offscreen renderer on a device a host lent and the caller has checked
-// against the requirements. It destroys what it creates on the device and
-// never the device itself; a lent device's validation messages go to its
-// host's instance.
-std::unique_ptr<OffscreenRenderer> CreateLentOffscreenRenderer(
-    const OffscreenDevice& device, const SceneShaders& shaders,
-    const RenderOptions& options, FrameStatus& status, std::string& detail);
 
 // Clip-from-world for a ToonView: the view's OpenGL-convention projection,
 // then y flipped and z mapped from [-1, 1] to Vulkan's [0, 1].

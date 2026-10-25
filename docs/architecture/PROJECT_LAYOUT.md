@@ -398,12 +398,16 @@ belongs to the Vulkan backend. `include/toon/vulkan_handoff.hpp` includes
 `vulkan_backend.hpp` and adds only what a host that lends its device
 consumes: the published device requirements (policy §2), the lent device —
 encoded instance, physical device, device, queue and queue family, and the
-optional features the host enabled — and the factory of an offscreen
-renderer on it; from stage 2, the product ring's options, the handoff
-descriptor of policy §6, acquisition and release. Handles and enumerations
+optional features the host enabled — the factory of an offscreen renderer
+on it, and the handoff: the product ring's options, the descriptor of
+policy §6, `HandoffRenderer` with acquisition, release and capture, and its
+statistics. Handles and enumerations
 travel as integers, as in `vulkan_present.hpp`, and the header joins the
 core-boundary check's list in the change that adds it. Its code lives in
-`backend/vulkan/vulkan_handoff.cpp` within `toon-render-vulkan`. A lent and
+`backend/vulkan/vulkan_handoff.cpp` within `toon-render-vulkan`, with the
+product ring declared in the private `backend/vulkan/handoff_ring.hpp`; the
+offscreen renderer in `vulkan_backend.cpp` draws a handoff frame into a
+ring slot where a readback frame draws into its own target. A lent and
 an owned device initialize the same offscreen renderer: choosing and
 creating the device move out of its initialization, which receives a device
 either way, and destruction leaves what the host owns. The scene code,
@@ -417,7 +421,8 @@ loader privately, is built only when the backend found Vulkan, and is
 never installed. It compares a lent device's products
 with an owned device's byte for byte over the
 [RGBA fixtures](../design/RENDER_OUTPUT_POLICY.md#6-evidence-boundary-and-additional-outputs),
-at 1x and 4x; from stage 2 it carries the reference consumer of policy §9.
+at 1x and 4x, and carries the reference consumer of policy §9, which
+samples handed-off frames with the backend's own composite shaders.
 The fixtures' scenes are `validation/rgba_fixture_scenes.hpp`, which the
 fixture capture includes too, and creating the lent device from the
 published requirements is `validation/lending_host.hpp`, test code only.
@@ -426,7 +431,7 @@ The measurements of policy §8 run in `adapters/hydra2/tests/handoff_measure.cpp
 never installed. It loads a USD stage through UsdImaging and `hdToon`'s
 delegate, frames the committed draw list with the viewport's
 `camera.cpp`, and renders it at the policy's extents and sample counts on
-the readback path and, from stage 2, the handoff, and writes the timings
+the readback path and the handoff, and writes the timings
 as JSON. It lends a device of its own through `lending_host.hpp`, without
 the validation layer, so both paths draw on the same device and the
 layer's cost is not measured as the renderer's. Avatar stages are local
