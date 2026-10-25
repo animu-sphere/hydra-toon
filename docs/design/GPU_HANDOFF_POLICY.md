@@ -17,6 +17,13 @@ owner: hydra-toon
 > Implementation status belongs to the
 > [capability matrix](../reference/CAPABILITY_MATRIX.md); the milestone's
 > remaining work is the [v0.8.0 roadmap](../roadmap/v0.8.0.md).
+> Stage 1, the lent device and the readback baseline, is
+> [report 97](../reports/renderer/97-2026-10-25-handoff-stage-1.md); stage 2,
+> the ring and the reference consumer,
+> [report 98](../reports/renderer/98-2026-10-25-handoff-stage-2.md); stage 3,
+> the Tessera host, [report 99](../reports/renderer/99-2026-10-25-handoff-stage-3.md);
+> and stage 4, the §10 evidence,
+> [report 100](../reports/renderer/100-2026-10-25-handoff-acceptance.md).
 
 ## 1. Purpose and decisions
 

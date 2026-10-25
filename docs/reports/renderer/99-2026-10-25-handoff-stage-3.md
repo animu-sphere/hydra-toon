@@ -1,5 +1,7 @@
 # GPU handoff stage 3: the Tessera host
 
+> The kitchen's handoff tails in §4 are one event a few seconds into each run, not the handoff's: [report 100](100-2026-10-25-handoff-acceptance.md#3-the-handoff-beside-readback).
+
 - Date: 2026-10-25
 - Machine: Windows 11 x86_64, NVIDIA RTX A5000, driver 597.16, a
   3,840 × 2,160 display at 100 % scale; MSVC 14.51 / Visual Studio 18,
