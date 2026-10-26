@@ -5,6 +5,7 @@
 
 namespace Toon::detail {
 
+// Renderer-private normalization shared by Hydra and evaluated UV transport.
 struct GeneratedTangents {
   std::vector<Float4> tangents;
   // Empty when the original vertex layout suffices. Otherwise maps every

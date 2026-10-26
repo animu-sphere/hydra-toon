@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <toon/fast/avatar_state.hpp>
+#include "generated_tangents.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -35,6 +36,46 @@ bool Equal(const std::shared_ptr<const std::vector<T>>& a,
     const std::shared_ptr<const std::vector<T>>& b) {
   return a == b || (a && b && *a == *b);
 }
+#if AR_ABI_VERSION >= 5
+template <class T>
+bool Remap(std::shared_ptr<const std::vector<T>>& values,
+    const std::vector<std::uint32_t>& vertices, std::size_t count, std::size_t stride = 1) {
+  if (!Size(values))
+    return true;
+  if (!stride || Size(values) / stride < count)
+    return false;
+  std::vector<T> expanded;
+  for (const auto vertex : vertices)
+    for (std::size_t k = 0; k < stride; ++k)
+      expanded.push_back((*values)[vertex * stride + k]);
+  values = std::make_shared<const std::vector<T>>(std::move(expanded));
+  return true;
+}
+bool UvTangents(MeshSnapshot& mesh, std::string& error) {
+  // Preserve the authored baseline exactly when its UVs are unchanged.
+  // Otherwise normalize the rest frame by the same MikkTSpace path as Hydra;
+  // GPU skinning/morphing subsequently deforms that frame with the geometry.
+  auto generated = detail::GenerateTangents(*mesh.points, *mesh.normals, *mesh.uvs, *mesh.indices);
+  if (!generated.vertices.empty()) {
+    const auto count = Size(mesh.points);
+    if (!Remap(mesh.points, generated.vertices, count) ||
+        !Remap(mesh.normals, generated.vertices, count) ||
+        !Remap(mesh.uvs, generated.vertices, count) ||
+        !Remap(mesh.edge_scales, generated.vertices, count) ||
+        !Remap(mesh.sub_texture_uvs, generated.vertices, count) ||
+        !Remap(mesh.morph_ranges, generated.vertices, count) ||
+        (!mesh.constant_influences &&
+            !Remap(mesh.influences, generated.vertices, count, mesh.influences_per_point)))
+      return Fail(error, "primary UV tangent seam has incomplete resident vertex streams");
+    mesh.indices = std::make_shared<const std::vector<std::uint32_t>>(std::move(generated.indices));
+    mesh.index_bound = *std::max_element(mesh.indices->begin(), mesh.indices->end()) + 1;
+  }
+  // Entirely collapsed UVs and unusable frames use Hydra's derivative
+  // fallback, never the stale authored tangent stream.
+  mesh.tangents = std::make_shared<const std::vector<Float4>>(std::move(generated.tangents));
+  return true;
+}
+#endif
 bool Valid(const ArStateView& s, std::string& error) {
   if (s.abi_version != AR_ABI_VERSION || s.struct_size < sizeof(ArStateView))
     return Fail(error, "incompatible runtime state ABI");
@@ -338,10 +379,9 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
         b.sources.size() != Size(mesh->points) || b.sources.size() != Size(mesh->uvs) ||
         mesh->index_bound > b.sources.size())
       return Fail(error, "invalid primary UV mesh binding");
-    // Tangent regeneration is a structural renderer operation; this slice
-    // accepts derivative fallback meshes only, never stale resident tangents.
-    if (Size(mesh->tangents))
-      return Fail(error, "primary UV binding requires a mesh without resident tangents");
+    if (Size(mesh->tangents) && (Size(mesh->tangents) != Size(mesh->points) ||
+            Size(mesh->normals) != Size(mesh->points) || !mesh->indices))
+      return Fail(error, "primary UV tangent binding requires complete resident geometry");
     std::string owner;
     for (std::size_t i = 0; i < b.sources.size(); ++i) {
       const auto source = b.sources[i];
@@ -487,13 +527,24 @@ void AvatarStateAdapter::Publish(FrameSnapshot candidate, FrameSnapshot& output)
       b.morph_weights = a.morph_weights;
       b.morph_weights_revision = a.morph_weights_revision;
     }
-    if (!Equal(a.uvs, b.uvs)) {
-      b.uvs_revision = stamp;
-      changed = true;
-    } else {
-      b.uvs = a.uvs;
-      b.uvs_revision = a.uvs_revision;
-    }
+    auto stream = [&](const auto& before, auto& after, std::uint64_t oldRevision, std::uint64_t& revision) {
+      if (!Equal(before, after)) {
+        revision = stamp;
+        changed = true;
+      } else {
+        after = before;
+        revision = oldRevision;
+      }
+    };
+    stream(a.points, b.points, a.points_revision, b.points_revision);
+    stream(a.normals, b.normals, a.normals_revision, b.normals_revision);
+    stream(a.indices, b.indices, a.topology_revision, b.topology_revision);
+    stream(a.uvs, b.uvs, a.uvs_revision, b.uvs_revision);
+    stream(a.tangents, b.tangents, a.tangents_revision, b.tangents_revision);
+    stream(a.edge_scales, b.edge_scales, a.edge_scales_revision, b.edge_scales_revision);
+    stream(a.sub_texture_uvs, b.sub_texture_uvs, a.sub_texture_uvs_revision, b.sub_texture_uvs_revision);
+    stream(a.influences, b.influences, a.skin_revision, b.skin_revision);
+    stream(a.morph_ranges, b.morph_ranges, a.morph_revision, b.morph_revision);
     changed |= a.visible != b.visible || a.transform != b.transform || a.color != b.color;
   }
   for (std::size_t i = 0; i < candidate.materials.size(); ++i) {
@@ -618,7 +669,12 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
       const auto& uv = s->vertex_uvs[source];
       values.push_back({static_cast<float>(uv.value[0]), static_cast<float>(uv.value[1])});
     }
-    Find(candidate.meshes, b.mesh)->uvs = std::make_shared<const std::vector<Float2>>(std::move(values));
+    auto& mesh = *Find(candidate.meshes, b.mesh);
+    if (*mesh.uvs != values) {
+      mesh.uvs = std::make_shared<const std::vector<Float2>>(std::move(values));
+      if (Size(mesh.tangents) && !UvTangents(mesh, error))
+        return false;
+    }
   }
 #endif
   Publish(std::move(candidate), output);

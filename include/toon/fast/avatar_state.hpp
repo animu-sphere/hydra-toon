@@ -92,6 +92,8 @@ struct AvatarUvBinding {
   // Runtime vertex_uv slots, one per resident vertex in renderer order.
   // A source may repeat at split vertices. All slots belong to one runtime
   // mesh with dense source vertex identities; coordinates are absolute st.
+  // Changed UVs regenerate resident rest tangents with MikkTSpace. New tangent
+  // seams split all per-vertex streams; unchanged UVs retain authored frames.
   std::vector<std::uint32_t> sources;
 };
 #endif
@@ -124,7 +126,9 @@ public:
   // Complete resolved values over the latest *unoverridden* scene baseline.
   // On failure output and adapter history are unchanged. Visibility changes
   // require ordinary extraction; ApplyFastSnapshot rejects membership changes.
-  // UV changes also require ordinary extraction (geometry stream upload).
+  // UV changes also require ordinary extraction (geometry stream upload and
+  // possible tangent seam splitting). Unusable generated frames use the
+  // derivative fallback. Release restores the baseline's authored frames.
   // Input times come from the host: runtime evaluation_seconds is not a source
   // timestamp. This API copies records and allocates changed dynamic arrays.
   bool Apply(const RetainedAvatarSnapshot& state, const FrameSnapshot& scene,

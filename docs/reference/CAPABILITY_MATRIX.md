@@ -121,15 +121,21 @@ Primary UV state transport has a scoped ABI-5 path through `Toon::AvatarState`
 with explicit resident vertex-to-slot bindings. Reordered slots and split
 vertices, full coverage, malformed/nonfinite/overflow refusal, retained arrays,
 reset and release are checked. UV changes use ordinary extraction; late UV
-changes and resident tangent streams refuse. Generated textured MMD/MToon
+changes refuse. Generated textured MMD/MToon
 Vulkan frames match an independently updated scene, change with UV weights and
 return to the original pixels at zero; [renderer report 102](../reports/renderer/102-2026-10-26-avatar-primary-uv.md).
 Automatic Hydra resident UV matching covers complete vertex/varying `st`,
 including corner and generated tangent-seam splits, reordered slots and
 per-mesh refusal for incomplete/ambiguous source mappings. Generated no-tangent
-meshes bind, publish mapped values and release to the baseline; bindings with
-resident tangents still refuse ([report 103](../reports/renderer/103-2026-10-26-avatar-resident-uv.md)).
-Tangent regeneration, composed MMD-to-GPU playback, runtime/Hydra pixel parity
-and representative avatar acceptance remain open. ABI-4 builds
+meshes bind, publish mapped values and release to the baseline
+([report 103](../reports/renderer/103-2026-10-26-avatar-resident-uv.md)).
+Tangent-bearing bindings regenerate MikkTSpace rest frames on changed UVs,
+including new seams across skin, morph and auxiliary streams. Unusable frames
+use the derivative fallback; unchanged UVs and Release retain/restore authored
+frames. Generated automatic runtime and USD/Hydra publications agree on streams
+and normal-mapped Vulkan pixels at 1x/4x
+([report 104](../reports/renderer/104-2026-10-26-avatar-uv-tangents.md)).
+Composed MMD-to-GPU playback, broader runtime/Hydra agreement and representative
+avatar acceptance remain open. ABI-4 builds
 retain their prior scope. Rebuild the adapter library and its consumers together
 with matching runtime headers; this experimental C++ binding layout has changed.

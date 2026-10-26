@@ -9,7 +9,7 @@ preserved in both source files and the accompanying [LICENSE](LICENSE).
 Keep the sources, license and attribution together when updating them.
 Git attributes preserve the upstream source bytes and formatting.
 
-The Hydra adapter compiles the C source once as C++, without changing it;
-its renderer-owned wrapper stays in
-[`generated_tangents.cpp`](../../adapters/hydra2/src/generated_tangents.cpp).
+Render-world compiles the C source once as C++, without changing it;
+Hydra and evaluated UV transport share the renderer-private wrapper in
+[`generated_tangents.cpp`](../../core/render-world/generated_tangents.cpp).
 There is no new runtime or build-time download.

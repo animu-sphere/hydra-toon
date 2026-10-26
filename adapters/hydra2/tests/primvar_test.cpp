@@ -99,10 +99,7 @@ bool PrimaryUvMapping(Host& host, const std::vector<std::uint32_t>& vertices,
     Toon::AvatarStateAdapter adapter;
     std::string error;
     const bool bound = adapter.Bind(view, baseline, 1, match.bindings, error);
-    if (!baseline.meshes[0].tangents->empty()) {
-      if (!Check(!bound && error.find("tangents") != std::string::npos,
-              "automatic UV matching must preserve resident tangent refusal")) return false;
-    } else {
+    {
       if (!Check(bound, error.c_str())) return false;
       ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
       api.get_snapshot = UvSnapshot::Get;
@@ -112,13 +109,16 @@ bool PrimaryUvMapping(Host& host, const std::vector<std::uint32_t>& vertices,
       Toon::FrameSnapshot output;
       const bool applied = held.Reset(api, 1, error) && adapter.Apply(held, baseline, 1, output, error);
       if (!Check(applied, error.c_str())) return false;
+      if (!Check(output.meshes[0].tangents->empty(),
+              "collapsed runtime UVs must discard stale resident tangents")) return false;
       for (std::size_t i = 0; i < vertices.size(); ++i) {
         const float value = static_cast<float>(vertices[i] + 1);
         if (!Check((*output.meshes[0].uvs)[i] == Toon::Float2{value, -value},
                 "automatically bound UV publication differs from source point identities")) return false;
       }
       if (!Check(adapter.Release(baseline, 1, output, error) &&
-                     *output.meshes[0].uvs == *baseline.meshes[0].uvs,
+                     *output.meshes[0].uvs == *baseline.meshes[0].uvs &&
+                     *output.meshes[0].tangents == *baseline.meshes[0].tangents,
               "automatic UV binding release must restore the Hydra baseline")) return false;
     }
   }
@@ -164,6 +164,84 @@ bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
                    after.validation_message_count == 0,
             "a steady split mesh must reuse geometry and pipelines without validation messages")) return false;
   }
+  return true;
+}
+
+bool RuntimeUvTangents(const std::string& shaders) {
+#if defined(TOON_HAS_AVATAR_STATE) && AR_ABI_VERSION >= 5
+  const auto stage = UsdStage::CreateInMemory();
+  if (!stage->GetRootLayer()->ImportFromString(R"USD(#usda 1.0
+def Mesh "Body" {
+ uniform token subdivisionScheme = "none"
+ point3f[] points = [(-0.6,-0.6,0), (0.6,-0.6,0), (0.6,0.6,0), (-0.6,0.6,0)]
+ normal3f[] normals = [(0,0,1)] (interpolation = "constant")
+ int[] faceVertexCounts = [3,3]
+ int[] faceVertexIndices = [0,1,2,0,2,3]
+ texCoord2f[] primvars:st = [(0,0), (1,0), (1,1), (0,1)] (interpolation = "vertex")
+ float[] primvars:mmd:edgeScale = [1,2,3,4] (interpolation = "vertex")
+ float4[] primvars:mmd:uv1 = [(0,0,0,0), (1,1,0,0), (2,2,0,0), (3,3,0,0)] (interpolation = "vertex")
+}
+)USD")) return false;
+  Host host(stage);
+  const auto baseline = host.Sync();
+  ArVertexUv values[4]{{"/Body",2,{}},{"/Body",0,{}},{"/Body",3,{}},{"/Body",1,{}}};
+  ArStateView view{AR_HEADER(ArStateView)};
+  view.instance = view.generation = view.layout_version = 1;
+  view.layout_id = "runtime-hydra-uv";
+  view.vertex_uvs = values; view.vertex_uv_count = 4;
+  const auto match = HdToonMatchAvatarTargets(view, host.delegate.DescribeResidentTargets(), {});
+  Toon::AvatarStateAdapter adapter;
+  std::string error;
+  if (!Check(match.mismatches.empty() && adapter.Bind(view, baseline, 1, match.bindings, error), error.c_str())) return false;
+  ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
+  api.get_snapshot = UvSnapshot::Get;
+  api.retain_snapshot = api.release_snapshot = UvSnapshot::Hold;
+  auto st = UsdGeomPrimvarsAPI(stage->GetPrimAtPath(SdfPath("/Body"))).GetPrimvar(TfToken("st"));
+  const std::vector<VtVec2fArray> frames{
+      {{0,0},{1,0},{1,1},{0,1}}, {{0,0},{1,0},{0,1},{1,1}},
+      {{0,0},{-1,0},{0,1},{-1,1}}, VtVec2fArray(4, GfVec2f(0)), {{0,0},{1,0},{1,1},{0,1}}};
+  for (std::size_t frame = 0; frame < frames.size(); ++frame) {
+    view.frame_id = frame + 1;
+    for (auto& value : values) {
+      const auto uv = frames[frame][value.vertex_index];
+      value.value[0] = uv[0]; value.value[1] = uv[1];
+    }
+    UvSnapshot::view = view;
+    Toon::RetainedAvatarSnapshot held;
+    Toon::FrameSnapshot actual;
+    if (!Check(held.Reset(api, 1, error) && adapter.Apply(held, baseline, 1, actual, error), error.c_str())) return false;
+    st.Set(frames[frame]);
+    auto expected = host.Sync();
+    const auto& a = actual.meshes[0]; const auto& b = expected.meshes[0];
+    if (!Check(*a.indices == *b.indices && *a.points == *b.points && *a.normals == *b.normals &&
+                   *a.uvs == *b.uvs && *a.tangents == *b.tangents &&
+                   *a.edge_scales == *b.edge_scales && *a.sub_texture_uvs == *b.sub_texture_uvs,
+            "automatic runtime UV tangent streams differ from USD/Hydra publication")) return false;
+    if (!shaders.empty()) {
+      Toon::RenderWorld resources;
+      Toon::ToonTexture texture;
+      texture.width = texture.height = 1;
+      texture.encoding = Toon::ToonTextureEncoding::Linear;
+      texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+          std::vector<std::uint8_t>{191,230,204,255});
+      const auto tex = resources.CreateTexture(); resources.SetTexture(tex, texture);
+      Toon::ToonMaterial material;
+      material.model = Toon::ToonShadingModel::MToon;
+      material.normal_texture.texture = tex;
+      material.mtoon.shading_toony = 0;
+      const auto mat = resources.CreateMaterial(); resources.SetMaterial(mat, material);
+      const auto snapshot = resources.Commit();
+      actual.materials = expected.materials = snapshot.materials;
+      actual.textures = expected.textures = snapshot.textures;
+      actual.meshes[0].material = expected.meshes[0].material = mat;
+      actual.meshes[0].parts = expected.meshes[0].parts =
+          std::make_shared<const std::vector<Toon::MeshPart>>(std::vector<Toon::MeshPart>{{0,6,mat}});
+      if (!Gpu(actual, expected, shaders)) return false;
+    }
+  }
+#else
+  (void)shaders;
+#endif
   return true;
 }
 
@@ -848,7 +926,7 @@ int main(int argc, char** argv) {
     }
     if (!Check(probe != nullptr, error.c_str())) return 1;
   }
-  if (!PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
+  if (!RuntimeUvTangents(shaders) || !PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
       !GeneratedSkin(argv[1], shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
   return 0;

@@ -134,13 +134,19 @@ For runtime ABI 5, `AvatarUvBinding` maps each resident vertex to a runtime
 primary UV slot, including explicit duplication for split vertices. The fast
 adapter checks complete coverage, dense source identities and finite narrowing,
 copies absolute coordinates, and publishes only changed UV arrays/revisions.
-UV changes require ordinary extraction. Resident tangents are refused pending
-coherent regeneration. `HdToonResidentMesh::primary_uv` describes complete
+UV changes require ordinary extraction. Changed UVs on tangent-bearing meshes
+regenerate rest frames through the shared renderer-private MikkTSpace wrapper;
+new seams expand all vertex streams, leaving triangle order, material parts,
+joint palettes and sparse morph offsets intact. Unchanged UVs retain the
+authored frames; Release restores the complete baseline. Unusable generated
+frames select the derivative fallback. Incomplete streams required by a new
+seam fail atomically. Meshes without resident tangents retain their derivative
+path. `HdToonResidentMesh::primary_uv` describes complete
 vertex/varying `st` in source-point identities after corner and tangent-seam
 splitting. The matcher uses its source point count and vertex map to build
 bindings independently of runtime slot order. Other interpolation domains,
 incomplete point arrays, ambiguous paths and missing source coverage report
-mismatches. Bind still validates the actual scene, including tangent refusal.
+mismatches. Bind still validates the actual scene and complete tangent geometry.
 
 A host over the runtime's real providers lives beside the Hydra checks as
 `adapters/hydra2/tests/avatar_provider_test.cpp`
