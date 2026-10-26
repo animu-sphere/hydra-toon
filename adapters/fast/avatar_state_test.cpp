@@ -398,13 +398,13 @@ void State() {
   reject(changed.View(3), structural, 1);
   // Malformed values are refused before exposing a retained view.
 #if AR_ABI_VERSION >= 5
-  ArVertexUv unsupportedUv{"mesh", 0, {.25, .75}};
+  ArVertexUv unsupportedUv{"mesh", 0, {std::numeric_limits<double>::infinity(), .75}};
   auto uvState = changed.View(3);
   uvState.vertex_uvs = &unsupportedUv; uvState.vertex_uv_count = 1;
   Fake::entries[998] = {uvState, 0};
   Toon::RetainedAvatarSnapshot uvSnapshot;
   Check(!uvSnapshot.Reset(Fake::Api(), 998, error) && Fake::entries.at(998).second == 0,
-      "unsupported primary UV output was silently dropped or leaked retention");
+      "invalid primary UV output was accepted or leaked retention");
 #endif
   auto refs = Fake::entries.at(1).second;
   Values invalid = changed;
@@ -565,6 +565,193 @@ void Runtime(const char* path) {
 #endif
 }
 
+#if AR_ABI_VERSION >= 5
+struct UvScene {
+  Toon::RenderWorld world;
+  Toon::MeshId mesh;
+  UvScene(Toon::ToonShadingModel model = Toon::ToonShadingModel::MMD) {
+    mesh = world.CreateMesh();
+    world.SetMeshPoints(mesh, {{-.8F, -.8F, 0}, {.8F, -.8F, 0}, {0, .8F, 0}, {0, .8F, 0}});
+    world.SetMeshNormals(mesh, std::vector<Toon::Float3>(4, {0, 0, 1}));
+    world.SetMeshTopology(mesh, {0, 1, 2, 3, 1, 0});
+    world.SetMeshUVs(mesh, {{.1F, .2F}, {.1F, .2F}, {.1F, .2F}, {.1F, .2F}});
+    auto image = world.CreateTexture();
+    Toon::ToonTexture texture;
+    texture.width = texture.height = 2;
+    texture.encoding = Toon::ToonTextureEncoding::Linear;
+    texture.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+        std::vector<std::uint8_t>{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255});
+    world.SetTexture(image, texture);
+    auto material = world.CreateMaterial();
+    Toon::ToonMaterial values;
+    values.model = model;
+    values.base_texture.texture = image;
+    values.mtoon.shade_color = {1, 1, 1};
+    world.SetMaterial(material, values);
+    world.SetMeshMaterial(mesh, material);
+  }
+  Toon::AvatarBindings Bindings() const {
+    Toon::AvatarBindings b;
+    b.uvs = {{mesh, {1, 2, 0, 0}}}; // reordered runtime slots and split vertex
+    return b;
+  }
+};
+void PrimaryUvs(const char* shaders = nullptr) {
+  for (const auto model : {Toon::ToonShadingModel::MMD, Toon::ToonShadingModel::MToon}) {
+    UvScene scene(model), oracle(model);
+    const auto base = scene.world.Commit();
+    ArVertexUv values[3]{{"mesh", 2, {.1, .2}}, {"mesh", 0, {.1, .2}}, {"mesh", 1, {.1, .2}}};
+    auto view = Values{}.View();
+    view.joints = nullptr;
+    view.joint_count = 0;
+    view.blend_shapes = nullptr;
+    view.blend_shape_count = 0;
+    view.materials = nullptr;
+    view.material_count = 0;
+    view.visibility = nullptr;
+    view.visibility_count = 0;
+    view.capabilities = nullptr;
+    view.capability_count = 0;
+    view.vertex_uvs = values;
+    view.vertex_uv_count = 3;
+    Toon::AvatarStateAdapter adapter;
+    Toon::FrameSnapshot output;
+    std::string error;
+    auto bindings = scene.Bindings();
+    Check(adapter.Bind(view, base, 1, bindings, error), error.c_str());
+    // Every invalid binding must leave the previous binding usable.
+    auto badBinding = [&](Toon::AvatarBindings b, Toon::FrameSnapshot s = {}) {
+      Check(!adapter.Bind(view, s.meshes.empty() ? base : s, 2, b, error), "invalid UV binding accepted");
+    };
+    badBinding({});
+    auto b = bindings;
+    b.uvs.push_back(b.uvs[0]);
+    badBinding(b);
+    b = bindings;
+    b.uvs[0].mesh = 999;
+    badBinding(b);
+    b = bindings;
+    b.uvs[0].sources.pop_back();
+    badBinding(b);
+    b = bindings;
+    b.uvs[0].sources[0] = 3;
+    badBinding(b);
+    b = bindings;
+    b.uvs[0].sources = {0, 0, 1, 1};
+    badBinding(b);
+    auto malformed = base;
+    malformed.meshes[0].uvs.reset();
+    badBinding(bindings, malformed);
+    malformed = base;
+    malformed.meshes[0].index_bound = 5;
+    badBinding(bindings, malformed);
+    malformed = base;
+    malformed.meshes[0].tangents = std::make_shared<const std::vector<Toon::Float4>>(4, Toon::Float4{1, 0, 0, 1});
+    badBinding(bindings, malformed);
+    values[0].vertex_index = 3;
+    Check(!adapter.Bind(view, base, 2, bindings, error), "sparse UV vertex identities accepted");
+    values[0].vertex_index = 2;
+    values[0].mesh_id = "other";
+    badBinding(bindings);
+    values[0].mesh_id = "mesh";
+    std::unique_ptr<Toon::OffscreenRenderer> renderer, reference;
+    if (shaders) {
+      Toon::FrameStatus status;
+      renderer = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error);
+      reference = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error);
+      Check(renderer && reference, error.c_str());
+    }
+    std::vector<std::uint8_t> firstPixels;
+    Toon::FrameSnapshot first;
+    const double weights[]{0, 1.5, -.5, 0};
+    for (std::size_t frame = 0; frame < 4; ++frame) {
+      const auto w = weights[frame];
+      for (auto& uv : values) {
+        uv.value[0] = .1 + (.2 + .05 * uv.vertex_index) * w;
+        uv.value[1] = .2 + (.15 + .025 * uv.vertex_index) * w;
+      }
+      view.frame_id = frame + 1;
+      auto snapshot = Fake::Snapshot(view);
+      Check(adapter.Apply(snapshot, base, 1, output, error), error.c_str());
+      const auto& mesh = output.meshes[0];
+      std::vector<Toon::Float2> expected;
+      for (const unsigned source : {0U, 1U, 2U, 2U})
+        expected.push_back({static_cast<float>(.1 + (.2 + .05 * source) * w),
+            static_cast<float>(.2 + (.15 + .025 * source) * w)});
+      Check(*mesh.uvs == expected, "UV source reordering/split mapping differs");
+      Check(mesh.points == base.meshes[0].points && mesh.indices == base.meshes[0].indices &&
+                mesh.topology_revision == base.meshes[0].topology_revision,
+          "UV update rebuilt topology");
+      const auto prior = output;
+      Check(adapter.Apply(snapshot, base, 1, output, error) && output.meshes[0].uvs == prior.meshes[0].uvs &&
+                output.meshes[0].uvs_revision == prior.meshes[0].uvs_revision,
+          "duplicate UV frame rewrote arrays");
+      auto draws = Toon::ExtractDrawList(base);
+      Check(Toon::ApplyFastSnapshot(output, draws, error) == (frame == 0),
+          "UV edits crossed late structural boundary");
+      if (frame == 0)
+        first = output;
+      if (renderer) {
+        oracle.world.SetMeshUVs(oracle.mesh, expected);
+        Toon::ColorProduct image, wanted;
+        Toon::DepthProduct depth, wantedDepth;
+        Check(renderer->Render(Toon::ExtractDrawList(output), 96, 96, image, depth, error) &&
+                  reference->Render(Toon::ExtractDrawList(oracle.world.Commit()), 96, 96, wanted, wantedDepth, error),
+            error.c_str());
+        Check(image.payload == wanted.payload && depth.payload == wantedDepth.payload, "UV pixels differ from independent scene");
+        if (!frame)
+          firstPixels = image.payload;
+        else if (frame == 1)
+          Check(image.payload != firstPixels, "UV edit did not change texture pixels");
+        else if (frame == 3)
+          Check(image.payload == firstPixels, "UV zero return did not restore pixels");
+        Check(renderer->statistics().validation_message_count == 0, "UV GPU validation message");
+      }
+    }
+    Check(*first.meshes[0].uvs == *base.meshes[0].uvs, "retained UV frame mutated");
+    const auto prior = output;
+    auto reject = [&](ArStateView bad, const Toon::FrameSnapshot& baseline) {
+      auto held = Fake::Snapshot(bad);
+      Check(!adapter.Apply(held, baseline, 1, output, error) && output.meshes[0].uvs == prior.meshes[0].uvs &&
+                output.revision == prior.revision && adapter.IdentityInfo().frame == 4,
+          "UV rejection was not atomic");
+    };
+    view.frame_id = 5;
+    auto bad = view;
+    bad.vertex_uv_count = 2;
+    reject(bad, base);
+    values[0].vertex_index = 3;
+    reject(view, base);
+    values[0].vertex_index = 2;
+    values[0].mesh_id = "renamed";
+    reject(view, base);
+    values[0].mesh_id = "mesh";
+    malformed = base;
+    malformed.meshes[0].uvs_revision++;
+    reject(view, malformed);
+    reject(view, output); // an overridden snapshot is never the source baseline
+    for (const double invalid : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(),
+             double(std::numeric_limits<float>::max()) * 2}) {
+      values[0].value[0] = invalid;
+      Fake::entries[997] = {view, 0};
+      Toon::RetainedAvatarSnapshot held;
+      Check(!held.Reset(Fake::Api(), 997, error) && Fake::entries[997].second == 0, "invalid UV retained or leaked");
+    }
+    values[0].value[0] = .8;
+    view.frame_id = 1;
+    view.generation = 2;
+    auto reset = Fake::Snapshot(view);
+    Check(adapter.Apply(reset, base, 1, output, error) && output.meshes[0].uvs_revision > prior.meshes[0].uvs_revision,
+        "UV reset generation failed");
+    Check(adapter.Release(base, 1, output, error) && *output.meshes[0].uvs == *base.meshes[0].uvs, "UV release failed");
+    const auto released = output;
+    Check(adapter.Release(base, 1, output, error) && output.meshes[0].uvs == released.meshes[0].uvs &&
+              output.revision == released.revision,
+        "repeated UV release rewrote arrays");
+  }
+}
+#endif
+
 void Gpu(const char* shaders) {
   for (const auto mode : {Toon::ToonAlphaMode::Opaque, Toon::ToonAlphaMode::Mask, Toon::ToonAlphaMode::Blend}) {
     Scene scene(mode), oracle(mode);
@@ -684,12 +871,18 @@ int main(int argc, char** argv) {
     ScaledEmissive();
     Inbetweens();
     State();
+#if AR_ABI_VERSION >= 5
+    PrimaryUvs();
+#endif
     if (argc == 3 && std::string(argv[1]) == "--runtime")
       Runtime(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--gpu") {
       if (!Toon::ProbeVulkanBackend().available)
         return 77;
       Gpu(argv[2]);
+#if AR_ABI_VERSION >= 5
+      PrimaryUvs(argv[2]);
+#endif
     }
     for (const auto& [id, entry] : Fake::entries) {
       (void)id;

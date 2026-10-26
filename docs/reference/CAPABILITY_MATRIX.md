@@ -117,10 +117,14 @@ make full reference equivalence a release condition; see the
 
 | VRM reproduction comparison | ✅ | Local raw VRM 0.x/1.0 rest-pose full/close captures at 800×900/4x against pinned three-vrm 3.5.5 and matched-camera usdview. Foreground RGB MAE versus three-vrm is 1.01–4.28/255, versus usdview 0.11–0.32/255. Finite coverage; constraints/springs/expressions and universal material equivalence are not established. [Renderer report 32](../reports/renderer/32-2026-10-04-vrm-reproduction.md) |
 
-Primary UV state transport remains unsupported by `Toon::AvatarState`. It can
-be rebuilt against experimental runtime ABI 4 or 5; each binary requires its
-compile-time revision at negotiation. A revision-5 build explicitly refuses a
-nonempty primary UV layout before retaining/publishing it. Existing pose,
-blend-shape and material behavior is unchanged. The source-header revision-5
-`toon-avatar-state` CPU check covers refusal and snapshot reference cleanup;
-this adds no UV rendering or GPU evidence.
+Primary UV state transport has a scoped ABI-5 path through `Toon::AvatarState`
+with explicit resident vertex-to-slot bindings. Reordered slots and split
+vertices, full coverage, malformed/nonfinite/overflow refusal, retained arrays,
+reset and release are checked. UV changes use ordinary extraction; late UV
+changes and resident tangent streams refuse. Generated textured MMD/MToon
+Vulkan frames match an independently updated scene, change with UV weights and
+return to the original pixels at zero; [renderer report 102](../reports/renderer/102-2026-10-26-avatar-primary-uv.md).
+Automatic Hydra resident UV matching, tangent regeneration, runtime/Hydra
+pixel parity and representative avatar acceptance remain open. ABI-4 builds
+retain their prior scope. Rebuild the adapter library and its consumers together
+with matching runtime headers; this experimental C++ binding layout has changed.

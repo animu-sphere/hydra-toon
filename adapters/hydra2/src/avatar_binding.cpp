@@ -60,6 +60,19 @@ HdToonAvatarTargetMatch HdToonMatchAvatarTargets(const ArStateView& layout,
     mismatch(Id(layout.layout_id), "runtime layout array is missing");
     return match;
   }
+#if AR_ABI_VERSION >= 5
+  if (!Array(layout.vertex_uvs, layout.vertex_uv_count)) {
+    mismatch(Id(layout.layout_id), "runtime primary UV array is missing");
+    return match;
+  }
+  // The resident description does not yet retain source-to-split vertex
+  // mappings. Hosts must supply explicit UV bindings rather than infer them.
+  std::set<std::string> uvMeshes;
+  for (std::uint32_t i = 0; i < layout.vertex_uv_count; ++i)
+    uvMeshes.insert(Id(layout.vertex_uvs[i].mesh_id));
+  for (const auto& mesh : uvMeshes)
+    mismatch(mesh, "primary UV output requires an explicit resident vertex mapping");
+#endif
 
   // Skins: each GPU-skinned palette of a skeleton the runtime publishes.
   std::map<Key, std::uint32_t> joints;

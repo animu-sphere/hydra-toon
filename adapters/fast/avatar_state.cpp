@@ -39,8 +39,15 @@ bool Valid(const ArStateView& s, std::string& error) {
   if (s.abi_version != AR_ABI_VERSION || s.struct_size < sizeof(ArStateView))
     return Fail(error, "incompatible runtime state ABI");
 #if AR_ABI_VERSION >= 5
-  if (s.vertex_uv_count)
-    return Fail(error, "runtime primary UV output requires an unsupported fast-path binding");
+  if (!Array(s.vertex_uvs, s.vertex_uv_count))
+    return Fail(error, "invalid runtime primary UV array");
+  std::set<std::pair<std::string, std::uint32_t>> uvIds;
+  for (std::uint32_t i = 0; i < s.vertex_uv_count; ++i) {
+    const auto& uv = s.vertex_uvs[i];
+    if (!Name(uv.mesh_id) || !uvIds.emplace(uv.mesh_id, uv.vertex_index).second ||
+        !Float(uv.value[0]) || !Float(uv.value[1]))
+      return Fail(error, "invalid runtime primary UV identity or value");
+  }
 #endif
   if (!s.instance || !s.generation || !Name(s.layout_id) || !s.layout_version || !std::isfinite(s.evaluation_seconds) ||
       !Array(s.joints, s.joint_count) || !Array(s.blend_shapes, s.blend_shape_count) ||
@@ -313,6 +320,44 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
   }
   for (std::uint32_t i = 0; i < layout.visibility_count; ++i)
     next.visibility_.push_back({layout.visibility[i].target_id, ""});
+#if AR_ABI_VERSION >= 5
+  std::map<std::string, std::set<std::uint32_t>> vertices;
+  for (std::uint32_t i = 0; i < layout.vertex_uv_count; ++i) {
+    const auto& uv = layout.vertex_uvs[i];
+    next.uvs_.push_back({uv.mesh_id, "", -1, uv.vertex_index});
+    vertices[uv.mesh_id].insert(uv.vertex_index);
+  }
+  for (const auto& [id, indices] : vertices)
+    if (*indices.rbegin() != indices.size() - 1)
+      return Fail(error, "runtime primary UV vertex layout is not dense");
+  std::vector<bool> mappedUvs(layout.vertex_uv_count);
+  std::set<MeshId> uvMeshes;
+  for (const auto& b : next.bindings_.uvs) {
+    const auto* mesh = Find(next.bound_.meshes, b.mesh);
+    if (!mesh || !uvMeshes.insert(b.mesh).second || b.sources.empty() ||
+        b.sources.size() != Size(mesh->points) || b.sources.size() != Size(mesh->uvs) ||
+        mesh->index_bound > b.sources.size())
+      return Fail(error, "invalid primary UV mesh binding");
+    // Tangent regeneration is a structural renderer operation; this slice
+    // accepts derivative fallback meshes only, never stale resident tangents.
+    if (Size(mesh->tangents))
+      return Fail(error, "primary UV binding requires a mesh without resident tangents");
+    std::string owner;
+    for (std::size_t i = 0; i < b.sources.size(); ++i) {
+      const auto source = b.sources[i];
+      if (source >= layout.vertex_uv_count)
+        return Fail(error, "primary UV source slot is out of range");
+      const auto& uv = layout.vertex_uvs[source];
+      if (owner.empty())
+        owner = uv.mesh_id;
+      if (owner != uv.mesh_id || !std::isfinite((*mesh->uvs)[i].x) || !std::isfinite((*mesh->uvs)[i].y))
+        return Fail(error, "primary UV binding mixes source meshes or has nonfinite bases");
+      mappedUvs[source] = true;
+    }
+  }
+  if (std::find(mappedUvs.begin(), mappedUvs.end(), false) != mappedUvs.end())
+    return Fail(error, "unmapped runtime primary UV output");
+#endif
   std::set<MeshId> skins;
   for (const auto& b : next.bindings_.skins) {
     const auto* mesh = Find(next.bound_.meshes, b.mesh);
@@ -442,6 +487,13 @@ void AvatarStateAdapter::Publish(FrameSnapshot candidate, FrameSnapshot& output)
       b.morph_weights = a.morph_weights;
       b.morph_weights_revision = a.morph_weights_revision;
     }
+    if (!Equal(a.uvs, b.uvs)) {
+      b.uvs_revision = stamp;
+      changed = true;
+    } else {
+      b.uvs = a.uvs;
+      b.uvs_revision = a.uvs_revision;
+    }
     changed |= a.visible != b.visible || a.transform != b.transform || a.color != b.color;
   }
   for (std::size_t i = 0; i < candidate.materials.size(); ++i) {
@@ -502,6 +554,15 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
   for (std::uint32_t i = 0; i < s->visibility_count; ++i)
     if (visibility_[i].owner != s->visibility[i].target_id)
       return Fail(error, "runtime visibility layout changed");
+#if AR_ABI_VERSION >= 5
+  if (s->vertex_uv_count != uvs_.size())
+    return Fail(error, "runtime primary UV count changed; rebind required");
+  for (std::uint32_t i = 0; i < s->vertex_uv_count; ++i) {
+    const auto& uv = s->vertex_uvs[i];
+    if (uvs_[i] != Identity{uv.mesh_id, "", -1, uv.vertex_index})
+      return Fail(error, "runtime primary UV layout changed; rebind required");
+  }
+#endif
   FrameSnapshot candidate = scene;
   candidate.time_seconds = s->evaluation_seconds;
   std::vector<Matrix4> world(s->joint_count);
@@ -549,6 +610,17 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
   }
   for (const auto& b : bindings_.visibility)
     Find(candidate.meshes, b.mesh)->visible = s->visibility[b.source].visible != 0;
+#if AR_ABI_VERSION >= 5
+  for (const auto& b : bindings_.uvs) {
+    std::vector<Float2> values;
+    values.reserve(b.sources.size());
+    for (const auto source : b.sources) {
+      const auto& uv = s->vertex_uvs[source];
+      values.push_back({static_cast<float>(uv.value[0]), static_cast<float>(uv.value[1])});
+    }
+    Find(candidate.meshes, b.mesh)->uvs = std::make_shared<const std::vector<Float2>>(std::move(values));
+  }
+#endif
   Publish(std::move(candidate), output);
   identity_.frame = s->frame_id;
   identity_.generation = s->generation;

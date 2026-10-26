@@ -130,6 +130,15 @@ adapter turns the shape's runtime weight into those slots' weights with
 usdSkelImaging's inbetween interpolation, so neither the host nor core
 evaluates inbetweens.
 
+For runtime ABI 5, `AvatarUvBinding` maps each resident vertex to a runtime
+primary UV slot, including explicit duplication for split vertices. The fast
+adapter checks complete coverage, dense source identities and finite narrowing,
+copies absolute coordinates, and publishes only changed UV arrays/revisions.
+UV changes require ordinary extraction. Resident tangents are refused pending
+coherent regeneration. The Hydra resident description does not yet expose its
+source vertex mapping, so the automatic matcher reports UV outputs as unmatched;
+a host must provide these bindings explicitly.
+
 A host over the runtime's real providers lives beside the Hydra checks as
 `adapters/hydra2/tests/avatar_provider_test.cpp`
 (`toon-hydra2-avatar-provider-test`). It is built only with
