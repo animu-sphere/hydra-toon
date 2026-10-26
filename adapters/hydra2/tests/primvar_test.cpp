@@ -4,6 +4,12 @@
 #ifdef TOON_HAS_AVATAR_STATE
 #include "avatar_binding.hpp"
 #endif
+#ifdef TOON_TEST_MMD_UV
+#include "mmd_uv_provider.hpp"
+#if AR_ABI_VERSION < 5
+#error The MMD UV composition check requires runtime ABI 5
+#endif
+#endif
 
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
@@ -134,7 +140,8 @@ bool SameGeometry(const Toon::MeshSnapshot& a, const Toon::MeshSnapshot& b) {
 }
 
 bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
-    const std::string& shaders, int tolerance = 0) {
+    const std::string& shaders, int tolerance = 0,
+    std::vector<std::uint8_t>* pixels = nullptr) {
   for (const unsigned samples : {1U, 4U}) {
     Toon::FrameStatus status;
     std::string error;
@@ -153,6 +160,12 @@ bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
                        [tolerance](auto a, auto b) { return std::abs(int(a) - int(b)) <= tolerance; }) &&
                    depth.payload == reference_depth.payload,
             "split geometry differs from the independent explicit-vertex GPU oracle")) return false;
+    if (pixels && samples == 1) {
+      if (!Check(std::any_of(depth.payload.begin(), depth.payload.end(),
+                     [](float z) { return std::isfinite(z) && z < 1; }),
+              "composed MMD GPU check must draw visible geometry")) return false;
+      *pixels = color.payload;
+    }
     const auto before = renderer->statistics();
     if (!Check(renderer->Render(draws, 128, 128, color, depth, error), error.c_str())) return false;
     const auto after = renderer->statistics();
@@ -189,6 +202,11 @@ def Mesh "Body" {
   view.instance = view.generation = view.layout_version = 1;
   view.layout_id = "runtime-hydra-uv";
   view.vertex_uvs = values; view.vertex_uv_count = 4;
+#ifdef TOON_TEST_MMD_UV
+  auto provider = std::make_unique<MmdUvProvider>();
+  ArSnapshot initial = provider->Advance();
+  if (!Check(provider->api.get_snapshot(initial, &view) == AR_OK, "MMD initial snapshot")) return false;
+#endif
   const auto match = HdToonMatchAvatarTargets(view, host.delegate.DescribeResidentTargets(), {});
   Toon::AvatarStateAdapter adapter;
   std::string error;
@@ -196,20 +214,68 @@ def Mesh "Body" {
   ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
   api.get_snapshot = UvSnapshot::Get;
   api.retain_snapshot = api.release_snapshot = UvSnapshot::Hold;
+#ifdef TOON_TEST_MMD_UV
+  api = provider->api;
+  Toon::RetainedAvatarSnapshot first_held;
+  Toon::FrameSnapshot first_output;
+  std::vector<std::uint8_t> base_pixels[2];
+  bool changed_pixels[2]{};
+#endif
   auto st = UsdGeomPrimvarsAPI(stage->GetPrimAtPath(SdfPath("/Body"))).GetPrimvar(TfToken("st"));
   const std::vector<VtVec2fArray> frames{
+#ifdef TOON_TEST_MMD_UV
+      {{0,0},{1,0},{1,1},{0,1}}, {{0,0},{1,0},{0,1},{1,1}},
+      {{0,0},{1,0},{-.5f,1},{1.5f,1}}, {{0,0},{1,0},{1.5f,1},{-.5f,1}},
+      VtVec2fArray(4, GfVec2f(0)), {{0,0},{1,0},{1,1},{0,1}}};
+  constexpr std::size_t generations = 3;
+#else
       {{0,0},{1,0},{1,1},{0,1}}, {{0,0},{1,0},{0,1},{1,1}},
       {{0,0},{-1,0},{0,1},{-1,1}}, VtVec2fArray(4, GfVec2f(0)), {{0,0},{1,0},{1,1},{0,1}}};
-  for (std::size_t frame = 0; frame < frames.size(); ++frame) {
+  constexpr std::size_t generations = 1;
+#endif
+  for (std::size_t iteration = 0; iteration < generations * frames.size(); ++iteration) {
+    const auto frame = iteration % frames.size();
+#ifndef TOON_TEST_MMD_UV
     view.frame_id = frame + 1;
     for (auto& value : values) {
       const auto uv = frames[frame][value.vertex_index];
       value.value[0] = uv[0]; value.value[1] = uv[1];
     }
     UvSnapshot::view = view;
+#endif
     Toon::RetainedAvatarSnapshot held;
     Toon::FrameSnapshot actual;
-    if (!Check(held.Reset(api, 1, error) && adapter.Apply(held, baseline, 1, actual, error), error.c_str())) return false;
+#ifdef TOON_TEST_MMD_UV
+    if (iteration && !frame) provider->Reset(iteration / frames.size() + 1);
+    const auto produced = iteration ? provider->Advance() : initial;
+    const bool retained = held.Reset(api, produced, error);
+    if (!iteration && !Check(first_held.Reset(api, produced, error), error.c_str())) return false;
+    api.release_snapshot(produced);
+    if (!Check(retained, error.c_str())) return false;
+    const auto& state = *held.View();
+    if (!Check(state.vertex_uv_count == 4 && state.vertex_uvs[0].vertex_index == 2,
+            "MMD UV layout must retain reordered source identities")) return false;
+    for (uint32_t i = 0; i < state.vertex_uv_count; ++i) {
+      const auto& value = state.vertex_uvs[i];
+      const auto expected = frames[frame][value.vertex_index];
+      if (!Check(std::abs(value.value[0] - expected[0]) < 1e-6 &&
+                     std::abs(value.value[1] - expected[1]) < 1e-6,
+              "MMD owner/runtime absolute UV differs from independent expected values")) return false;
+    }
+#else
+    if (!Check(held.Reset(api, 1, error), error.c_str())) return false;
+#endif
+    if (!Check(adapter.Apply(held, baseline, 1, actual, error), error.c_str())) return false;
+#ifdef TOON_TEST_MMD_UV
+    if (!iteration) first_output = actual;
+    Toon::FrameSnapshot duplicate;
+    if (!Check(adapter.Apply(held, baseline, 1, duplicate, error) &&
+                   duplicate.meshes[0].uvs == actual.meshes[0].uvs &&
+                   duplicate.meshes[0].uvs_revision == actual.meshes[0].uvs_revision &&
+                   duplicate.meshes[0].tangents == actual.meshes[0].tangents &&
+                   duplicate.meshes[0].tangents_revision == actual.meshes[0].tangents_revision,
+            "duplicate MMD frame must reuse UV/tangent arrays and revisions")) return false;
+#endif
     st.Set(frames[frame]);
     auto expected = host.Sync();
     const auto& a = actual.meshes[0]; const auto& b = expected.meshes[0];
@@ -229,6 +295,17 @@ def Mesh "Body" {
       material.model = Toon::ToonShadingModel::MToon;
       material.normal_texture.texture = tex;
       material.mtoon.shading_toony = 0;
+#ifdef TOON_TEST_MMD_UV
+      Toon::ToonTexture colors;
+      colors.width = colors.height = 2;
+      colors.encoding = Toon::ToonTextureEncoding::Linear;
+      colors.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+          std::vector<std::uint8_t>{255,0,0,255, 0,255,0,255, 0,0,255,255, 255,255,0,255});
+      const auto color_tex = resources.CreateTexture(); resources.SetTexture(color_tex, colors);
+      material.base_texture.texture = color_tex;
+      for (int model = 0; model < 2; ++model) {
+        material.model = model ? Toon::ToonShadingModel::MMD : Toon::ToonShadingModel::MToon;
+#endif
       const auto mat = resources.CreateMaterial(); resources.SetMaterial(mat, material);
       const auto snapshot = resources.Commit();
       actual.materials = expected.materials = snapshot.materials;
@@ -236,9 +313,36 @@ def Mesh "Body" {
       actual.meshes[0].material = expected.meshes[0].material = mat;
       actual.meshes[0].parts = expected.meshes[0].parts =
           std::make_shared<const std::vector<Toon::MeshPart>>(std::vector<Toon::MeshPart>{{0,6,mat}});
+#ifdef TOON_TEST_MMD_UV
+        std::vector<std::uint8_t> pixels;
+        if (!Gpu(actual, expected, shaders, 0, &pixels)) return false;
+        if (!iteration) base_pixels[model] = pixels;
+        if (!frame || frame == frames.size() - 1) {
+          if (!Check(pixels == base_pixels[model], "zero/reset MMD UV must restore original texture pixels")) return false;
+        } else {
+          changed_pixels[model] |= pixels != base_pixels[model];
+        }
+      }
+#else
       if (!Gpu(actual, expected, shaders)) return false;
+#endif
     }
   }
+#ifdef TOON_TEST_MMD_UV
+  if (!shaders.empty() && !Check(changed_pixels[0] && changed_pixels[1],
+          "MMD UV morphs must change sampled MMD and normal-mapped MToon pixels")) return false;
+  provider.reset();
+  if (!Check(first_held.View()->generation == 1 && first_held.View()->vertex_uvs[0].value[0] == 1 &&
+                 *first_output.meshes[0].uvs == *baseline.meshes[0].uvs,
+          "retained MMD snapshot/renderer arrays changed after producer destruction")) return false;
+  Toon::FrameSnapshot released;
+  if (!Check(adapter.Release(baseline, 1, released, error) &&
+                 *released.meshes[0].uvs == *baseline.meshes[0].uvs &&
+                 *released.meshes[0].tangents == *baseline.meshes[0].tangents,
+          "MMD resident release failed to restore immutable UV/tangent bases")) return false;
+  std::cout << "MMD owner/runtime resident UV: three reset generations, signed/group weights, streams and "
+            << (shaders.empty() ? "CPU" : "1x/4x Vulkan colour/depth") << " parity passed\n";
+#endif
 #else
   (void)shaders;
 #endif
@@ -926,8 +1030,11 @@ int main(int argc, char** argv) {
     }
     if (!Check(probe != nullptr, error.c_str())) return 1;
   }
-  if (!RuntimeUvTangents(shaders) || !PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
+  if (!RuntimeUvTangents(shaders)) return 1;
+#ifndef TOON_TEST_MMD_UV
+  if (!PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
       !GeneratedSkin(argv[1], shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
+#endif
   return 0;
 }

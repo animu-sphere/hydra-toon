@@ -10,6 +10,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- An opt-in generated MMD owner/runtime UV composition check over automatic
+  resident bindings, with USD/Hydra stream and textured MMD/normal-mapped
+  MToon Vulkan agreement through signed weights, resets and return to base.
 - Explicit ABI-5 primary UV bindings in `Toon::AvatarState`, including split
   vertices, atomic validation, reset/release restoration and generated textured
   MMD/MToon Vulkan checks. UV changes require ordinary extraction. Rebuild the

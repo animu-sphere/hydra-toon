@@ -135,7 +135,15 @@ use the derivative fallback; unchanged UVs and Release retain/restore authored
 frames. Generated automatic runtime and USD/Hydra publications agree on streams
 and normal-mapped Vulkan pixels at 1x/4x
 ([report 104](../reports/renderer/104-2026-10-26-avatar-uv-tangents.md)).
-Composed MMD-to-GPU playback, broader runtime/Hydra agreement and representative
+An opt-in generated UV-only MMD owner/runtime provider now feeds those automatic
+resident bindings with real retained snapshots. Nested group, signed and
+above-one weights, collapsed UVs, reset/replay and baseline restoration agree
+with independently expected UVs and USD/Hydra streams. Textured MMD and
+normal-mapped MToon Vulkan colour/depth agree at 1x/4x; pixels change and return
+to base. The provider uses an empty physics world and no bones, PMX/VMD reader,
+material evaluation or application host
+([report 105](../reports/renderer/105-2026-10-26-mmd-resident-uv.md)).
+Composed full-avatar playback, broader runtime/Hydra agreement and representative
 avatar acceptance remain open. ABI-4 builds
 retain their prior scope. Rebuild the adapter library and its consumers together
 with matching runtime headers; this experimental C++ binding layout has changed.
