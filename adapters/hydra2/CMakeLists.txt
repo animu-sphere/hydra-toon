@@ -159,6 +159,10 @@ if(TOON_BUILD_TESTS)
   target_compile_features(toon-hydra2-primvar-test PRIVATE cxx_std_20)
   target_compile_definitions(toon-hydra2-primvar-test PRIVATE NOMINMAX
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+  if(TARGET toon-hydra2-avatar-binding)
+    target_link_libraries(toon-hydra2-primvar-test PRIVATE toon-hydra2-avatar-binding)
+    target_compile_definitions(toon-hydra2-primvar-test PRIVATE TOON_HAS_AVATAR_STATE=1)
+  endif()
 
   # The GPU handoff's measurements (GPU handoff policy §8): a host that lends
   # its own device renders a stage's draw list and writes timings as JSON.

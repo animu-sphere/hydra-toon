@@ -48,6 +48,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -425,6 +426,12 @@ public:
       std::vector<HdToonResidentSubshape> subshapes) {
     std::scoped_lock lock(mutex_);
     resident_[mesh].subshapes = std::move(subshapes);
+  }
+
+  void SetMeshResidentPrimaryUv(Toon::MeshId mesh,
+      std::optional<HdToonResidentPrimaryUv> mapping) {
+    std::scoped_lock lock(mutex_);
+    resident_[mesh].primary_uv = std::move(mapping);
   }
 
   HdToonResidentTargets DescribeResidentTargets() {
@@ -1188,6 +1195,22 @@ private:
       Toon::ToonMorph morph{*source.morph_offsets, TangentVertices(split_ ?
           PerPoint(*source.morph_ranges, corner_points_) : *source.morph_ranges)};
       state_->SetMeshMorph(mesh_, std::move(morph));
+    }
+    if (layout || points_changed || uvs_changed) {
+      std::optional<HdToonResidentPrimaryUv> mapping;
+      if ((uv_interpolation_ == HdInterpolationVertex ||
+              uv_interpolation_ == HdInterpolationVarying) &&
+          !uvs_.empty() && uvs_.size() == source.points->size() &&
+          source.points->size() <= std::numeric_limits<std::uint32_t>::max()) {
+        HdToonResidentPrimaryUv point_uv;
+        point_uv.source_point_count = static_cast<std::uint32_t>(source.points->size());
+        std::vector<std::uint32_t> points(source.points->size());
+        std::iota(points.begin(), points.end(), 0U);
+        point_uv.vertices = TangentVertices(split_ ?
+            PerPoint(points, corner_points_) : points);
+        if (!point_uv.vertices.empty()) mapping = std::move(point_uv);
+      }
+      state_->SetMeshResidentPrimaryUv(mesh_, std::move(mapping));
     }
     published_ = source;
     published_uv_interpolation_ = uv_interpolation_;

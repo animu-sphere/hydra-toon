@@ -13,8 +13,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 - Explicit ABI-5 primary UV bindings in `Toon::AvatarState`, including split
   vertices, atomic validation, reset/release restoration and generated textured
   MMD/MToon Vulkan checks. UV changes require ordinary extraction; resident
-  tangents and automatic Hydra UV matching remain unsupported. Rebuild the
+  tangents remain unsupported. Rebuild the
   adapter and consumers together for the changed experimental C++ layout.
+- Automatic Hydra primary UV target matching from complete vertex/varying
+  `st`, retaining source point identities through corner and tangent-seam
+  splits. Missing source coverage and ambiguous paths produce diagnostics;
+  resident tangent bindings still require coherent regeneration.
 
 ## [0.8.0] - 2026-10-25
 

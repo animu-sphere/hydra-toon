@@ -135,9 +135,12 @@ primary UV slot, including explicit duplication for split vertices. The fast
 adapter checks complete coverage, dense source identities and finite narrowing,
 copies absolute coordinates, and publishes only changed UV arrays/revisions.
 UV changes require ordinary extraction. Resident tangents are refused pending
-coherent regeneration. The Hydra resident description does not yet expose its
-source vertex mapping, so the automatic matcher reports UV outputs as unmatched;
-a host must provide these bindings explicitly.
+coherent regeneration. `HdToonResidentMesh::primary_uv` describes complete
+vertex/varying `st` in source-point identities after corner and tangent-seam
+splitting. The matcher uses its source point count and vertex map to build
+bindings independently of runtime slot order. Other interpolation domains,
+incomplete point arrays, ambiguous paths and missing source coverage report
+mismatches. Bind still validates the actual scene, including tangent refusal.
 
 A host over the runtime's real providers lives beside the Hydra checks as
 `adapters/hydra2/tests/avatar_provider_test.cpp`

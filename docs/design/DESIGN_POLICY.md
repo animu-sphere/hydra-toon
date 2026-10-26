@@ -774,7 +774,10 @@ explicit capability negotiation and diagnostics, not silent omission.
 
 Primary UV bindings must explicitly map every resident vertex to an absolute
 runtime `st` slot. Source identities remain dense per mesh; split resident
-vertices may share a source. Consumers must refuse missing/overlapping mappings,
+vertices may share a source. Automatic Hydra matching must use retained source
+point identities through every corner/tangent-seam split, with complete
+vertex/varying `st` and source coverage. Other interpolation domains must not
+be inferred from array length. Consumers must refuse missing/overlapping mappings,
 nonfinite or float-overflow values and structural edits before publishing any
 part of the frame. UV changes use ordinary extraction and geometry upload;
 they are not late pose/material updates. A binding with resident tangents must

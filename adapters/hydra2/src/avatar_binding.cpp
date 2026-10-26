@@ -65,13 +65,53 @@ HdToonAvatarTargetMatch HdToonMatchAvatarTargets(const ArStateView& layout,
     mismatch(Id(layout.layout_id), "runtime primary UV array is missing");
     return match;
   }
-  // The resident description does not yet retain source-to-split vertex
-  // mappings. Hosts must supply explicit UV bindings rather than infer them.
-  std::set<std::string> uvMeshes;
-  for (std::uint32_t i = 0; i < layout.vertex_uv_count; ++i)
-    uvMeshes.insert(Id(layout.vertex_uvs[i].mesh_id));
-  for (const auto& mesh : uvMeshes)
-    mismatch(mesh, "primary UV output requires an explicit resident vertex mapping");
+  // Match absolute st by opaque mesh path and source point identity, never
+  // by runtime array order or resident split-vertex order.
+  std::map<std::string, std::map<std::uint32_t, std::uint32_t>> uvMeshes;
+  std::set<std::string> invalidUvMeshes;
+  for (std::uint32_t i = 0; i < layout.vertex_uv_count; ++i) {
+    const auto& uv = layout.vertex_uvs[i];
+    const std::string mesh = Id(uv.mesh_id);
+    if (!uvMeshes[mesh].emplace(uv.vertex_index, i).second || mesh.empty())
+      invalidUvMeshes.insert(mesh);
+  }
+  for (const auto& [path, slots] : uvMeshes) {
+    const HdToonResidentMesh* target = nullptr;
+    bool ambiguous = false;
+    for (const auto& mesh : resident.meshes) {
+      if (mesh.path.GetString() != path) continue;
+      ambiguous |= target != nullptr;
+      target = &mesh;
+    }
+    if (invalidUvMeshes.contains(path) || slots.rbegin()->first != slots.size() - 1) {
+      mismatch(path, "runtime primary UV source identities are not unique and dense");
+      continue;
+    }
+    if (!target || ambiguous || !target->primary_uv) {
+      mismatch(path, !target ? "no resident mesh at this path" :
+          ambiguous ? "resident mesh path is ambiguous" :
+          "no resident point-domain primary UV mapping");
+      continue;
+    }
+    const auto& mapping = *target->primary_uv;
+    if (mapping.source_point_count != slots.size() || mapping.vertices.empty()) {
+      mismatch(path, "primary UV source point count differs from the resident mapping");
+      continue;
+    }
+    Toon::AvatarUvBinding binding{target->mesh, {}};
+    std::set<std::uint32_t> covered;
+    for (const auto point : mapping.vertices) {
+      const auto slot = slots.find(point);
+      if (slot == slots.end()) break;
+      binding.sources.push_back(slot->second);
+      covered.insert(point);
+    }
+    if (binding.sources.size() != mapping.vertices.size() || covered.size() != slots.size()) {
+      mismatch(path, "resident primary UV mapping does not cover every source point");
+      continue;
+    }
+    match.bindings.uvs.push_back(std::move(binding));
+  }
 #endif
 
   // Skins: each GPU-skinned palette of a skeleton the runtime publishes.

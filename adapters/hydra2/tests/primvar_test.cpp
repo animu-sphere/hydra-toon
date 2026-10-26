@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "adapter.hpp"
 #include "generated_tangents.hpp"
+#ifdef TOON_HAS_AVATAR_STATE
+#include "avatar_binding.hpp"
+#endif
 
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
@@ -52,6 +55,76 @@ struct Host {
     return delegate.CommitScene();
   }
 };
+
+#if defined(TOON_HAS_AVATAR_STATE) && AR_ABI_VERSION >= 5
+struct UvSnapshot {
+  static inline ArStateView view{};
+  static ArStatus AR_CALL Get(ArSnapshot, ArStateView* output) {
+    *output = view;
+    return AR_OK;
+  }
+  static ArStatus AR_CALL Hold(ArSnapshot) { return AR_OK; }
+};
+#endif
+
+bool PrimaryUvMapping(Host& host, const std::vector<std::uint32_t>& vertices,
+    std::uint32_t source_count = 4) {
+  const auto targets = host.delegate.DescribeResidentTargets();
+  if (!Check(targets.meshes.size() == 1, "UV mapping check needs one resident mesh")) return false;
+  const auto& mapping = targets.meshes[0].primary_uv;
+  if (!Check(vertices.empty() ? !mapping :
+          mapping && mapping->source_point_count == source_count && mapping->vertices == vertices,
+      "resident primary UV identities must follow corner and tangent-seam splits")) return false;
+#if defined(TOON_HAS_AVATAR_STATE) && AR_ABI_VERSION >= 5
+  if (mapping) {
+    const std::string path = targets.meshes[0].path.GetString();
+    std::vector<ArVertexUv> uvs;
+    for (std::uint32_t i = source_count; i > 0; --i)
+      uvs.push_back({path.c_str(), i - 1, {double(i), -double(i)}});
+    ArStateView view{AR_HEADER(ArStateView)};
+    view.instance = view.generation = view.layout_version = view.frame_id = 1;
+    view.layout_id = "primary-uv-test";
+    view.vertex_uvs = uvs.data();
+    view.vertex_uv_count = source_count;
+    const auto match = HdToonMatchAvatarTargets(view, targets, {});
+    if (!Check(match.mismatches.empty() && match.bindings.uvs.size() == 1,
+            "Hydra UV identities must automatically match reversed runtime slots")) return false;
+    const auto& binding = match.bindings.uvs[0];
+    if (!Check(binding.mesh == targets.meshes[0].mesh && binding.sources.size() == vertices.size(),
+            "matched UV binding must cover the resident mesh")) return false;
+    for (std::size_t i = 0; i < vertices.size(); ++i)
+      if (!Check(binding.sources[i] == source_count - 1 - vertices[i],
+              "matched UV slot lost a corner or tangent-seam identity")) return false;
+    const auto baseline = host.delegate.CommitScene();
+    Toon::AvatarStateAdapter adapter;
+    std::string error;
+    const bool bound = adapter.Bind(view, baseline, 1, match.bindings, error);
+    if (!baseline.meshes[0].tangents->empty()) {
+      if (!Check(!bound && error.find("tangents") != std::string::npos,
+              "automatic UV matching must preserve resident tangent refusal")) return false;
+    } else {
+      if (!Check(bound, error.c_str())) return false;
+      ArRuntimeApi api{AR_HEADER(ArRuntimeApi)};
+      api.get_snapshot = UvSnapshot::Get;
+      api.retain_snapshot = api.release_snapshot = UvSnapshot::Hold;
+      UvSnapshot::view = view;
+      Toon::RetainedAvatarSnapshot held;
+      Toon::FrameSnapshot output;
+      const bool applied = held.Reset(api, 1, error) && adapter.Apply(held, baseline, 1, output, error);
+      if (!Check(applied, error.c_str())) return false;
+      for (std::size_t i = 0; i < vertices.size(); ++i) {
+        const float value = static_cast<float>(vertices[i] + 1);
+        if (!Check((*output.meshes[0].uvs)[i] == Toon::Float2{value, -value},
+                "automatically bound UV publication differs from source point identities")) return false;
+      }
+      if (!Check(adapter.Release(baseline, 1, output, error) &&
+                     *output.meshes[0].uvs == *baseline.meshes[0].uvs,
+              "automatic UV binding release must restore the Hydra baseline")) return false;
+    }
+  }
+#endif
+  return true;
+}
 
 bool SameGeometry(const Toon::MeshSnapshot& a, const Toon::MeshSnapshot& b) {
   return a.points_revision == b.points_revision &&
@@ -176,6 +249,7 @@ def Mesh "Body" {
   const auto mesh = first.meshes[0];
   const std::vector<Toon::Float4> tangents{{0,1,0,1},{0,1,0,1},{0,1,0,1},
       {1,0,0,-1},{1,0,0,-1},{1,0,0,-1}};
+  if (!PrimaryUvMapping(host, {0,1,2,0,2,3})) return false;
   if (!Check(mesh.points->size() == 6 && *mesh.tangents == tangents &&
                  *mesh.uvs == std::vector<Toon::Float2>{{0,0},{1,0},{1,1},{0,0},{1,1},{0,1}},
           "indexed tangent seams must split points and UVs with their signs")) return false;
@@ -235,6 +309,7 @@ def Mesh "Body" {
   expanded.push_back(GfVec3f(0,0,0));
   UsdGeomMesh(prim).GetPointsAttr().Set(expanded);
   const auto grown = host.Sync();
+  if (!PrimaryUvMapping(host, {})) return false;
   if (!Check(grown.meshes[0].tangents->size() == 5,
           "constant tangent expansion did not follow point count")) return false;
   for (const auto interpolation : {UsdGeomTokens->vertex, UsdGeomTokens->varying}) {
@@ -301,6 +376,7 @@ def Mesh "Body" {
   Host host(stage);
   const auto first = host.Sync();
   const auto mesh = first.meshes[0];
+  if (!PrimaryUvMapping(host, vertices)) return false;
   if (!Check(*mesh.tangents == frames && *mesh.indices == split_indices &&
                  *mesh.edge_scales == std::vector<float>{1,2,3,4,1,3} &&
                  *mesh.sub_texture_uvs == std::vector<Toon::Float2>{{0,0},{1,1},{2,2},{3,3},{0,0},{2,2}},
@@ -352,6 +428,7 @@ def Mesh "Body" {
   // Scale preserves both the seam layout and frame; no geometry upload.
   st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(2,0),GfVec2f(0,2),GfVec2f(2,2)});
   const auto scaled = host.Sync();
+  if (!PrimaryUvMapping(host, vertices)) return false;
   if (!Check(SameGeometry(mesh, scaled.meshes[0]) && mesh.tangents == scaled.meshes[0].tangents,
           "UV scaling rebuilt an unchanged generated frame or seam map")) return false;
   // A UV rotation changes frames but retains the mirrored split.
@@ -362,6 +439,7 @@ def Mesh "Body" {
   // Restore ordinary UVs, eliminating the tangent discontinuity.
   st.Set(VtVec2fArray{GfVec2f(0,0),GfVec2f(1,0),GfVec2f(1,1),GfVec2f(0,1)});
   const auto ordinary = host.Sync();
+  if (!PrimaryUvMapping(host, {0,1,2,3})) return false;
   if (!Check(ordinary.meshes[0].points->size() == 4 && *ordinary.meshes[0].indices == triangles &&
                  *ordinary.meshes[0].tangents == std::vector<Toon::Float4>(4,{1,0,0,1}),
           "removing a generated seam must restore the original indexed layout")) return false;
@@ -393,6 +471,15 @@ def Mesh "Body" {
   prim.RemoveProperty(TfToken("primvars:tangents"));
   st.Set(VtVec2fArray(4, GfVec2f(0,0)));
   if (!Check(host.Sync().meshes[0].tangents->empty(), "collapsed UVs retained stale frames")) return false;
+  if (!PrimaryUvMapping(host, {0,1,2,3})) return false;
+  st.SetInterpolation(UsdGeomTokens->faceVarying);
+  st.Set(VtVec2fArray(6, GfVec2f(0,0)));
+  host.Sync();
+  if (!PrimaryUvMapping(host, {})) return false;
+  st.SetInterpolation(UsdGeomTokens->varying);
+  st.Set(VtVec2fArray(4, GfVec2f(0,0)));
+  host.Sync();
+  if (!PrimaryUvMapping(host, {0,1,2,3})) return false;
   std::cout << "MikkTSpace mirrored seams, analytic normal mapping and edit routing passed\n";
   return true;
 }

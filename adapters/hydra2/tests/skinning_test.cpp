@@ -754,6 +754,68 @@ bool AvatarSkinParity(HdToonRenderDelegate& delegate,
 
 // What has no resident target is reported by its runtime identity; what
 // does is still bound beside it.
+#if AR_ABI_VERSION >= 5
+bool AvatarUvMatching() {
+  // A resident split mesh and a second instance of the same point-domain
+  // layout use unrelated runtime slot orders and opaque paths.
+  HdToonResidentTargets resident;
+  HdToonResidentMesh mesh;
+  mesh.mesh = 1;
+  mesh.path = SdfPath("/Body");
+  mesh.primary_uv = HdToonResidentPrimaryUv{3, {0,1,2,0}};
+  resident.meshes.push_back(mesh);
+  mesh.mesh = 2;
+  mesh.path = SdfPath("/Other");
+  mesh.primary_uv = HdToonResidentPrimaryUv{3, {2,1,0}};
+  resident.meshes.push_back(mesh);
+  std::vector<ArVertexUv> uvs{
+      {"/Body", 2, {0,0}}, {"/Other", 1, {0,0}}, {"/Body", 0, {0,0}},
+      {"/Other", 0, {0,0}}, {"/Body", 1, {0,0}}, {"/Other", 2, {0,0}}};
+  ArStateView view{AR_HEADER(ArStateView)};
+  view.vertex_uvs = uvs.data();
+  view.vertex_uv_count = static_cast<std::uint32_t>(uvs.size());
+  const auto match = HdToonMatchAvatarTargets(view, resident, {});
+  if (!Check(match.mismatches.empty() && match.bindings.uvs.size() == 2 &&
+                 match.bindings.uvs[0].mesh == 1 &&
+                 match.bindings.uvs[0].sources == std::vector<std::uint32_t>{2,4,0,2} &&
+                 match.bindings.uvs[1].mesh == 2 &&
+                 match.bindings.uvs[1].sources == std::vector<std::uint32_t>{5,1,3},
+          "UV matching must isolate meshes and reorder slots at split vertices")) return false;
+  auto refused = [&](const ArStateView& candidate, const HdToonResidentTargets& targets) {
+    const auto bad = HdToonMatchAvatarTargets(candidate, targets, {});
+    return Check(bad.mismatches.size() == 1 && bad.mismatches[0].subject == "/Body" &&
+                     bad.bindings.uvs.size() == 1 && bad.bindings.uvs[0].mesh == 2,
+        "malformed UV mesh must refuse atomically beside a valid mesh");
+  };
+  auto targets = resident;
+  targets.meshes[0].primary_uv.reset();
+  if (!refused(view, targets)) return false;
+  targets = resident;
+  targets.meshes[0].primary_uv->source_point_count = 4;
+  if (!refused(view, targets)) return false;
+  targets = resident;
+  targets.meshes[0].primary_uv->vertices = {0,1,0};
+  if (!refused(view, targets)) return false;
+  targets.meshes[0].primary_uv->vertices = {0,1,2,99};
+  if (!refused(view, targets)) return false;
+  targets = resident;
+  targets.meshes.push_back(targets.meshes[0]);
+  if (!refused(view, targets)) return false;
+  targets = resident;
+  targets.meshes.erase(targets.meshes.begin());
+  if (!refused(view, targets)) return false;
+  uvs[0].vertex_index = 0;
+  if (!refused(view, resident)) return false;
+  uvs[0].vertex_index = 99;
+  if (!refused(view, resident)) return false;
+  uvs[0].vertex_index = 2;
+  view.vertex_uvs = nullptr;
+  const auto missing = HdToonMatchAvatarTargets(view, resident, {});
+  return Check(missing.mismatches.size() == 1 && missing.bindings.uvs.empty(),
+      "a missing UV array must refuse before dereference");
+}
+#endif
+
 bool AvatarMismatches(const HdToonResidentTargets& resident) {
   RuntimeLayout layout;
   // The skeleton without the tip a palette entry needs, and one not there.
@@ -1087,7 +1149,11 @@ int main(int argc, char** argv) {
 #ifdef TOON_HAS_AVATAR_STATE
   if (!AvatarInbetweenParity(delegate, weight_attr, sync) ||
       !AvatarMismatches(delegate.DescribeResidentTargets()) ||
-      !AvatarEmissive(delegate.DescribeResidentTargets())) {
+      !AvatarEmissive(delegate.DescribeResidentTargets())
+#if AR_ABI_VERSION >= 5
+      || !AvatarUvMatching()
+#endif
+      ) {
     return 1;
   }
 #endif
