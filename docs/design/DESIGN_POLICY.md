@@ -772,6 +772,15 @@ for the duration of its use. Frame identity, binding compatibility, input
 provenance and clock mapping survive adaptation. Unsupported effects follow
 explicit capability negotiation and diagnostics, not silent omission.
 
+Primary UV bindings must explicitly map every resident vertex to an absolute
+runtime `st` slot. Source identities remain dense per mesh; split resident
+vertices may share a source. Consumers must refuse missing/overlapping mappings,
+nonfinite or float-overflow values and structural edits before publishing any
+part of the frame. UV changes use ordinary extraction and geometry upload;
+they are not late pose/material updates. A binding with resident tangents must
+either regenerate them coherently or refuse the binding. Release restores the
+unoverridden scene's UV stream, with revisions advancing only on value changes.
+
 The runtime owns evaluation order and competition between expressions and gaze.
 The renderer's late callback obtains the latest compatible completed snapshot;
 it cannot trigger another evaluation or simulation step. It may keep a previous

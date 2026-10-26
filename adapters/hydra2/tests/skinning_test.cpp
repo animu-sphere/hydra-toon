@@ -770,13 +770,23 @@ bool AvatarMismatches(const HdToonResidentTargets& resident) {
       "inputs:vrm:material:baseColorFactor", AR_VALUE_VEC3, 0, {}});
   layout.visibility.push_back({"/Root/Linear", 1});
   layout.visibility.push_back({"/Root/Nowhere", 1});
+  auto view = layout.View(0);
+#if AR_ABI_VERSION >= 5
+  ArVertexUv uv{"/Root/Linear", 0, {.25, .5}};
+  view.vertex_uvs = &uv;
+  view.vertex_uv_count = 1;
+#endif
   const HdToonAvatarTargetMatch match = HdToonMatchAvatarTargets(
-      layout.View(0), resident, HdToonCanonicalMaterialInputs());
+      view, resident, HdToonCanonicalMaterialInputs());
   std::vector<std::string> subjects;
   for (const auto& mismatch : match.mismatches) {
     subjects.push_back(mismatch.subject);
   }
-  const std::vector<std::string> expected{"/Root/Linear base/tip",
+  const std::vector<std::string> expected{
+#if AR_ABI_VERSION >= 5
+      "/Root/Linear",
+#endif
+      "/Root/Linear base/tip",
       "/Root/Other", "/Root/Skel", "/Root/Linear missing",
       "/Root/DualQuaternion lift", "/Root/Looks/Skin inputs:vrm:material:emissiveStrength",
       "/Root/Looks/None inputs:vrm:material:baseColorFactor", "/Root/Nowhere"};

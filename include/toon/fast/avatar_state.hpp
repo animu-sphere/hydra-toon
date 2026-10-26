@@ -86,11 +86,23 @@ struct AvatarVisibilityBinding {
   std::uint32_t source = 0;
   MeshId mesh = 0;
 };
+#if AR_ABI_VERSION >= 5
+struct AvatarUvBinding {
+  MeshId mesh = 0;
+  // Runtime vertex_uv slots, one per resident vertex in renderer order.
+  // A source may repeat at split vertices. All slots belong to one runtime
+  // mesh with dense source vertex identities; coordinates are absolute st.
+  std::vector<std::uint32_t> sources;
+};
+#endif
 struct AvatarBindings {
   std::vector<AvatarSkinBinding> skins;
   std::vector<AvatarMorphBinding> morphs;
   std::vector<AvatarMaterialBinding> materials;
   std::vector<AvatarVisibilityBinding> visibility;
+#if AR_ABI_VERSION >= 5
+  std::vector<AvatarUvBinding> uvs;
+#endif
 };
 
 struct AvatarFrameIdentity {
@@ -112,6 +124,7 @@ public:
   // Complete resolved values over the latest *unoverridden* scene baseline.
   // On failure output and adapter history are unchanged. Visibility changes
   // require ordinary extraction; ApplyFastSnapshot rejects membership changes.
+  // UV changes also require ordinary extraction (geometry stream upload).
   // Input times come from the host: runtime evaluation_seconds is not a source
   // timestamp. This API copies records and allocates changed dynamic arrays.
   bool Apply(const RetainedAvatarSnapshot& state, const FrameSnapshot& scene,
@@ -140,6 +153,9 @@ private:
   bool CheckScene(const FrameSnapshot& scene, std::uint64_t epoch, std::string& error) const;
   void Publish(FrameSnapshot candidate, FrameSnapshot& output);
   std::vector<Identity> joints_, morphs_, materials_, visibility_;
+#if AR_ABI_VERSION >= 5
+  std::vector<Identity> uvs_;
+#endif
   std::vector<std::vector<Knot>> knots_; // per morph binding
   AvatarBindings bindings_;
   AvatarFrameIdentity identity_;
