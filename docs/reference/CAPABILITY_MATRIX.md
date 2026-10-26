@@ -143,7 +143,14 @@ normal-mapped MToon Vulkan colour/depth agree at 1x/4x; pixels change and return
 to base. The provider uses an empty physics world and no bones, PMX/VMD reader,
 material evaluation or application host
 ([report 105](../reports/renderer/105-2026-10-26-mmd-resident-uv.md)).
-Composed full-avatar playback, broader runtime/Hydra agreement and representative
-avatar acceptance remain open. ABI-4 builds
+  A separate opt-in generated MMD/Jolt host combines two final joints, vertex
+  morphs and primary UVs in the same snapshot, automatically matching reversed
+  resident palettes and reordered UV slots. Skin/morph/UV/tangent and auxiliary
+  streams agree with USD/Hydra, and textured MMD/normal-mapped MToon colour/depth
+  agree at 1x/4x across world resets. Removing skin or vertex-morph output changes
+  pixels; retained results survive producer destruction and Release restores
+  all resident bases ([report 106](../reports/renderer/106-2026-10-26-mmd-avatar-uv.md)).
+  PMX/VMD intake, application resident lifecycle, broader runtime/Hydra agreement
+  and representative avatar acceptance remain open. ABI-4 builds
 retain their prior scope. Rebuild the adapter library and its consumers together
 with matching runtime headers; this experimental C++ binding layout has changed.

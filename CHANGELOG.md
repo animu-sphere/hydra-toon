@@ -10,6 +10,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- An opt-in generated MMD/Jolt composition check combining final joint palettes,
+  vertex morphs and primary UVs through automatic resident bindings, with
+  USD/Hydra stream and 1x/4x Vulkan parity across world resets.
 - An opt-in generated MMD owner/runtime UV composition check over automatic
   resident bindings, with USD/Hydra stream and textured MMD/normal-mapped
   MToon Vulkan agreement through signed weights, resets and return to base.

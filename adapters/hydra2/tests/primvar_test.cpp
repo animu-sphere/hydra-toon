@@ -11,6 +11,13 @@
 #endif
 #endif
 
+#ifdef TOON_TEST_MMD_AVATAR
+#include "mmd_avatar_provider.hpp"
+#if AR_ABI_VERSION < 5
+#error The MMD avatar composition check requires runtime ABI 5
+#endif
+#endif
+
 #include <pxr/base/tf/setenv.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/rprimCollection.h>
@@ -348,6 +355,10 @@ def Mesh "Body" {
 #endif
   return true;
 }
+
+#ifdef TOON_TEST_MMD_AVATAR
+#include "mmd_avatar_check.hpp"
+#endif
 
 bool PreviewNormals(const std::string& shaders) {
   if (shaders.empty()) return true;
@@ -1030,8 +1041,12 @@ int main(int argc, char** argv) {
     }
     if (!Check(probe != nullptr, error.c_str())) return 1;
   }
+#ifdef TOON_TEST_MMD_AVATAR
+  if (!RuntimeMmdAvatar(shaders)) return 1;
+#else
   if (!RuntimeUvTangents(shaders)) return 1;
-#ifndef TOON_TEST_MMD_UV
+#endif
+#if !defined(TOON_TEST_MMD_UV) && !defined(TOON_TEST_MMD_AVATAR)
   if (!PreviewNormals(shaders) || !Tangents(shaders) || !Generated(shaders) ||
       !GeneratedSkin(argv[1], shaders) || !Ordinary(shaders) || !Skin(argv[1], shaders)) return 1;
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
