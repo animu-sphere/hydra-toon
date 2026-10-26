@@ -47,6 +47,8 @@ option(TOON_ENABLE_AVATAR_STATE "Build the optional avatar runtime state consume
 option(TOON_ENABLE_TESSERA "Build the Tessera example host" OFF)
 option(TOON_AVATAR_RUNTIME_PROVIDERS
   "Build the Hydra host check over real usd-avatar-runtime VRM providers" OFF)
+option(TOON_MMD_UV_PROVIDER_TEST
+  "Build the opt-in generated MMD/runtime resident UV composition check" OFF)
 if("hydra2" IN_LIST OST_RENDERER_ADAPTERS)
   set(TOON_ENABLE_HYDRA2 ON CACHE BOOL
     "Build the optional co-built OpenUSD Hydra 2 adapter" FORCE)
@@ -56,6 +58,9 @@ if("viewport" IN_LIST OST_RENDERER_ADAPTERS)
     "Build the optional GLFW/Vulkan viewport adapter" FORCE)
 endif()
 option(TOON_BUILD_TESTS "Build renderer contract and install-tree tests" ON)
+if(TOON_MMD_UV_PROVIDER_TEST AND (NOT TOON_ENABLE_HYDRA2 OR NOT TOON_BUILD_TESTS))
+  message(FATAL_ERROR "TOON_MMD_UV_PROVIDER_TEST requires TOON_ENABLE_HYDRA2 and TOON_BUILD_TESTS")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

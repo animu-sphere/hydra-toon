@@ -153,6 +153,33 @@ if(TOON_BUILD_TESTS)
     target_link_libraries(toon-hydra2-primvar-test PRIVATE toon-hydra2-avatar-binding)
     target_compile_definitions(toon-hydra2-primvar-test PRIVATE TOON_HAS_AVATAR_STATE=1)
   endif()
+  if(TOON_MMD_UV_PROVIDER_TEST)
+    if(NOT TARGET toon-hydra2-avatar-binding)
+      message(FATAL_ERROR "TOON_MMD_UV_PROVIDER_TEST requires TOON_ENABLE_AVATAR_STATE")
+    endif()
+    find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS mmd)
+    add_executable(toon-hydra2-mmd-uv-test tests/primvar_test.cpp)
+    toon_configure_warnings(toon-hydra2-mmd-uv-test)
+    target_include_directories(toon-hydra2-mmd-uv-test PRIVATE "${PROJECT_SOURCE_DIR}/core/render-world")
+    target_link_libraries(toon-hydra2-mmd-uv-test PRIVATE toon-hydra2-avatar-binding
+      toon-hydra2-runtime usdImaging usdShade usdGeom usd Toon::Vulkan AvatarRuntime::avatarMmdAdapter)
+    target_compile_features(toon-hydra2-mmd-uv-test PRIVATE cxx_std_20)
+    target_compile_definitions(toon-hydra2-mmd-uv-test PRIVATE TOON_HAS_AVATAR_STATE=1 TOON_TEST_MMD_UV=1
+      NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    foreach(mode IN ITEMS cpu gpu)
+      set(arguments "unused")
+      if(mode STREQUAL "gpu")
+        list(APPEND arguments "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+      endif()
+      string(JOIN "|" arguments ${arguments})
+      add_test(NAME toon-renderer-mmd-uv-${mode} COMMAND ${CMAKE_COMMAND}
+        "-DPROGRAM=$<TARGET_FILE:toon-hydra2-mmd-uv-test>"
+        "-DARGUMENTS=${arguments}"
+        "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-hydra2-mmd-uv-test>,|>"
+        "-DPLUGINS=" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_avatar_providers.cmake")
+    endforeach()
+    set_tests_properties(toon-renderer-mmd-uv-gpu PROPERTIES LABELS "gpu")
+  endif()
 
   # The GPU handoff's measurements (GPU handoff policy §8): a host that lends
   # its own device renders a stage's draw list and writes timings as JSON.
