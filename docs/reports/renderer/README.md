@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [104](104-2026-10-26-avatar-uv-tangents.md) | Evaluated UV tangent regeneration, coherent skin/morph/auxiliary seam expansion, immutable baseline restoration and generated automatic runtime/USD-Hydra stream and normal-mapped Vulkan parity at 1x/4x |
 | [103](103-2026-10-26-avatar-resident-uv.md) | Automatic point-domain primary UV matching through corner/tangent-seam splits, reordered slots, malformed mapping refusal and no-tangent publication/release; resident tangent regeneration remains open |
 | [102](102-2026-10-26-avatar-primary-uv.md) | Explicit runtime ABI-5 primary UV bindings, reordered/split vertices, atomic refusal/reset/release, installed consumers and generated textured MMD/MToon Vulkan response; automatic resident mapping and composed Hydra parity remain open |
 | [101](101-2026-10-25-v080-preparation.md) | v0.8.0 release gate: OST core 24/24, hydra 39/39, viewport-usd 75/75, webgpu 53/53, webgpu-usd 101/101, tessera-usd 40/40 with `ost validate`, plain CMake 24/24, a reproducible local `hydra` package carrying `vulkan_handoff.hpp` without Dawn, DXC, WGSL or Tessera; GPU evidence in reports 97–100 |

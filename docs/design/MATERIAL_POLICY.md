@@ -394,6 +394,14 @@ skinning/morphing must leave a stable normal/tangent frame. A frame derived
 only from deformed positions and UVs is insufficient as the general asset
 fidelity contract.
 
+For a mesh with resident tangents, an evaluated primary UV override must update
+its rest tangent frame coherently. Preserve the authored frame when coordinates equal the baseline;
+otherwise regenerate it from rest geometry and the absolute overridden UVs,
+carrying any new seam through every vertex stream before publication. Unusable
+frames use the derivative fallback. Releasing the override restores the
+baseline's geometry and authored frames. Ordinary extraction must carry these
+structural updates; the late pose/material path must refuse them.
+
 Use bounded authored-asset/reference and generated-frame/glTF comparisons
 to investigate mirrored seams and deformation under §12.1. Unverified
 external cases may remain documented limitations when no visible defect

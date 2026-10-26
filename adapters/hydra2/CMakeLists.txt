@@ -8,21 +8,11 @@ if(NOT TOON_WITH_VULKAN)
 endif()
 # The co-built runtime is implementation detail of the module. It is not an
 # independently packaged OpenStrata plugin bundle or renderer SDK component.
-set(_toon_mikktspace_dir "${PROJECT_SOURCE_DIR}/third_party/mikktspace")
-add_library(toon-hydra2-runtime STATIC src/adapter.cpp src/material.cpp
-  src/generated_tangents.cpp "${_toon_mikktspace_dir}/mikktspace.c")
-# The standalone upstream implementation is also valid C++; keep the
-# project's CXX-only toolchain and isolate upstream warnings.
-set_source_files_properties("${_toon_mikktspace_dir}/mikktspace.c" PROPERTIES LANGUAGE CXX)
-if(MSVC)
-  set_source_files_properties("${_toon_mikktspace_dir}/mikktspace.c" PROPERTIES COMPILE_OPTIONS /w)
-else()
-  set_source_files_properties("${_toon_mikktspace_dir}/mikktspace.c" PROPERTIES COMPILE_OPTIONS -w)
-endif()
+add_library(toon-hydra2-runtime STATIC src/adapter.cpp src/material.cpp)
 toon_configure_warnings(toon-hydra2-runtime)
 target_include_directories(toon-hydra2-runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  PRIVATE "${_toon_mikktspace_dir}")
+  PRIVATE "${PROJECT_SOURCE_DIR}/core/render-world")
 target_link_libraries(toon-hydra2-runtime
   PUBLIC hd Toon::RenderWorld
   PRIVATE
@@ -73,8 +63,6 @@ toon_copy_shaders(hdToon)
 
 toon_install_plugin(hdToon "${TOON_PLUGIN_RESOURCE_FILE}"
   ${TOON_SHADER_SPVS})
-install(FILES "${_toon_mikktspace_dir}/LICENSE" "${_toon_mikktspace_dir}/README.md"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/licenses/mikktspace")
 install(FILES tests/usdview-smoke.usda
   DESTINATION "${CMAKE_INSTALL_DATADIR}/toon/tests")
 
@@ -153,6 +141,8 @@ if(TOON_BUILD_TESTS)
     _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 
   add_executable(toon-hydra2-primvar-test tests/primvar_test.cpp)
+  target_include_directories(toon-hydra2-primvar-test PRIVATE
+    "${PROJECT_SOURCE_DIR}/core/render-world")
   toon_configure_warnings(toon-hydra2-primvar-test)
   target_link_libraries(toon-hydra2-primvar-test PRIVATE
     toon-hydra2-runtime usdImaging usdShade usdGeom usd Toon::Vulkan)

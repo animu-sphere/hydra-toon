@@ -6,6 +6,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -596,6 +597,169 @@ struct UvScene {
     return b;
   }
 };
+void PrimaryUvTangents(const char* shaders = nullptr) {
+  UvScene scene(Toon::ToonShadingModel::MToon);
+  auto& world = scene.world;
+  const auto id = scene.mesh;
+  world.SetMeshPoints(id, {{-.6F,-.6F,0},{.6F,-.6F,0},{.6F,.6F,0},{-.6F,.6F,0}});
+  world.SetMeshTopology(id, {0,1,2,0,2,3});
+  const std::vector<Toon::Float2> ordinary{{0,0},{1,0},{1,1},{0,1}};
+  const std::vector<Toon::Float2> mirrored{{0,0},{1,0},{0,1},{1,1}};
+  world.SetMeshUVs(id, ordinary);
+  world.SetMeshTangents(id, std::vector<Toon::Float4>(4, {0,1,0,-1}));
+  world.SetMeshEdgeScales(id, {1,2,3,4});
+  world.SetMeshSubTextureUVs(id, ordinary);
+  world.SetMeshSkin(id, {1, false, {{0,1},{1,1},{0,1},{1,1}}, {}});
+  Toon::Matrix4 translated;
+  translated.m[12] = .05F;
+  world.SetMeshSkinPose(id, {{Toon::Matrix4{}, translated}, {}});
+  world.SetMeshMorph(id, {{{{.05F,0,0},0,{},0}}, {{0,1},{0,0},{0,1},{0,0}}});
+  world.SetMeshMorphWeights(id, {.5F});
+  Toon::ToonTexture normal;
+  normal.width = normal.height = 1;
+  normal.encoding = Toon::ToonTextureEncoding::Linear;
+  normal.pixels = std::make_shared<const std::vector<std::uint8_t>>(
+      std::vector<std::uint8_t>{191,230,204,255});
+  const auto normalId = world.CreateTexture(); world.SetTexture(normalId, normal);
+  auto material = world.Commit().materials[0].material;
+  material.normal_texture.texture = normalId;
+  world.SetMaterial(1, material);
+  const auto base = world.Commit();
+  ArVertexUv values[4]{{"mesh",2,{}},{"mesh",0,{}},{"mesh",3,{}},{"mesh",1,{}}};
+  ArStateView view{AR_HEADER(ArStateView)};
+  view.instance = view.generation = view.layout_version = 1;
+  view.layout_id = "uv-tangents";
+  view.vertex_uvs = values; view.vertex_uv_count = 4;
+  Toon::AvatarBindings bindings;
+  bindings.uvs = {{id, {1,3,0,2}}};
+  Toon::AvatarStateAdapter adapter;
+  Toon::FrameSnapshot output;
+  std::string error;
+  Check(adapter.Bind(view, base, 1, bindings, error), error.c_str());
+  std::unique_ptr<Toon::OffscreenRenderer> renderer, reference;
+  if (shaders) {
+    Toon::FrameStatus status;
+    renderer = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error);
+    reference = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error);
+    Check(renderer && reference, error.c_str());
+  }
+  const std::vector<std::vector<Toon::Float2>> frames{ordinary, mirrored,
+      {{0,0},{-1,0},{0,1},{-1,1}}, std::vector<Toon::Float2>(4), ordinary,
+      {{0,0},{2,0},{2,1},{0,1}}};
+  for (std::size_t frame = 0; frame < frames.size(); ++frame) {
+    view.frame_id = frame + 1;
+    for (auto& value : values) {
+      value.value[0] = frames[frame][value.vertex_index].x;
+      value.value[1] = frames[frame][value.vertex_index].y;
+    }
+    auto held = Fake::Snapshot(view);
+    Check(adapter.Apply(held, base, 1, output, error), error.c_str());
+    const bool seam = frame == 1 || frame == 2;
+    const std::vector<unsigned> sources = seam ? std::vector<unsigned>{0,1,2,3,0,2} : std::vector<unsigned>{0,1,2,3};
+    const std::vector<unsigned> indices = seam ? std::vector<unsigned>{0,1,2,4,5,3} : std::vector<unsigned>{0,1,2,0,2,3};
+    const auto& mesh = output.meshes[0];
+    Check(*mesh.indices == indices && mesh.points->size() == sources.size() && mesh.index_bound == sources.size(),
+        "UV tangent seam topology differs");
+    // Independent expected rest frames; no call to the tangent generator.
+    std::vector<Toon::Float4> tangents;
+    if (frame != 3) {
+      for (std::size_t i = 0; i < sources.size(); ++i) {
+        const bool negative = i == 3 || i >= 4;
+        tangents.push_back(frame == 5 ? Toon::Float4{1,0,0,1} : !seam ? Toon::Float4{0,1,0,-1} :
+            frame == 1 ? Toon::Float4{negative ? -1.F : 1.F,0,0,negative ? -1.F : 1.F} :
+            Toon::Float4{negative ? 1.F : -1.F,0,0,negative ? 1.F : -1.F});
+      }
+    }
+    Check(*mesh.tangents == tangents, "runtime UV tangent direction/handedness differs");
+    if (frame == 5)
+      Check(mesh.points == base.meshes[0].points && mesh.indices == base.meshes[0].indices &&
+                mesh.influences == base.meshes[0].influences && mesh.morph_ranges == base.meshes[0].morph_ranges,
+          "UV-only frame rebuilt unchanged geometry");
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+      const auto source = sources[i];
+      Check((*mesh.points)[i] == (*base.meshes[0].points)[source] &&
+                (*mesh.normals)[i] == (*base.meshes[0].normals)[source] &&
+                (*mesh.uvs)[i] == frames[frame][source] &&
+                (*mesh.influences)[i] == (*base.meshes[0].influences)[source] &&
+                (*mesh.morph_ranges)[i] == (*base.meshes[0].morph_ranges)[source] &&
+                (*mesh.edge_scales)[i] == float(source + 1) &&
+                (*mesh.sub_texture_uvs)[i] == ordinary[source], "UV seam lost a resident stream");
+    }
+    Check(mesh.morph_offsets == base.meshes[0].morph_offsets && mesh.parts == base.meshes[0].parts &&
+              mesh.joints == base.meshes[0].joints, "UV seam changed non-vertex streams");
+    const auto prior = output;
+    Check(adapter.Apply(held, base, 1, output, error) &&
+              output.revision == prior.revision && output.meshes[0].points == prior.meshes[0].points &&
+              output.meshes[0].indices == prior.meshes[0].indices && output.meshes[0].tangents == prior.meshes[0].tangents &&
+              output.meshes[0].influences == prior.meshes[0].influences && output.meshes[0].morph_ranges == prior.meshes[0].morph_ranges,
+        "duplicate UV tangent frame rewrote streams");
+    if (renderer) {
+      // Independently expand an oracle snapshot; the renderer must upload
+      // every changed stream on seam creation, rotation and removal.
+      auto expected = base;
+      auto& wanted = expected.meshes[0];
+      auto expand = [&](const auto& array) {
+        using T = typename std::remove_cvref_t<decltype(*array)>::value_type;
+        std::vector<T> result;
+        for (auto source : sources) result.push_back((*array)[source]);
+        return std::make_shared<const std::vector<T>>(std::move(result));
+      };
+      wanted.points = expand(wanted.points); wanted.normals = expand(wanted.normals);
+      wanted.influences = expand(wanted.influences); wanted.morph_ranges = expand(wanted.morph_ranges);
+      wanted.edge_scales = expand(wanted.edge_scales); wanted.sub_texture_uvs = expand(wanted.sub_texture_uvs);
+      auto uvArray = std::make_shared<const std::vector<Toon::Float2>>(frames[frame]);
+      wanted.uvs = expand(uvArray);
+      wanted.tangents = std::make_shared<const std::vector<Toon::Float4>>(tangents);
+      wanted.indices = std::make_shared<const std::vector<unsigned>>(indices);
+      wanted.index_bound = static_cast<unsigned>(sources.size());
+      wanted.points_revision = wanted.normals_revision = wanted.topology_revision = wanted.uvs_revision =
+          wanted.tangents_revision = wanted.skin_revision = wanted.morph_revision =
+          wanted.edge_scales_revision = wanted.sub_texture_uvs_revision = 1000 + frame;
+      Toon::ColorProduct image, wantedImage;
+      Toon::DepthProduct depth, wantedDepth;
+      Check(renderer->Render(Toon::ExtractDrawList(output),96,96,image,depth,error) &&
+                reference->Render(Toon::ExtractDrawList(expected),96,96,wantedImage,wantedDepth,error), error.c_str());
+      Check(image.payload == wantedImage.payload && depth.payload == wantedDepth.payload &&
+                renderer->statistics().validation_message_count == 0, "UV seam GPU differs from independent streams");
+    }
+  }
+  // A reset may introduce seams again; Release must restore all streams,
+  // including their revisions, from the immutable authored baseline.
+  view.generation = 2; view.frame_id = 1;
+  for (auto& value : values) {
+    value.value[0] = mirrored[value.vertex_index].x;
+    value.value[1] = mirrored[value.vertex_index].y;
+  }
+  auto reset = Fake::Snapshot(view);
+  Check(adapter.Apply(reset, base, 1, output, error), error.c_str());
+  const auto seamFrame = output;
+  Check(adapter.Release(base, 1, output, error) && output.meshes[0].points->size() == 4 &&
+            *output.meshes[0].tangents == *base.meshes[0].tangents &&
+            *output.meshes[0].influences == *base.meshes[0].influences &&
+            *output.meshes[0].morph_ranges == *base.meshes[0].morph_ranges &&
+            output.meshes[0].topology_revision > seamFrame.meshes[0].topology_revision &&
+            output.meshes[0].tangents_revision > seamFrame.meshes[0].tangents_revision,
+      "UV tangent release lost authored streams or revisions");
+  const auto released = output;
+  Check(adapter.Release(base, 1, output, error) && output.revision == released.revision &&
+            output.meshes[0].tangents == released.meshes[0].tangents, "repeated tangent release rewrote arrays");
+  auto incomplete = base;
+  incomplete.meshes[0].edge_scales = std::make_shared<const std::vector<float>>(3, 1.F);
+  Toon::AvatarStateAdapter invalid;
+  Check(invalid.Bind(view, incomplete, 2, bindings, error), error.c_str());
+  Check(!invalid.Apply(reset, incomplete, 2, output, error) && output.revision == released.revision &&
+            output.meshes[0].points == released.meshes[0].points && !invalid.IdentityInfo().active,
+      "incomplete seam streams partially published output/history");
+  // A rigid skin stores only one influence set, even after splitting.
+  auto constant = base;
+  constant.meshes[0].constant_influences = true;
+  constant.meshes[0].influences = std::make_shared<const std::vector<Toon::ToonJointInfluence>>(1, Toon::ToonJointInfluence{0,1});
+  Check(invalid.Bind(view, constant, 3, bindings, error) && invalid.Apply(reset, constant, 3, output, error) &&
+            output.meshes[0].points->size() == 6 && output.meshes[0].influences == constant.meshes[0].influences,
+      "UV tangent seam expanded a constant skin");
+  Check(seamFrame.meshes[0].points->size() == 6 && *seamFrame.meshes[0].indices == std::vector<unsigned>{0,1,2,4,5,3},
+      "retained tangent seam frame mutated");
+}
 void PrimaryUvs(const char* shaders = nullptr) {
   for (const auto model : {Toon::ToonShadingModel::MMD, Toon::ToonShadingModel::MToon}) {
     UvScene scene(model), oracle(model);
@@ -646,7 +810,7 @@ void PrimaryUvs(const char* shaders = nullptr) {
     malformed.meshes[0].index_bound = 5;
     badBinding(bindings, malformed);
     malformed = base;
-    malformed.meshes[0].tangents = std::make_shared<const std::vector<Toon::Float4>>(4, Toon::Float4{1, 0, 0, 1});
+    malformed.meshes[0].tangents = std::make_shared<const std::vector<Toon::Float4>>(3, Toon::Float4{1, 0, 0, 1});
     badBinding(bindings, malformed);
     values[0].vertex_index = 3;
     Check(!adapter.Bind(view, base, 2, bindings, error), "sparse UV vertex identities accepted");
@@ -873,6 +1037,7 @@ int main(int argc, char** argv) {
     State();
 #if AR_ABI_VERSION >= 5
     PrimaryUvs();
+    PrimaryUvTangents();
 #endif
     if (argc == 3 && std::string(argv[1]) == "--runtime")
       Runtime(argv[2]);
@@ -882,6 +1047,7 @@ int main(int argc, char** argv) {
       Gpu(argv[2]);
 #if AR_ABI_VERSION >= 5
       PrimaryUvs(argv[2]);
+      PrimaryUvTangents(argv[2]);
 #endif
     }
     for (const auto& [id, entry] : Fake::entries) {
