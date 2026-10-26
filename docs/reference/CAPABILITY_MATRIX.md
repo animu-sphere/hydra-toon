@@ -124,7 +124,12 @@ reset and release are checked. UV changes use ordinary extraction; late UV
 changes and resident tangent streams refuse. Generated textured MMD/MToon
 Vulkan frames match an independently updated scene, change with UV weights and
 return to the original pixels at zero; [renderer report 102](../reports/renderer/102-2026-10-26-avatar-primary-uv.md).
-Automatic Hydra resident UV matching, tangent regeneration, runtime/Hydra
-pixel parity and representative avatar acceptance remain open. ABI-4 builds
+Automatic Hydra resident UV matching covers complete vertex/varying `st`,
+including corner and generated tangent-seam splits, reordered slots and
+per-mesh refusal for incomplete/ambiguous source mappings. Generated no-tangent
+meshes bind, publish mapped values and release to the baseline; bindings with
+resident tangents still refuse ([report 103](../reports/renderer/103-2026-10-26-avatar-resident-uv.md)).
+Tangent regeneration, composed MMD-to-GPU playback, runtime/Hydra pixel parity
+and representative avatar acceptance remain open. ABI-4 builds
 retain their prior scope. Rebuild the adapter library and its consumers together
 with matching runtime headers; this experimental C++ binding layout has changed.

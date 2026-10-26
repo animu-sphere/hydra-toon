@@ -42,7 +42,9 @@ struct HdToonAvatarTargetMatch {
 // (design policy §34): skeleton path and joint tokens to each GPU-skinned
 // palette, mesh path and `skel:blendShapes` token to the shape's described
 // subshape slots, material path and canonical input to a material field,
-// and a visibility target to the mesh with that path. A mesh whose skeleton
+// a visibility target to the mesh with that path, and point-domain primary
+// UV identities through the described corner/tangent-seam vertex map.
+// A mesh whose skeleton
 // the runtime does not publish keeps its scene pose. Nothing evaluates a
 // format, expression or inbetween here.
 HdToonAvatarTargetMatch HdToonMatchAvatarTargets(const ArStateView& layout,

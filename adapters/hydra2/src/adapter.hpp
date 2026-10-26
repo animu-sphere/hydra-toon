@@ -181,6 +181,16 @@ struct HdToonResidentSkin {
   Toon::Matrix4 skeleton_to_mesh;
 };
 
+// Point-domain primary st, after corner and tangent-seam splitting. Absent
+// for other interpolation domains or incomplete source arrays.
+struct HdToonResidentPrimaryUv {
+  std::uint32_t source_point_count = 0;
+  std::vector<std::uint32_t> vertices;
+
+  friend bool operator==(const HdToonResidentPrimaryUv&,
+      const HdToonResidentPrimaryUv&) = default;
+};
+
 struct HdToonResidentMesh {
   Toon::MeshId mesh = 0;
   SdfPath path;
@@ -192,6 +202,7 @@ struct HdToonResidentMesh {
   // one whose points usdSkelImaging's CPU kernel computes.
   std::optional<HdToonResidentSkin> skin;
   std::vector<HdToonResidentSubshape> subshapes;
+  std::optional<HdToonResidentPrimaryUv> primary_uv;
 };
 
 struct HdToonResidentMaterial {
