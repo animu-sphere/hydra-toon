@@ -16,7 +16,7 @@ owner: hydra-toon
 > follows [INTEGRATION_SCOPE_POLICY.md](INTEGRATION_SCOPE_POLICY.md).
 > Implementation status belongs to the
 > [capability matrix](../reference/CAPABILITY_MATRIX.md); the milestone's
-> remaining work is the [v0.8.0 roadmap](../roadmap/v0.8.0.md).
+> acceptance is recorded in the [v0.8.0 release record](../releases/v0.8.0.md).
 > Stage 1, the lent device and the readback baseline, is
 > [report 97](../reports/renderer/97-2026-10-25-handoff-stage-1.md); stage 2,
 > the ring and the reference consumer,

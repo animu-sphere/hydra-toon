@@ -8,7 +8,7 @@
   layer of Vulkan SDK 1.3.290.0, the registered one; `ost` 0.23.14
 - Source: branch `claude/v080-handoff-stage-4` from `main` at `5875d73`;
   Tessera pinned at `c999a27`
-- Occasion: stage 4 of the [v0.8.0 roadmap](../../roadmap/v0.8.0.md), the
+- Occasion: stage 4 of the [v0.8.0 roadmap](../../releases/v0.8.0.md), the
   [evidence](../../design/GPU_HANDOFF_POLICY.md#10-evidence) of the GPU
   handoff policy
 
@@ -236,7 +236,7 @@ frames the kitchen's handoff tails are gone and the burst sits in readback.
 
 ## 7. Done when, and next
 
-The [roadmap's condition](../../roadmap/v0.8.0.md#done-when) holds: one
+The [roadmap's condition](../../releases/v0.8.0.md#acceptance) holds: one
 foreground product reaches an intended host, the Tessera host, without CPU
 readback; the reference consumer matches the readback composite exactly
 through resize, held slots, several consumers and capture; the Tessera
