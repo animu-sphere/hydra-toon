@@ -8,6 +8,8 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-25
+
 ### Added
 
 - The GPU handoff's acceptance (renderer report 100): every piece of the
@@ -58,6 +60,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- `Toon::AvatarState` builds against experimental runtime ABI revision 4 or
+  5, chosen at compile time; a revision-5 build refuses a nonempty primary
+  UV output before retaining it. Primary UV transport stays unsupported.
 - The committed VRM host Formation pins the published `toon` 0.7.0 package,
   replacing 0.6.0. Renderer report 96 verifies release assets, the GHCR pull,
   Formation smoke and headless GPU checks, and MMD and MToon avatar captures

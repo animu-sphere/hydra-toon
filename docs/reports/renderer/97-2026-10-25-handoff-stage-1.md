@@ -6,7 +6,7 @@
 - Tools: `slangc` from Vulkan SDK 1.4.350.0; the Khronos validation layer
   of Vulkan SDK 1.3.290.0, the registered one; `ost` 0.23.14
 - Source: branch `claude/v080-handoff-stage-1` from `main` at `df77e39`
-- Occasion: stage 1 of the [v0.8.0 roadmap](../../roadmap/v0.8.0.md), under
+- Occasion: stage 1 of the [v0.8.0 roadmap](../../releases/v0.8.0.md), under
   the [GPU handoff policy](../../design/GPU_HANDOFF_POLICY.md) and the
   placement of [PROJECT_LAYOUT](../../architecture/PROJECT_LAYOUT.md)
   (PR #126)
