@@ -165,6 +165,16 @@ render tags, as the viewport does. Its
 oracle authors each result into the session layer for UsdImaging to compose;
 that authoring belongs to the check, not to a renderer path.
 
+Two further opt-in, uninstalled test hosts consume installed MMD providers:
+`TOON_MMD_UV_PROVIDER_TEST` builds `toon-hydra2-mmd-uv-test` for UV-only
+composition, and `TOON_MMD_AVATAR_PROVIDER_TEST` builds
+`toon-hydra2-mmd-avatar-test` for combined skin, vertex morph and UV publication.
+Both require avatar state and Hydra tests and link the runtime's `mmd`
+component. The latter also requires installed `physicsJolt` and its compatible
+Jolt SDK. Its test-only host owns the solver; only published final snapshots
+reach the renderer adapter. No production library links these providers or
+adds their packages to its installed dependencies.
+
 `toon-viewport-avatar` is the viewport built from the same sources with
 `adapters/viewport/src/avatar_runtime.*`, an external host of the same
 providers. It is built only with `TOON_AVATAR_RUNTIME_PROVIDERS` and the

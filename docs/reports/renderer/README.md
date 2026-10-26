@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [106](106-2026-10-26-mmd-avatar-uv.md) | Generated MMD/Jolt final joints, vertex morphs and primary UVs in one retained snapshot; automatic reversed-palette/UV bindings, USD/Hydra streams and textured MMD/normal-mapped MToon Vulkan parity across resets |
 | [105](105-2026-10-26-mmd-resident-uv.md) | Generated MMD owner/runtime UV-only composition through automatic resident bindings, independent UV values, USD/Hydra streams and textured MMD/normal-mapped MToon Vulkan parity at 1x/4x across reset generations |
 | [104](104-2026-10-26-avatar-uv-tangents.md) | Evaluated UV tangent regeneration, coherent skin/morph/auxiliary seam expansion, immutable baseline restoration and generated automatic runtime/USD-Hydra stream and normal-mapped Vulkan parity at 1x/4x |
 | [103](103-2026-10-26-avatar-resident-uv.md) | Automatic point-domain primary UV matching through corner/tangent-seam splits, reordered slots, malformed mapping refusal and no-tangent publication/release; resident tangent regeneration remains open |

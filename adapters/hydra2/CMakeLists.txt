@@ -181,6 +181,39 @@ if(TOON_BUILD_TESTS)
     set_tests_properties(toon-renderer-mmd-uv-gpu PROPERTIES LABELS "gpu")
   endif()
 
+  if(TOON_MMD_AVATAR_PROVIDER_TEST)
+    if(NOT TARGET toon-hydra2-avatar-binding)
+      message(FATAL_ERROR "TOON_MMD_AVATAR_PROVIDER_TEST requires TOON_ENABLE_AVATAR_STATE")
+    endif()
+    find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS mmd)
+    find_package(physicsJolt CONFIG REQUIRED)
+    if(NOT physicsJolt_BACKEND_AVAILABLE)
+      message(FATAL_ERROR "TOON_MMD_AVATAR_PROVIDER_TEST requires an installed Jolt backend")
+    endif()
+    add_executable(toon-hydra2-mmd-avatar-test tests/primvar_test.cpp)
+    toon_configure_warnings(toon-hydra2-mmd-avatar-test)
+    target_include_directories(toon-hydra2-mmd-avatar-test PRIVATE "${PROJECT_SOURCE_DIR}/core/render-world")
+    target_link_libraries(toon-hydra2-mmd-avatar-test PRIVATE toon-hydra2-avatar-binding
+      toon-hydra2-runtime usdImaging usdShade usdGeom usdPhysics usdSkel usd Toon::Vulkan
+      AvatarRuntime::avatarMmdAdapter physicsJolt::physicsJolt)
+    target_compile_features(toon-hydra2-mmd-avatar-test PRIVATE cxx_std_20)
+    target_compile_definitions(toon-hydra2-mmd-avatar-test PRIVATE TOON_HAS_AVATAR_STATE=1 TOON_TEST_MMD_AVATAR=1
+      NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    foreach(mode IN ITEMS cpu gpu)
+      set(arguments "unused")
+      if(mode STREQUAL "gpu")
+        list(APPEND arguments "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+      endif()
+      string(JOIN "|" arguments ${arguments})
+      add_test(NAME toon-renderer-mmd-avatar-${mode} COMMAND ${CMAKE_COMMAND}
+        "-DPROGRAM=$<TARGET_FILE:toon-hydra2-mmd-avatar-test>"
+        "-DARGUMENTS=${arguments}"
+        "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-hydra2-mmd-avatar-test>,|>"
+        "-DPLUGINS=" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_avatar_providers.cmake")
+    endforeach()
+    set_tests_properties(toon-renderer-mmd-avatar-gpu PROPERTIES LABELS "gpu" SKIP_RETURN_CODE 77)
+  endif()
+
   # The GPU handoff's measurements (GPU handoff policy §8): a host that lends
   # its own device renders a stage's draw list and writes timings as JSON.
   # Never installed; avatar stages are local arguments.
