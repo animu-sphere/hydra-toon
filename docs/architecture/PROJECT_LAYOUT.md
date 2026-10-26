@@ -214,12 +214,13 @@ avatar-state structural bindings.
 CPU point-computation fallbacks, including dual quaternion skinning, retain
 the derivative path because they supply no matching deformed tangent frame.
 
-Without authored tangents, the Hydra adapter's private
-`src/generated_tangents.*` runs the unmodified MikkTSpace implementation
-vendored under the repository's `third_party/mikktspace/`, compiled inside
-`toon-hydra2-runtime`. Third-party source and its license/attribution belong
-under `third_party/<dependency>/`; renderer-owned wrappers stay with their
-consumer. It uses the
+Without authored tangents, Hydra uses the renderer-private
+`core/render-world/generated_tangents.*` wrapper, also consumed by the optional
+evaluated UV adapter. It runs the unmodified MikkTSpace implementation
+vendored under the repository's `third_party/mikktspace/`, compiled once inside
+`toon-render-world`. Neither consumer links the other adapter. Third-party
+source and its license/attribution belong under `third_party/<dependency>/`;
+shared host-neutral geometry normalization belongs in render-world. It uses the
 normalized rest triangles, unit normals and bottom-left `st`. The C source
 compiles as C++; no new target, runtime dependency or public header is added.
 Its pinned origin and license are recorded in that directory's README and
