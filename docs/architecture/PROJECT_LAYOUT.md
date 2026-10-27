@@ -42,6 +42,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
 | `adapters/tessera/` | `toon-tessera-host` | — | Win32 example host: an avatar through the GPU handoff and Tessera UI in one swapchain ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)); optional (`TOON_ENABLE_TESSERA`), with the Hydra adapter; never installed |
 | `adapters/fast/` | `toon-avatar-state` | `Toon::AvatarState` | optional revision-4/5 runtime state consumer (`TOON_ENABLE_AVATAR_STATE`); only the runtime C headers are required, with snapshot calls supplied by the host |
+| `adapters/viewport/` | `toon-viewport-mmd` | — | optional native application host (`TOON_MMD_RUNTIME_VIEWPORT`) consuming installed runtime MMD/Jolt snapshots through resident resources; never installed; no physics evaluation in renderer core |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
 
 `formations/vrm-host-session/` builds nothing: it is an OpenStrata Formation

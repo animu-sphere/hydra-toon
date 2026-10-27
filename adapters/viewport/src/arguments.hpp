@@ -59,10 +59,12 @@ struct Arguments {
   // The stage's avatar driven by usd-avatar-runtime's real providers
   // (toon-viewport-avatar only).
   bool avatar_runtime = false;
+  bool mmd_physics = false;
   std::string avatar_look_at;
   double avatar_rate = 120.0;
   std::uint64_t avatar_reset_every = 0;
   std::string avatar_motion;
+  std::string avatar_model;
 };
 
 Arguments ParseArguments(int argc, char** argv);

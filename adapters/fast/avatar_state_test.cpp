@@ -778,6 +778,25 @@ void PrimaryUvs(const char* shaders = nullptr) {
     view.capability_count = 0;
     view.vertex_uvs = values;
     view.vertex_uv_count = 3;
+    {
+      std::vector<ArVertexUv> dense;
+      for (const char* mesh : {"dense.a", "dense.b"})
+        for (std::uint32_t vertex = 0; vertex < 32768; ++vertex)
+          dense.push_back({mesh, vertex, {.25, .75}});
+      auto layout = view;
+      layout.vertex_uvs = dense.data(); layout.vertex_uv_count = static_cast<std::uint32_t>(dense.size());
+      auto retained = Fake::Snapshot(layout);
+      Check(retained.View() != nullptr, "ordered dense UV layout refused");
+      std::reverse(dense.begin(), dense.end());
+      retained = Fake::Snapshot(layout);
+      Check(retained.View() != nullptr, "reverse dense UV layout refused");
+      dense.back() = dense.front();
+      Fake::entries[996] = {layout, 0};
+      Toon::RetainedAvatarSnapshot malformed;
+      std::string failure;
+      Check(!malformed.Reset(Fake::Api(), 996, failure) && Fake::entries[996].second == 0,
+          "nonadjacent dense UV duplicate accepted or leaked");
+    }
     Toon::AvatarStateAdapter adapter;
     Toon::FrameSnapshot output;
     std::string error;

@@ -355,6 +355,9 @@ records the tested controls and scene route.
 
 ### A USD stage in the viewport
 
+For PMX/VMD with runtime-owned live physics, see
+[the native MMD host](#live-mmd-physics-in-the-dedicated-viewport).
+
 The `Skeleton` panel lists each USD skeleton's joint names, parents and
 evaluated world positions in stage units. Enable `Show bones and joints` to
 draw them through surfaces, and `Joint labels` for names. Selecting a joint
@@ -860,3 +863,64 @@ surfaces use their own saved interior measurement masks. The scalar cases
 compare texture quadrants to constant-input captures and verify Mask cutoff
 and linear Blend over the fixed opaque clear, excluding silhouette/MSAA
 edges and texture transitions.
+
+
+### Live MMD physics in the dedicated viewport
+
+The optional `toon-viewport-mmd` consumes the installed runtime's
+[native MMD session](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/MMD_SESSION.md).
+Prepare that package with MMD, USD, Stage Runner, physics USD and Jolt enabled.
+The importer and renderer core remain physics-free.
+
+Starting from a configured Vulkan/USD viewport build, set `$prefixes` to the
+installed runtime and its owner dependencies and `$avatar` to its prefix:
+
+```powershell
+cmake -S . -B build/mmd-viewport -DTOON_ENABLE_HYDRA2=ON -DTOON_ENABLE_VIEWPORT=ON `
+  -DTOON_ENABLE_AVATAR_STATE=ON -DTOON_MMD_RUNTIME_VIEWPORT=ON `
+  "-DCMAKE_PREFIX_PATH=$prefixes" "-DTOON_AVATAR_RUNTIME_INCLUDE_DIR=$avatar/include"
+cmake --build build/mmd-viewport --config Release --target toon-viewport-mmd
+```
+
+Register MMD schema, imaging and file-format plugins, with matching OpenUSD,
+runtime and owner DLLs on PATH, then launch:
+
+```text
+toon-viewport-mmd --usd <model.pmx> --mmd-physics --avatar-motion <motion.vmd> --play
+```
+
+For a composed USD/USDZ stage, add `--avatar-model <original.pmx>` so runtime
+control reads the original owner data while rendering uses the composed stage.
+The host validates the joint/morph/primary-UV bindings; source and display data
+must correspond. Author stage-wide up-axis, metre/kilogram units and default
+prim on the composition's root layer. This option applies no damping repairs
+and admits no unsupported morph outputs automatically. Bounded `--frames` runs
+return failure when runtime evaluation is refused, rather than counting window
+presentation alone as successful animation.
+
+**MMD live physics** and Space control Play/Pause. Reset pauses and reconstructs
+the frame-zero world; Stop closes it and restores authored output; another Play
+builds a new session. Closing/replacing the stage releases its old runtime
+before its resources. VMD plays once then holds; automatic looping and arbitrary
+seek are unavailable. USD `--time`, `--time-step` and speed are rejected.
+Source edits require Stop/rebind. The Animation panel samples ordinary USD and
+does not control physics.
+
+Runtime owns 120 Hz ticks, bounded catch-up and retained backlog; slow models
+can fall behind wall time. The log separates runtime milliseconds per tick,
+resident conversion milliseconds per result and GPU timings. Unchanged results
+over an unchanged scene reuse conversion at late reads and paused frames.
+
+For opt-in tests, set `TOON_MMD_RUNTIME_TEST_PMX` to the owner's generated
+`live-physics-morph.pmx`, `TOON_MMD_RUNTIME_TEST_VMD` to generated
+`live-physics-uv-mixed.vmd`, and `TOON_MMD_RUNTIME_PLUGINS` to the three MMD
+plugin resource directories. Also build `toon-mmd-runtime-test`, then run CTest
+with `-R 'toon-mmd-runtime-cache|toon-viewport-mmd-runtime'`. Tests compare
+cached/uncached joint/morph/UV/tangent streams and upload revisions through
+reset/baseline commits/restart, and check actual viewport playback, stage
+replacement, one Hydra sync and teardown. No third-party model is required.
+
+[Renderer report 107](../reports/renderer/107-2026-10-27-live-mmd-viewport.md)
+records private-input display and performance limits. Material morphs,
+additional UV output, private Hydra/direct parity, multi-avatar lifecycle and
+representative L3 acceptance remain open.

@@ -249,7 +249,7 @@ int RunViewport(int argc, char** argv) {
       next.SetSpeed(arguments.playback_speed);
       next.SetLoop(arguments.loop);
       next.SetPlaying(arguments.play);
-      if (arguments.play && !next.available()) {
+      if (arguments.play && !arguments.mmd_physics && !next.available()) {
         throw std::runtime_error("--play needs a finite authored animation range");
       }
       return next;
@@ -266,7 +266,7 @@ int RunViewport(int argc, char** argv) {
       if (!arguments.avatar_runtime) return started;
       started = Toon::viewport::AvatarRuntime::Start(scene, bound, ++avatar_epoch,
           {arguments.avatar_look_at, arguments.avatar_rate, arguments.avatar_reset_every,
-              arguments.avatar_motion});
+              arguments.avatar_motion, arguments.play, true, arguments.avatar_model});
       std::string failure;
       if (!started->Apply(bound, false, failure)) {
         throw std::runtime_error("avatar runtime: " + failure);
@@ -498,6 +498,12 @@ int RunViewport(int argc, char** argv) {
           } else if (event.key == Toon::viewport::Key::R) {
             camera.Reset();
           } else if (event.key == Toon::viewport::Key::Space && !arguments.time_step) {
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+            if (avatar && avatar->status().physics) {
+              avatar->Control(avatar->status().playing ? Toon::viewport::AvatarRuntime::Action::Pause
+                                                     : Toon::viewport::AvatarRuntime::Action::Play);
+            } else
+#endif
             playback.SetPlaying(!playback.playing());
             playback_clock = Clock::now();
           } else if (event.key == Toon::viewport::Key::O && event.control) {
@@ -570,6 +576,10 @@ int RunViewport(int argc, char** argv) {
 #if TOON_VIEWPORT_HAS_HYDRA
       if (hydra != nullptr) {
         const auto now = Clock::now();
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        if (avatar && avatar->status().physics)
+          avatar->Tick(std::chrono::duration<double>(now - playback_clock).count());
+#endif
         if (arguments.time_step) {
           const double time = arguments.time.value_or(hydra->start_time()) +
                               *arguments.time_step *
@@ -682,6 +692,12 @@ int RunViewport(int argc, char** argv) {
             overlay_draws);
         last_overlay = overlay_start;
         open_file_requested = controls.open_file;
+#if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+        if (avatar && controls.runtime_action) {
+          avatar->Control(*controls.runtime_action);
+          playback_clock = Clock::now();
+        }
+#endif
 #if TOON_VIEWPORT_HAS_HYDRA
         // ReadFast publishes these edits in this frame, without Hydra sync.
         // The avatar runtime binds over the unoverridden scene and owns the
@@ -871,6 +887,10 @@ int RunViewport(int argc, char** argv) {
                 << since.topology + since.points + since.textures + since.skins + since.morphs
                 << " poses=" << since.poses << " morph_weights=" << since.morph_weights
                 << " materials=" << since.materials << '\n';
+      if (arguments.frame_limit && avatar->status().physics && avatar->status().refused) {
+        std::cerr << "toon-viewport: bounded MMD run contains refused physics evaluations\n";
+        return 1;
+      }
     }
 #endif
     if (!arguments.telemetry_output.empty()) {
