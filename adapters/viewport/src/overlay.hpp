@@ -109,6 +109,7 @@ struct MaterialEdit {
 
 // What the overlay's controls asked for this frame.
 struct OverlayControls {
+  std::optional<AvatarRuntime::Action> runtime_action;
   bool open_file = false;
   // MSAA samples per pixel; 0 when unchanged.
   std::uint32_t samples = 0;

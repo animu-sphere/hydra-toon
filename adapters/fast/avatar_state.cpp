@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <string_view>
 #include <utility>
 
 namespace Toon {
@@ -82,11 +83,24 @@ bool Valid(const ArStateView& s, std::string& error) {
 #if AR_ABI_VERSION >= 5
   if (!Array(s.vertex_uvs, s.vertex_uv_count))
     return Fail(error, "invalid runtime primary UV array");
-  std::set<std::pair<std::string, std::uint32_t>> uvIds;
+  using UvIdentity = std::pair<std::string_view, std::uint32_t>;
+  bool orderedUvs = true;
+  UvIdentity previousUv;
   for (std::uint32_t i = 0; i < s.vertex_uv_count; ++i) {
     const auto& uv = s.vertex_uvs[i];
-    if (!Name(uv.mesh_id) || !uvIds.emplace(uv.mesh_id, uv.vertex_index).second ||
-        !Float(uv.value[0]) || !Float(uv.value[1]))
+    if (!Name(uv.mesh_id) || !Float(uv.value[0]) || !Float(uv.value[1]))
+      return Fail(error, "invalid runtime primary UV identity or value");
+    const UvIdentity identity{uv.mesh_id, uv.vertex_index};
+    if (i && !(previousUv < identity)) orderedUvs = false;
+    previousUv = identity;
+  }
+  if (!orderedUvs) {
+    std::vector<UvIdentity> uvIds;
+    uvIds.reserve(s.vertex_uv_count);
+    for (std::uint32_t i = 0; i < s.vertex_uv_count; ++i)
+      uvIds.emplace_back(s.vertex_uvs[i].mesh_id, s.vertex_uvs[i].vertex_index);
+    std::sort(uvIds.begin(), uvIds.end());
+    if (std::adjacent_find(uvIds.begin(), uvIds.end()) != uvIds.end())
       return Fail(error, "invalid runtime primary UV identity or value");
   }
 #endif

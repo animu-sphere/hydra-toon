@@ -218,6 +218,9 @@ Arguments ParseArguments(int argc, char** argv) {
         throw std::invalid_argument("--overlay must be on or off");
       }
       result.overlay = value == "on";
+    } else if (option == "--mmd-physics") {
+      result.mmd_physics = true;
+      result.avatar_runtime = true;
     } else if (option == "--avatar-runtime") {
       result.avatar_runtime = true;
     } else if (option == "--avatar-lookat") {
@@ -234,6 +237,8 @@ Arguments ParseArguments(int argc, char** argv) {
       result.avatar_reset_every = ReadUnsigned(next(), option);
     } else if (option == "--avatar-motion") {
       result.avatar_motion = next();
+    } else if (option == "--avatar-model") {
+      result.avatar_model = next();
     } else if (option == "--help") {
       std::cout << "Usage: toon-viewport [options]\n"
                    "  --width N --height N     window size (default 1280x720)\n"
@@ -293,6 +298,8 @@ Arguments ParseArguments(int argc, char** argv) {
                    "                           (cannot benchmark with readbacks)\n"
                    "  --camera-output FILE     final view/projection as JSON\n"
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+                   "  --mmd-physics            live PMX/VMD physics (toon-viewport-mmd)\n"
+                   "  --avatar-model PMX       owner source for a composed MMD stage\n"
                    "  --avatar-runtime         drive the stage's VRM avatar with\n"
                    "                           usd-avatar-runtime's providers\n"
                    "  --avatar-lookat <prim>   the VRM LookAt prim to evaluate\n"
@@ -375,6 +382,21 @@ Arguments ParseArguments(int argc, char** argv) {
     throw std::invalid_argument("--switch-file needs --frames N, N >= 2");
   }
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+  if (!result.avatar_model.empty() && !result.mmd_physics)
+    throw std::invalid_argument("--avatar-model needs --mmd-physics");
+  if (result.mmd_physics) {
+#if !TOON_VIEWPORT_HAS_MMD_RUNTIME
+    throw std::invalid_argument("--mmd-physics needs toon-viewport-mmd");
+#endif
+    if (result.time || result.time_step || result.playback_speed != 1.0)
+      throw std::invalid_argument("MMD physics uses the runtime clock; USD seek/step/speed are unavailable");
+    if (!result.avatar_look_at.empty() || result.avatar_rate != 120.0)
+      throw std::invalid_argument("MMD physics does not use VRM LookAt or a renderer producer rate");
+  }
+#if TOON_VIEWPORT_HAS_MMD_RUNTIME
+  if (result.avatar_runtime && !result.mmd_physics)
+    throw std::invalid_argument("toon-viewport-mmd requires --mmd-physics for runtime input");
+#endif
   if (result.avatar_runtime && result.usd.empty() && result.switch_file.empty()) {
     throw std::invalid_argument("--avatar-runtime needs --usd <stage>");
   }

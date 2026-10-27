@@ -45,6 +45,12 @@ struct AvatarRuntimeOptions {
   // provider retargets onto the avatar; empty runs without one. The clip
   // plays once from the host's start and then holds its last sample.
   std::string motion;
+  bool play = false;
+  // Native-host regression oracle; normal hosts reuse unchanged conversions.
+  bool cache = true;
+  // Owner PMX bytes when the displayed stage is a composed USD/USDZ stage.
+  // Empty uses the directly opened PMX root layer.
+  std::string model;
 };
 
 // A runtime output and where it lands, with its value in the applied result.
@@ -57,6 +63,10 @@ struct AvatarRuntimeRow {
 // What the overlay and the run's last lines show. The frame loop's thread
 // owns it; the producer's counts are copied in when a result is taken.
 struct AvatarRuntimeStatus {
+  bool physics = false, playing = false, stopped = false;
+  std::uint64_t physics_steps = 0;
+  std::size_t bodies = 0, uvs = 0;
+  std::string error;
   std::string avatar;
   std::string look_at;
   // The motion stage and its clip's range in seconds; empty without one.
@@ -93,6 +103,7 @@ struct AvatarRuntimeStatus {
 
 class AvatarRuntime {
 public:
+  enum class Action { Play, Pause, Reset, Stop };
   // Reads the avatar at the stage's default prim with the runtime's VRM
   // bindings, registers its evaluator, publishes a first result and binds
   // what of it matches `bound`, the scene as the frame loop committed it.
@@ -110,6 +121,10 @@ public:
   // With a zero rate, evaluates and publishes the next result now; the
   // frame loop calls it after extraction. Otherwise does nothing.
   virtual void Produce() = 0;
+  // Native physics hosts receive host elapsed time once before extraction.
+  // Late reads only consume retained output and never request a physics tick.
+  virtual void Tick(double) {}
+  virtual void Control(Action) {}
   [[nodiscard]] virtual const AvatarRuntimeStatus& status() const noexcept = 0;
   // The run's last lines.
   [[nodiscard]] virtual std::string Report() const = 0;

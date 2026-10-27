@@ -117,6 +117,48 @@ if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
   toon_copy_shaders(toon-viewport-avatar)
 endif()
 
+if(TOON_MMD_RUNTIME_VIEWPORT)
+  if(NOT TOON_ENABLE_HYDRA2 OR NOT TARGET toon-hydra2-avatar-binding)
+    message(FATAL_ERROR "TOON_MMD_RUNTIME_VIEWPORT requires Hydra and TOON_ENABLE_AVATAR_STATE")
+  endif()
+  find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS mmd_session)
+  add_executable(toon-viewport-mmd src/mmd_runtime.cpp src/hydra_scene.cpp ${_viewport_sources})
+  toon_configure_warnings(toon-viewport-mmd)
+  target_link_libraries(toon-viewport-mmd PRIVATE
+    Toon::RenderWorld Toon::RenderExtraction Toon::Vulkan Vulkan::Vulkan glfw toon-viewport-imgui
+    toon-hydra2-avatar-binding AvatarRuntime::avatarMmdSession usdImaging usdSkel usdGeom usd nfd)
+  target_compile_features(toon-viewport-mmd PRIVATE cxx_std_20)
+  target_compile_definitions(toon-viewport-mmd PRIVATE
+    TOON_VIEWPORT_HAS_HYDRA=1 TOON_VIEWPORT_HAS_AVATAR_RUNTIME=1 TOON_VIEWPORT_HAS_MMD_RUNTIME=1
+    TOON_VIEWPORT_HAS_WEBGPU=0 NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+  toon_copy_shaders(toon-viewport-mmd)
+  set(TOON_MMD_RUNTIME_TEST_PMX "" CACHE FILEPATH "Generated morph PMX for live viewport acceptance")
+  set(TOON_MMD_RUNTIME_TEST_VMD "" CACHE FILEPATH "Generated mixed UV/vertex VMD for live viewport acceptance")
+  set(TOON_MMD_RUNTIME_PLUGINS "" CACHE STRING "MMD schema, imaging and file-format plugin directories for live tests")
+  if(TOON_BUILD_TESTS AND TOON_MMD_RUNTIME_TEST_PMX AND TOON_MMD_RUNTIME_TEST_VMD AND TOON_MMD_RUNTIME_PLUGINS)
+    add_executable(toon-mmd-runtime-test tests/mmd_runtime_test.cpp src/mmd_runtime.cpp src/hydra_scene.cpp src/skeleton_debug.cpp src/telemetry.cpp)
+    target_include_directories(toon-mmd-runtime-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(toon-mmd-runtime-test PRIVATE toon-hydra2-avatar-binding
+      AvatarRuntime::avatarMmdSession usdImaging usdSkel usdGeom usd)
+    target_compile_features(toon-mmd-runtime-test PRIVATE cxx_std_20)
+    target_compile_definitions(toon-mmd-runtime-test PRIVATE NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    add_test(NAME toon-mmd-runtime-cache COMMAND "${CMAKE_COMMAND}"
+      "-DPROGRAM=$<TARGET_FILE:toon-mmd-runtime-test>"
+      "-DSTAGE=${TOON_MMD_RUNTIME_TEST_PMX}" "-DARGUMENTS=${TOON_MMD_RUNTIME_TEST_VMD}"
+      "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-mmd-runtime-test>,|>"
+      "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+      -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+    add_test(NAME toon-viewport-mmd-runtime COMMAND "${CMAKE_COMMAND}"
+      "-DVIEWPORT=$<TARGET_FILE:toon-viewport-mmd>"
+      "-DPMX=${TOON_MMD_RUNTIME_TEST_PMX}" "-DVMD=${TOON_MMD_RUNTIME_TEST_VMD}"
+      "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+      "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-viewport-mmd>,|>"
+      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/mmd-runtime-test.log"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mmd_runtime.cmake")
+    set_tests_properties(toon-viewport-mmd-runtime PROPERTIES LABELS "gpu" SKIP_RETURN_CODE 77)
+  endif()
+endif()
+
 # The installed tree reuses bin/shaders written by the project install rules.
 install(TARGETS toon-viewport
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

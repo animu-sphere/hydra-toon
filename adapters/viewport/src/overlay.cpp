@@ -760,6 +760,21 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
       }
     }
 
+    if (frame.avatar_runtime != nullptr && frame.avatar_runtime->physics) {
+      const auto& live = *frame.avatar_runtime;
+      ImGui::SeparatorText("MMD live physics");
+      ImGui::Text("%s | tick %llu | bodies %zu | %.3f s",
+          live.stopped ? "Stopped" : live.playing ? "Playing" : "Paused",
+          static_cast<unsigned long long>(live.physics_steps), live.bodies, live.evaluation_seconds);
+      if (ImGui::Button(live.playing ? "Pause physics" : "Play physics"))
+        controls.runtime_action = live.playing ? AvatarRuntime::Action::Pause : AvatarRuntime::Action::Play;
+      ImGui::SameLine();
+      if (ImGui::Button("Reset physics")) controls.runtime_action = AvatarRuntime::Action::Reset;
+      ImGui::SameLine();
+      if (ImGui::Button("Stop physics")) controls.runtime_action = AvatarRuntime::Action::Stop;
+      ImGui::TextWrapped("VMD + runtime fixed ticks + Jolt. Space plays/pauses. Motion holds its last key; no automatic loop or seek.");
+      if (!live.error.empty()) ImGui::TextWrapped("%s", live.error.c_str());
+    }
     if (frame.avatar_runtime != nullptr && ImGui::CollapsingHeader("Avatar runtime")) {
       AvatarRuntimePanel(*frame.avatar_runtime, scale);
     }
