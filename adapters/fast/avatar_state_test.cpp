@@ -760,6 +760,84 @@ void PrimaryUvTangents(const char* shaders = nullptr) {
   Check(seamFrame.meshes[0].points->size() == 6 && *seamFrame.meshes[0].indices == std::vector<unsigned>{0,1,2,4,5,3},
       "retained tangent seam frame mutated");
 }
+void DensePrimaryUvs() {
+  constexpr std::uint32_t count = 32768;
+  const std::string owners[]{"dense.mesh.a.with.a.long.opaque.owner.identity",
+      "dense.mesh.b.with.a.long.opaque.owner.identity"};
+  Toon::RenderWorld world;
+  Toon::AvatarBindings bindings;
+  std::vector<ArVertexUv> values;
+  for (std::uint32_t m = 0; m < 2; ++m) {
+    const auto mesh = world.CreateMesh();
+    world.SetMeshPoints(mesh, std::vector<Toon::Float3>(count, {0, 0, 0}));
+    world.SetMeshTopology(mesh, {0, 1, 2});
+    std::vector<Toon::Float2> uvs;
+    Toon::AvatarUvBinding binding{mesh, {}};
+    for (std::uint32_t v = 0; v < count; ++v) {
+      const Toon::Float2 uv{.25F + v / 65536.F, .75F};
+      uvs.push_back(uv);
+      values.push_back({owners[m].c_str(), v, {uv.x, uv.y}});
+      binding.sources.push_back(2 * count - 1 - (m * count + v));
+    }
+    world.SetMeshUVs(mesh, uvs);
+    bindings.uvs.push_back(std::move(binding));
+  }
+  // The layout order need not be mesh/vertex order; bindings retain the map.
+  std::reverse(values.begin(), values.end());
+  const auto base = world.Commit();
+  ArStateView view{AR_HEADER(ArStateView)};
+  view.instance = view.generation = view.frame_id = view.layout_version = 1;
+  view.layout_id = "dense.uv.layout";
+  view.vertex_uvs = values.data(); view.vertex_uv_count = static_cast<std::uint32_t>(values.size());
+  Toon::AvatarStateAdapter adapter;
+  Toon::FrameSnapshot output;
+  std::string error;
+  Check(adapter.Bind(view, base, 1, bindings, error), error.c_str());
+  auto held = Fake::Snapshot(view);
+  Check(adapter.Apply(held, base, 1, output, error), error.c_str());
+  for (std::size_t m = 0; m < 2; ++m)
+    Check(output.meshes[m].uvs == base.meshes[m].uvs &&
+              output.meshes[m].uvs_revision == base.meshes[m].uvs_revision,
+        "unchanged dense UVs lost baseline storage/revision");
+  const auto unchanged = output;
+  // Equal identities may have different storage in successive snapshots.
+  const std::string copiedOwners[]{owners[0], owners[1]};
+  for (auto& uv : values) {
+    uv.mesh_id = copiedOwners[uv.mesh_id == owners[0] ? 0 : 1].c_str();
+    uv.value[0] = -.125 - uv.vertex_index / 65536.;
+  }
+  ++view.frame_id;
+  held = Fake::Snapshot(view);
+  Check(adapter.Apply(held, base, 1, output, error), error.c_str());
+  for (const auto& mesh : output.meshes)
+    for (std::uint32_t v = 0; v < count; ++v)
+      Check((*mesh.uvs)[v] == Toon::Float2{static_cast<float>(-.125 - v / 65536.), .75F},
+          "dense UV mapping/value differs");
+  const auto changed = output;
+  auto reject = [&] {
+    auto invalid = Fake::Snapshot(view);
+    Check(!adapter.Apply(invalid, base, 1, output, error) &&
+              output.revision == changed.revision && output.meshes[0].uvs == changed.meshes[0].uvs &&
+              adapter.IdentityInfo().frame == 2, "dense UV refusal changed output/history");
+  };
+  ++view.frame_id;
+  values.back().mesh_id = "dense.mesh.renamed.with.a.long.opaque.owner.identity";
+  reject();
+  values.back().mesh_id = copiedOwners[0].c_str();
+  std::swap(values.front(), values[1]);
+  reject();
+  std::swap(values.front(), values[1]);
+  // Restore through a new generation and check retained arrays independently.
+  for (auto& uv : values) uv.value[0] = .25 + uv.vertex_index / 65536.;
+  view.generation = 2; view.frame_id = 1;
+  held = Fake::Snapshot(view);
+  Check(adapter.Apply(held, base, 1, output, error), error.c_str());
+  for (std::size_t m = 0; m < 2; ++m)
+    Check(output.meshes[m].uvs == base.meshes[m].uvs &&
+              unchanged.meshes[m].uvs == base.meshes[m].uvs &&
+              (*changed.meshes[m].uvs)[count - 1].x == static_cast<float>(-.125 - (count - 1) / 65536.),
+        "dense UV reset mutated retained output or failed to restore baseline");
+}
 void PrimaryUvs(const char* shaders = nullptr) {
   for (const auto model : {Toon::ToonShadingModel::MMD, Toon::ToonShadingModel::MToon}) {
     UvScene scene(model), oracle(model);
@@ -1055,6 +1133,7 @@ int main(int argc, char** argv) {
     Inbetweens();
     State();
 #if AR_ABI_VERSION >= 5
+    DensePrimaryUvs();
     PrimaryUvs();
     PrimaryUvTangents();
 #endif

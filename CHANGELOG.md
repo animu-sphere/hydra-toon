@@ -8,6 +8,13 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Dense resident avatar updates compare incoming identities without temporary
+  owned strings and allocate primary UV arrays only when mapped values differ
+  from the renderer baseline. Dense two-mesh regression and isolated conversion
+  measurements are recorded in renderer report 109.
+
 ### Added
 
 - An opt-in generated MMD/Jolt composition check combining final joint palettes,
