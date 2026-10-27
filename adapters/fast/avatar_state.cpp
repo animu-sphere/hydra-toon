@@ -603,17 +603,19 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
     return Fail(error, "runtime layout count changed; rebind required");
   for (std::uint32_t i = 0; i < s->joint_count; ++i) {
     const auto& v = s->joints[i];
-    if (joints_[i] != Identity{v.skeleton_id, v.joint_id, v.parent_index, 0})
+    const auto& id = joints_[i];
+    if (id.owner != v.skeleton_id || id.target != v.joint_id || id.parent != v.parent_index)
       return Fail(error, "runtime joint layout changed");
   }
   for (std::uint32_t i = 0; i < s->blend_shape_count; ++i) {
     const auto& v = s->blend_shapes[i];
-    if (morphs_[i] != Identity{v.mesh_id, v.target_id})
+    if (morphs_[i].owner != v.mesh_id || morphs_[i].target != v.target_id)
       return Fail(error, "runtime morph layout changed");
   }
   for (std::uint32_t i = 0; i < s->material_count; ++i) {
     const auto& v = s->materials[i];
-    if (materials_[i] != Identity{v.material_id, v.input_id, -1, v.value_type})
+    const auto& id = materials_[i];
+    if (id.owner != v.material_id || id.target != v.input_id || id.type != v.value_type)
       return Fail(error, "runtime material layout changed");
   }
   for (std::uint32_t i = 0; i < s->visibility_count; ++i)
@@ -624,7 +626,9 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
     return Fail(error, "runtime primary UV count changed; rebind required");
   for (std::uint32_t i = 0; i < s->vertex_uv_count; ++i) {
     const auto& uv = s->vertex_uvs[i];
-    if (uvs_[i] != Identity{uv.mesh_id, "", -1, uv.vertex_index})
+    // Compare borrowed identity bytes against the owned binding directly;
+    // dense UV layouts must not allocate one temporary string per vertex.
+    if (uvs_[i].owner != uv.mesh_id || uvs_[i].type != uv.vertex_index)
       return Fail(error, "runtime primary UV layout changed; rebind required");
   }
 #endif
@@ -677,14 +681,19 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
     Find(candidate.meshes, b.mesh)->visible = s->visibility[b.source].visible != 0;
 #if AR_ABI_VERSION >= 5
   for (const auto& b : bindings_.uvs) {
-    std::vector<Float2> values;
-    values.reserve(b.sources.size());
-    for (const auto source : b.sources) {
-      const auto& uv = s->vertex_uvs[source];
-      values.push_back({static_cast<float>(uv.value[0]), static_cast<float>(uv.value[1])});
-    }
     auto& mesh = *Find(candidate.meshes, b.mesh);
-    if (*mesh.uvs != values) {
+    const auto value = [&](std::uint32_t source) {
+      const auto& uv = s->vertex_uvs[source];
+      return Float2{static_cast<float>(uv.value[0]), static_cast<float>(uv.value[1])};
+    };
+    // All identities and values have already been validated. Unchanged UVs
+    // preserve the baseline array without allocating a dense temporary.
+    if (!std::equal(b.sources.begin(), b.sources.end(), mesh.uvs->begin(),
+            [&](std::uint32_t source, const Float2& uv) { return value(source) == uv; })) {
+      std::vector<Float2> values;
+      values.reserve(b.sources.size());
+      for (const auto source : b.sources)
+        values.push_back(value(source));
       mesh.uvs = std::make_shared<const std::vector<Float2>>(std::move(values));
       if (Size(mesh.tangents) && !UvTangents(mesh, error))
         return false;

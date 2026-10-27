@@ -125,6 +125,11 @@ reset and release are checked. UV changes use ordinary extraction; late UV
 changes refuse. Generated textured MMD/MToon
 Vulkan frames match an independently updated scene, change with UV weights and
 return to the original pixels at zero; [renderer report 102](../reports/renderer/102-2026-10-26-avatar-primary-uv.md).
+Dense updates compare identity bytes against owned bindings without per-vertex
+temporary strings; unchanged mapped UVs preserve baseline arrays without a
+dense temporary allocation. Two-mesh reversed layouts, distinct storage for
+equal identities, rejection and retained-array restoration are checked
+([report 109](../reports/renderer/109-2026-10-27-resident-uv-allocation.md)).
 Automatic Hydra resident UV matching covers complete vertex/varying `st`,
 including corner and generated tangent-seam splits, reordered slots and
 per-mesh refusal for incomplete/ambiguous source mappings. Generated no-tangent
