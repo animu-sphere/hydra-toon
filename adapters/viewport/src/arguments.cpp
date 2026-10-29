@@ -221,6 +221,13 @@ Arguments ParseArguments(int argc, char** argv) {
     } else if (option == "--mmd-physics") {
       result.mmd_physics = true;
       result.avatar_runtime = true;
+    } else if (option == "--vrm-springs") {
+      result.vrm_springs = true;
+      result.avatar_runtime = true;
+    } else if (option == "--secondary-motion") {
+      const auto value = next();
+      if (value != "on" && value != "off") throw std::invalid_argument("--secondary-motion must be on or off");
+      result.secondary_motion = value == "on";
     } else if (option == "--avatar-runtime") {
       result.avatar_runtime = true;
     } else if (option == "--avatar-lookat") {
@@ -241,6 +248,8 @@ Arguments ParseArguments(int argc, char** argv) {
       result.avatar_model = next();
     } else if (option == "--help") {
       std::cout << "Usage: toon-viewport [options]\n"
+                   "  --vrm-springs            native VRM motion + spring session\n"
+                   "  --secondary-motion on|off  springs in the native VRM session (on)\n"
                    "  --width N --height N     window size (default 1280x720)\n"
                    "  --frames N               exit after N presented frames\n"
                    "  --telemetry-output FILE  save latency/timing JSON on exit\n"
@@ -382,6 +391,20 @@ Arguments ParseArguments(int argc, char** argv) {
     throw std::invalid_argument("--switch-file needs --frames N, N >= 2");
   }
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+  if (result.vrm_springs) {
+#if !TOON_VIEWPORT_HAS_VRM_RUNTIME
+    throw std::invalid_argument("--vrm-springs needs toon-viewport-vrm");
+#endif
+    if (result.mmd_physics || result.avatar_motion.empty())
+      throw std::invalid_argument("--vrm-springs requires --avatar-motion and a VRM stage");
+    if (result.time || result.time_step || result.playback_speed != 1.0 ||
+        !result.avatar_look_at.empty() || result.avatar_rate != 120.0)
+      throw std::invalid_argument("VRM springs use the runtime clock; USD seek/step/speed and generated gaze are unavailable");
+  }
+#if TOON_VIEWPORT_HAS_VRM_RUNTIME
+  if (result.avatar_runtime && !result.vrm_springs)
+    throw std::invalid_argument("toon-viewport-vrm requires --vrm-springs for runtime input");
+#endif
   if (!result.avatar_model.empty() && !result.mmd_physics)
     throw std::invalid_argument("--avatar-model needs --mmd-physics");
   if (result.mmd_physics) {
