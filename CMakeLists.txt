@@ -43,6 +43,7 @@ option(TOON_ENABLE_VIEWPORT "Build the optional GLFW/Vulkan viewport adapter"
 option(TOON_ENABLE_WEBGPU "Build the optional WebGPU backend on Dawn" OFF)
 option(TOON_ENABLE_AVATAR_STATE "Build the optional avatar runtime state consumer" OFF)
 option(TOON_MMD_RUNTIME_VIEWPORT "Build the optional live MMD physics viewport host" OFF)
+option(TOON_VRM_RUNTIME_VIEWPORT "Build the optional live VRM motion/spring viewport host" OFF)
 # The Tessera example host (GPU handoff policy §9): Win32, with the Hydra
 # adapter and the Vulkan backend; fetches a pinned Tessera. Never installed.
 option(TOON_ENABLE_TESSERA "Build the Tessera example host" OFF)
@@ -63,6 +64,9 @@ endif()
 option(TOON_BUILD_TESTS "Build renderer contract and install-tree tests" ON)
 if(TOON_MMD_RUNTIME_VIEWPORT AND NOT (TOON_ENABLE_HYDRA2 AND TOON_ENABLE_VIEWPORT AND TOON_ENABLE_AVATAR_STATE))
   message(FATAL_ERROR "TOON_MMD_RUNTIME_VIEWPORT requires Hydra, viewport and avatar state options")
+endif()
+if(TOON_VRM_RUNTIME_VIEWPORT AND NOT (TOON_ENABLE_HYDRA2 AND TOON_ENABLE_VIEWPORT AND TOON_ENABLE_AVATAR_STATE))
+  message(FATAL_ERROR "TOON_VRM_RUNTIME_VIEWPORT requires Hydra, viewport and avatar state options")
 endif()
 if(TOON_MMD_UV_PROVIDER_TEST AND (NOT TOON_ENABLE_HYDRA2 OR NOT TOON_BUILD_TESTS))
   message(FATAL_ERROR "TOON_MMD_UV_PROVIDER_TEST requires TOON_ENABLE_HYDRA2 and TOON_BUILD_TESTS")

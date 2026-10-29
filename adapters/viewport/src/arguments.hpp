@@ -60,6 +60,8 @@ struct Arguments {
   // (toon-viewport-avatar only).
   bool avatar_runtime = false;
   bool mmd_physics = false;
+  bool vrm_springs = false;
+  bool secondary_motion = true;
   std::string avatar_look_at;
   double avatar_rate = 120.0;
   std::uint64_t avatar_reset_every = 0;

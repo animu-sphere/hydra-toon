@@ -865,6 +865,36 @@ and linear Blend over the fixed opaque clear, excluding silhouette/MSAA
 edges and texture transitions.
 
 
+### Live VRM motion and springs in the dedicated viewport
+
+Enable `TOON_ENABLE_HYDRA2`, `TOON_ENABLE_VIEWPORT`, `TOON_ENABLE_AVATAR_STATE`
+and `TOON_VRM_RUNTIME_VIEWPORT`. Supply an installed `AvatarRuntime` with the
+`vrm_session` component and its installed motion/VRM owner packages through
+`CMAKE_PREFIX_PATH`; set `TOON_AVATAR_RUNTIME_INCLUDE_DIR` to that runtime's
+installed include directory. Build `toon-viewport-vrm`.
+
+Register matching contract-v2 VRM schema, imaging, VRM/VRMA file-format and
+package-resolver resources, and put their DLLs plus OpenUSD/runtime on PATH:
+
+```text
+toon-viewport-vrm --usd <avatar.vrm> --vrm-springs --avatar-motion <clip.vrma> --play
+```
+
+The **VRM motion + springs** panel and Space control playback. Reset restarts
+the animated pose and spring history and pauses; Stop releases the session,
+and Play rebuilds it. Default `--loop on` explicitly resets at wrap;
+`--loop off` holds the final clip pose while springs continue. Start another
+session with `--secondary-motion off` for motion-only comparison. The runtime
+owns 60 Hz ticks, up to four catch-up ticks and retained backlog. Late reads
+only deliver retained output. USD seek/step/speed options are refused.
+
+For opt-in resident checks, configure `TOON_VRM_RUNTIME_TEST_STAGE`,
+`TOON_VRM_RUNTIME_TEST_MOTION` and `TOON_VRM_RUNTIME_PLUGINS` with local inputs
+and plugin resource directories. Build `toon-vrm-runtime-test` and run CTest
+with `-R '^toon-vrm-runtime-resident$'`. Assets are not copied or committed.
+[Renderer report 110](../reports/renderer/110-2026-10-29-live-vrm-springs.md)
+records AliciaSolid display and the remaining parity/admission limits.
+
 ### Live MMD physics in the dedicated viewport
 
 The optional `toon-viewport-mmd` consumes the installed runtime's

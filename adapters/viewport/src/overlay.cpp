@@ -762,17 +762,26 @@ OverlayControls Overlay::Build(const OverlayFrame& frame, double delta,
 
     if (frame.avatar_runtime != nullptr && frame.avatar_runtime->physics) {
       const auto& live = *frame.avatar_runtime;
-      ImGui::SeparatorText("MMD live physics");
-      ImGui::Text("%s | tick %llu | bodies %zu | %.3f s",
-          live.stopped ? "Stopped" : live.playing ? "Playing" : "Paused",
-          static_cast<unsigned long long>(live.physics_steps), live.bodies, live.evaluation_seconds);
-      if (ImGui::Button(live.playing ? "Pause physics" : "Play physics"))
+      ImGui::SeparatorText(live.vrm_session ? "VRM motion + springs" : "MMD live physics");
+      if (live.vrm_session)
+        ImGui::Text("%s | tick %llu | %.3f s", live.stopped ? "Stopped" : live.playing ? "Playing" : "Paused",
+            static_cast<unsigned long long>(live.physics_steps), live.evaluation_seconds);
+      else
+        ImGui::Text("%s | tick %llu | bodies %zu | %.3f s",
+            live.stopped ? "Stopped" : live.playing ? "Playing" : "Paused",
+            static_cast<unsigned long long>(live.physics_steps), live.bodies, live.evaluation_seconds);
+      if (ImGui::Button(live.playing ? "Pause" : "Play"))
         controls.runtime_action = live.playing ? AvatarRuntime::Action::Pause : AvatarRuntime::Action::Play;
       ImGui::SameLine();
-      if (ImGui::Button("Reset physics")) controls.runtime_action = AvatarRuntime::Action::Reset;
+      if (ImGui::Button("Reset")) controls.runtime_action = AvatarRuntime::Action::Reset;
       ImGui::SameLine();
-      if (ImGui::Button("Stop physics")) controls.runtime_action = AvatarRuntime::Action::Stop;
-      ImGui::TextWrapped("VMD + runtime fixed ticks + Jolt. Space plays/pauses. Motion holds its last key; no automatic loop or seek.");
+      if (ImGui::Button("Stop")) controls.runtime_action = AvatarRuntime::Action::Stop;
+      if (live.vrm_session) {
+        ImGui::Text("Springs: %s | backlog %.3f s", live.secondary_motion ? "On" : "Off", live.pending_seconds);
+        ImGui::TextWrapped("Space plays/pauses. Reset restarts the motion and springs.");
+      } else {
+        ImGui::TextWrapped("VMD + runtime fixed ticks + Jolt. Space plays/pauses. Motion holds its last key; no automatic loop or seek.");
+      }
       if (!live.error.empty()) ImGui::TextWrapped("%s", live.error.c_str());
     }
     if (frame.avatar_runtime != nullptr && ImGui::CollapsingHeader("Avatar runtime")) {

@@ -51,6 +51,8 @@ struct AvatarRuntimeOptions {
   // Owner PMX bytes when the displayed stage is a composed USD/USDZ stage.
   // Empty uses the directly opened PMX root layer.
   std::string model;
+  bool secondary_motion = true;
+  bool loop = true;
 };
 
 // A runtime output and where it lands, with its value in the applied result.
@@ -64,6 +66,8 @@ struct AvatarRuntimeRow {
 // owns it; the producer's counts are copied in when a result is taken.
 struct AvatarRuntimeStatus {
   bool physics = false, playing = false, stopped = false;
+  bool vrm_session = false, secondary_motion = false;
+  double pending_seconds = 0;
   std::uint64_t physics_steps = 0;
   std::size_t bodies = 0, uvs = 0;
   std::string error;

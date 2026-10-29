@@ -249,7 +249,7 @@ int RunViewport(int argc, char** argv) {
       next.SetSpeed(arguments.playback_speed);
       next.SetLoop(arguments.loop);
       next.SetPlaying(arguments.play);
-      if (arguments.play && !arguments.mmd_physics && !next.available()) {
+      if (arguments.play && !arguments.mmd_physics && !arguments.vrm_springs && !next.available()) {
         throw std::runtime_error("--play needs a finite authored animation range");
       }
       return next;
@@ -266,7 +266,8 @@ int RunViewport(int argc, char** argv) {
       if (!arguments.avatar_runtime) return started;
       started = Toon::viewport::AvatarRuntime::Start(scene, bound, ++avatar_epoch,
           {arguments.avatar_look_at, arguments.avatar_rate, arguments.avatar_reset_every,
-              arguments.avatar_motion, arguments.play, true, arguments.avatar_model});
+              arguments.avatar_motion, arguments.play, true, arguments.avatar_model,
+              arguments.secondary_motion, arguments.loop});
       std::string failure;
       if (!started->Apply(bound, false, failure)) {
         throw std::runtime_error("avatar runtime: " + failure);
@@ -888,7 +889,7 @@ int RunViewport(int argc, char** argv) {
                 << " poses=" << since.poses << " morph_weights=" << since.morph_weights
                 << " materials=" << since.materials << '\n';
       if (arguments.frame_limit && avatar->status().physics && avatar->status().refused) {
-        std::cerr << "toon-viewport: bounded MMD run contains refused physics evaluations\n";
+        std::cerr << "toon-viewport: bounded runtime run contains refused evaluations\n";
         return 1;
       }
     }
