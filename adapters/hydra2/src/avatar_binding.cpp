@@ -42,7 +42,19 @@ const std::vector<HdToonAvatarMaterialInput>& HdToonCanonicalMaterialInputs() {
       {"inputs:vrm:mtoon:matcapFactor", Field::Matcap},
       {"inputs:vrm:mtoon:parametricRimColorFactor", Field::RimColor},
       {"inputs:vrm:mtoon:outlineWidthFactor", Field::OutlineWidth},
-      {"inputs:vrm:mtoon:outlineColorFactor", Field::OutlineColor}};
+      {"inputs:vrm:mtoon:outlineColorFactor", Field::OutlineColor},
+      {"inputs:mmd:material:diffuseColor", Field::BaseColor},
+      {"inputs:mmd:material:specularColor", Field::MmdSpecularColor},
+      {"inputs:mmd:material:specularPower", Field::MmdSpecularPower},
+      {"inputs:mmd:material:ambientColor", Field::MmdAmbientColor},
+      {"inputs:mmd:material:edgeColor", Field::MmdEdgeColor},
+      {"inputs:mmd:material:edgeSize", Field::MmdEdgeSize},
+      {"mmd:textureTint:multiply", Field::MmdTextureMultiply},
+      {"mmd:textureTint:add", Field::MmdTextureAdd},
+      {"mmd:sphereTint:multiply", Field::MmdSphereMultiply},
+      {"mmd:sphereTint:add", Field::MmdSphereAdd},
+      {"mmd:toonTint:multiply", Field::MmdToonMultiply},
+      {"mmd:toonTint:add", Field::MmdToonAdd}};
   return inputs;
 }
 

@@ -17,6 +17,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Native MMD material snapshot consumption with automatic resident matching,
+  canonical colour/scalar fields and independent sampled texture/sphere/toon
+  coefficients. Alpha changes update draw membership; generated runtime,
+  resident and Vulkan checks are recorded in renderer report 111.
+
 - An opt-in generated MMD/Jolt composition check combining final joint palettes,
   vertex morphs and primary UVs through automatic resident bindings, with
   USD/Hydra stream and 1x/4x Vulkan parity across world resets.

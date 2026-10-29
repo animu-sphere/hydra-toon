@@ -921,12 +921,22 @@ toon-viewport-mmd --usd <model.pmx> --mmd-physics --avatar-motion <motion.vmd> -
 
 For a composed USD/USDZ stage, add `--avatar-model <original.pmx>` so runtime
 control reads the original owner data while rendering uses the composed stage.
-The host validates the joint/morph/primary-UV bindings; source and display data
+The host validates the joint/morph/primary-UV/material bindings; source and display data
 must correspond. Author stage-wide up-axis, metre/kilogram units and default
 prim on the composition's root layer. This option applies no damping repairs
 and admits no unsupported morph outputs automatically. Bounded `--frames` runs
 return failure when runtime evaluation is refused, rather than counting window
 presentation alone as successful animation.
+
+Material morph delivery requires the runtime's material-capable session. Its
+six canonical inputs and independent sampled tint coefficients map to resident
+MMD materials. Add `--mmd-morph-tints on` to request full.fx tint realization;
+the default follows MMD's untinted reading. Generate optional two-material
+acceptance inputs using the runtime's `tools/generate-mmd-material-fixture.py`,
+then set `TOON_MMD_MATERIAL_TEST_PMX` and `TOON_MMD_MATERIAL_TEST_VMD` alongside
+the existing MMD test inputs. Run `toon-mmd-material-resident` and
+`toon-viewport-mmd-material`; scope and measured evidence are in
+[report 111](../reports/renderer/111-2026-10-29-live-mmd-materials.md).
 
 **MMD live physics** and Space control Play/Pause. Reset pauses and reconstructs
 the frame-zero world; Stop closes it and restores authored output; another Play
