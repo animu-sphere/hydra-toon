@@ -147,6 +147,76 @@ void Slow(const Toon::FrameSnapshot& a, const Toon::FrameSnapshot& b) {
             a.materials[0].structure_revision == b.materials[0].structure_revision,
       "runtime update changed static resources");
 }
+void MmdMaterials(const char* shaders = nullptr) {
+  using Field = Toon::AvatarMaterialField;
+  Scene scene;
+  scene.values.model = Toon::ToonShadingModel::MMD;
+  scene.values.outline = false;
+  const auto texture = scene.world.CreateTexture();
+  Toon::ToonTexture texels; texels.width = texels.height = 1;
+  texels.encoding = Toon::ToonTextureEncoding::Linear;
+  texels.pixels = std::make_shared<const std::vector<std::uint8_t>>(std::vector<std::uint8_t>{64,128,192,255});
+  scene.world.SetTexture(texture,texels);
+  scene.world.SetMeshUVs(scene.mesh,{{0,0},{0,0},{0,0}});
+  scene.values.base_texture.texture = texture;
+  scene.values.mmd.sphere_texture.texture = texture;
+  scene.values.mmd.sphere_mode = Toon::ToonSphereMode::Multiply;
+  scene.values.mmd.toon_texture.texture = texture;
+  scene.values.mmd.toon_source = Toon::ToonRampSource::Individual;
+  scene.world.SetMaterial(scene.material,scene.values);
+  const Field fields[]{Field::BaseColor,Field::MmdSpecularColor,Field::MmdSpecularPower,
+      Field::MmdAmbientColor,Field::MmdEdgeColor,Field::MmdEdgeSize,
+      Field::MmdTextureMultiply,Field::MmdTextureAdd,Field::MmdSphereMultiply,Field::MmdSphereAdd,
+      Field::MmdToonMultiply,Field::MmdToonAdd};
+  const std::uint32_t types[]{4,3,1,3,4,1,4,4,4,4,4,4};
+  const char* names[]{"diffuse","specular","power","ambient","edge","size","tm","ta","sm","sa","rm","ra"};
+  ArMaterialInput materials[12]{};
+  auto bindings = scene.Bindings(); bindings.materials.clear();
+  for (std::uint32_t i = 0; i < 12; ++i) {
+    materials[i] = {"surface",names[i],types[i],1,{}};
+    for (std::uint32_t a = 0; a < types[i]; ++a) materials[i].value[a] = (i+1+a)/32.;
+    bindings.materials.push_back({i,scene.material,fields[i]});
+  }
+  Values values; auto view = values.View(); view.materials = materials; view.material_count = 12;
+  auto base = scene.world.Commit();
+  Toon::AvatarStateAdapter adapter; std::string error;
+  Check(adapter.Bind(view,base,1,bindings,error),error.c_str());
+  auto retained = Fake::Snapshot(view); Toon::FrameSnapshot output;
+  Check(adapter.Apply(retained,base,1,output,error),error.c_str());
+  auto expected = scene.values;
+  const auto rgb = [&](int n) { return Toon::Float3{float(materials[n].value[0]),float(materials[n].value[1]),float(materials[n].value[2])}; };
+  const auto rgba = [&](int n) { return Toon::Float4{float(materials[n].value[0]),float(materials[n].value[1]),float(materials[n].value[2]),float(materials[n].value[3])}; };
+  expected.base_color = rgb(0); expected.alpha = float(materials[0].value[3]);
+  expected.alpha_mode = Toon::ToonAlphaMode::Blend;
+  expected.mmd.specular_color = rgb(1); expected.mmd.specular_power = float(materials[2].value[0]);
+  expected.mmd.ambient_color = rgb(3); expected.outline_color = rgb(4); expected.mmd.edge_alpha = float(materials[4].value[3]);
+  expected.outline_width = float(materials[5].value[0]);
+  expected.mmd.texture_tint = {rgba(6),rgba(7)}; expected.mmd.sphere_tint = {rgba(8),rgba(9)};
+  expected.mmd.toon_tint = {rgba(10),rgba(11)};
+  Check(output.materials[0].material == expected,"MMD material mapping lost a component");
+  Check(output.materials[0].structure_revision > base.materials[0].structure_revision,"MMD alpha draw membership did not invalidate");
+  if (shaders) {
+    Toon::FrameStatus status; std::string detail; Toon::RenderOptions options; options.samples = 4;
+    auto renderer = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders),status,detail,options);
+    auto oracle = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders),status,detail,options);
+    Check(renderer && oracle,detail.c_str());
+    Toon::ColorProduct image,reference,disabled; Toon::DepthProduct depth,referenceDepth;
+    auto draws = Toon::ExtractDrawList(output); draws.mmd_morph_tints = true;
+    auto manual = output; manual.materials[0].material = expected;
+    auto referenceDraws = Toon::ExtractDrawList(manual); referenceDraws.mmd_morph_tints = true;
+    Check(renderer->Render(draws,96,96,image,depth,error) && oracle->Render(referenceDraws,96,96,reference,referenceDepth,error),error.c_str());
+    Check(image.payload == reference.payload,"MMD runtime material GPU/reference parity");
+    draws.mmd_morph_tints = false;
+    Check(renderer->Render(draws,96,96,disabled,depth,error),error.c_str());
+    Check(image.payload != disabled.payload,"MMD affine tint coefficients did not reach sampled textures");
+    Check(renderer->statistics().validation_message_count == 0,"MMD GPU validation");
+  }
+  for (auto& m : materials) m.overridden = 0;
+  ++view.frame_id; retained = Fake::Snapshot(view);
+  Check(adapter.Apply(retained,base,1,output,error) && output.materials[0].material == scene.values,"MMD release did not restore baseline");
+  auto wrong = base; wrong.materials[0].material.model = Toon::ToonShadingModel::MToon;
+  Check(!adapter.Bind(view,wrong,2,bindings,error),"MMD-only fields accepted on MToon");
+}
 void SplitBaseColor() {
   Scene scene;
   Values v;
@@ -1127,6 +1197,7 @@ void Gpu(const char* shaders) {
 } // namespace
 int main(int argc, char** argv) {
   try {
+    MmdMaterials();
     SplitBaseColor();
     TextureTransform();
     ScaledEmissive();
@@ -1143,6 +1214,7 @@ int main(int argc, char** argv) {
       if (!Toon::ProbeVulkanBackend().available)
         return 77;
       Gpu(argv[2]);
+      MmdMaterials(argv[2]);
 #if AR_ABI_VERSION >= 5
       PrimaryUvs(argv[2]);
       PrimaryUvTangents(argv[2]);

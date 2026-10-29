@@ -69,7 +69,10 @@ enum class AvatarMaterialField {
   BaseTextureScale,
   BaseTextureRotation,
   // Separate canonical RGB and alpha inputs may bind independently.
-  BaseColorRgb
+  BaseColorRgb,
+  MmdSpecularColor, MmdSpecularPower, MmdAmbientColor, MmdEdgeColor, MmdEdgeSize,
+  MmdTextureMultiply, MmdTextureAdd, MmdSphereMultiply, MmdSphereAdd,
+  MmdToonMultiply, MmdToonAdd
 };
 struct AvatarMaterialBinding {
   std::uint32_t source = 0;

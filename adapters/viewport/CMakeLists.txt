@@ -187,6 +187,24 @@ if(TOON_MMD_RUNTIME_VIEWPORT)
       "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/mmd-runtime-test.log"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mmd_runtime.cmake")
     set_tests_properties(toon-viewport-mmd-runtime PROPERTIES LABELS "gpu" SKIP_RETURN_CODE 77)
+    set(TOON_MMD_MATERIAL_TEST_PMX "" CACHE FILEPATH "Generated two-material physics PMX")
+    set(TOON_MMD_MATERIAL_TEST_VMD "" CACHE FILEPATH "Generated group/direct material VMD")
+    if(TOON_MMD_MATERIAL_TEST_PMX AND TOON_MMD_MATERIAL_TEST_VMD)
+      add_test(NAME toon-mmd-material-resident COMMAND "${CMAKE_COMMAND}"
+        "-DPROGRAM=$<TARGET_FILE:toon-mmd-runtime-test>"
+        "-DSTAGE=${TOON_MMD_MATERIAL_TEST_PMX}" "-DARGUMENTS=${TOON_MMD_MATERIAL_TEST_VMD}|--materials"
+        "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-mmd-runtime-test>,|>"
+        "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+        -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+      add_test(NAME toon-viewport-mmd-material COMMAND "${CMAKE_COMMAND}"
+        "-DPROGRAM=$<TARGET_FILE:toon-viewport-mmd>"
+        "-DARGUMENTS=--usd|${TOON_MMD_MATERIAL_TEST_PMX}|--mmd-physics|--avatar-motion|${TOON_MMD_MATERIAL_TEST_VMD}|--mmd-morph-tints|on|--play|--hidden|--frames|120|--width|320|--height|320|--vsync|on"
+        "-DEXPECT=material_inputs=24|refused=0|mismatches=0|Presented 120 frames"
+        "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-viewport-mmd>,|>"
+        "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+        -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+      set_tests_properties(toon-viewport-mmd-material PROPERTIES LABELS "gpu")
+    endif()
   endif()
 endif()
 

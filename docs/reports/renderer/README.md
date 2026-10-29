@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [111](111-2026-10-29-live-mmd-materials.md) | Live MMD canonical material and affine tint delivery, automatic resident binding, reset/cache parity and sampled-texture Vulkan evidence |
 | [110](110-2026-10-29-live-vrm-springs.md) | Native VRM/clip fixed-tick session in the viewport, spring-driven resident skins, cached/reset parity, playback controls and AliciaSolid display |
 | [109](109-2026-10-27-resident-uv-allocation.md) | Dense resident UV identity and unchanged-value allocation removal; isolated conversion cost, retained-array regression and scoped live preview |
 | [108](108-2026-10-27-dense-live-mmd.md) | Dense private USDZ/PMX preview with explicit owner source, temporary intake limitations, UV validation bottleneck and roughly sixfold presentation improvement |

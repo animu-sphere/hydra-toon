@@ -171,8 +171,17 @@ T* Find(std::vector<T>& items, std::uint32_t id) {
 std::uint32_t Type(AvatarMaterialField field) {
   switch (field) {
   case AvatarMaterialField::BaseColor:
+  case AvatarMaterialField::MmdEdgeColor:
+  case AvatarMaterialField::MmdTextureMultiply:
+  case AvatarMaterialField::MmdTextureAdd:
+  case AvatarMaterialField::MmdSphereMultiply:
+  case AvatarMaterialField::MmdSphereAdd:
+  case AvatarMaterialField::MmdToonMultiply:
+  case AvatarMaterialField::MmdToonAdd:
     return AR_VALUE_VEC4;
   case AvatarMaterialField::Emissive:
+  case AvatarMaterialField::MmdSpecularColor:
+  case AvatarMaterialField::MmdAmbientColor:
   case AvatarMaterialField::BaseColorRgb:
   case AvatarMaterialField::ShadeColor:
   case AvatarMaterialField::OutlineColor:
@@ -183,6 +192,8 @@ std::uint32_t Type(AvatarMaterialField field) {
   case AvatarMaterialField::BaseTextureScale:
     return AR_VALUE_VEC2;
   case AvatarMaterialField::Alpha:
+  case AvatarMaterialField::MmdSpecularPower:
+  case AvatarMaterialField::MmdEdgeSize:
   case AvatarMaterialField::ShadingShift:
   case AvatarMaterialField::ShadingToony:
   case AvatarMaterialField::OutlineWidth:
@@ -195,10 +206,24 @@ void Material(ToonMaterial& m, AvatarMaterialField f, const double* v, float sca
   const Float3 color{static_cast<float>(v[0]) * scale, static_cast<float>(v[1]) * scale,
       static_cast<float>(v[2]) * scale};
   const float x = color.x;
+  const Float4 rgba{x,color.y,color.z,static_cast<float>(v[3])*scale};
   switch (f) {
+  case AvatarMaterialField::MmdSpecularColor: m.mmd.specular_color = color; break;
+  case AvatarMaterialField::MmdSpecularPower: m.mmd.specular_power = x; break;
+  case AvatarMaterialField::MmdAmbientColor: m.mmd.ambient_color = color; break;
+  case AvatarMaterialField::MmdEdgeColor: m.outline_color = color; m.mmd.edge_alpha = rgba.w; break;
+  case AvatarMaterialField::MmdEdgeSize: m.outline_width = x; break;
+  case AvatarMaterialField::MmdTextureMultiply: m.mmd.texture_tint.multiply = rgba; break;
+  case AvatarMaterialField::MmdTextureAdd: m.mmd.texture_tint.add = rgba; break;
+  case AvatarMaterialField::MmdSphereMultiply: m.mmd.sphere_tint.multiply = rgba; break;
+  case AvatarMaterialField::MmdSphereAdd: m.mmd.sphere_tint.add = rgba; break;
+  case AvatarMaterialField::MmdToonMultiply: m.mmd.toon_tint.multiply = rgba; break;
+  case AvatarMaterialField::MmdToonAdd: m.mmd.toon_tint.add = rgba; break;
   case AvatarMaterialField::BaseColor:
     m.base_color = color;
     m.alpha = static_cast<float>(v[3]) * scale;
+    if (m.model == ToonShadingModel::MMD && m.alpha_mode == ToonAlphaMode::Opaque && m.alpha < 1.0F)
+      m.alpha_mode = ToonAlphaMode::Blend;
     break;
   case AvatarMaterialField::BaseColorRgb:
     m.base_color = color;
@@ -450,7 +475,11 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
   std::set<std::pair<MaterialId, AvatarMaterialField>> fields;
   for (const auto& b : next.bindings_.materials) {
     const auto* material = Find(next.bound_.materials, b.material);
-    if (b.source >= layout.material_count || !material || material->material.model != ToonShadingModel::MToon ||
+    const bool mmd = b.field >= AvatarMaterialField::MmdSpecularColor;
+    const bool supported = material && (material->material.model == ToonShadingModel::MMD
+        ? (mmd || b.field == AvatarMaterialField::BaseColor)
+        : material->material.model == ToonShadingModel::MToon && !mmd);
+    if (b.source >= layout.material_count || !supported ||
         !std::isfinite(b.scale) || Type(b.field) != layout.materials[b.source].value_type || !fields.emplace(b.material, b.field).second)
       return Fail(error, "unsupported or overlapping material binding");
     materials[b.source] = true;
@@ -569,6 +598,7 @@ void AvatarStateAdapter::Publish(FrameSnapshot candidate, FrameSnapshot& output)
       changed = true;
     } else
       b.parameters_revision = a.parameters_revision;
+    b.structure_revision = IsStructuralChange(a.material,b.material) ? stamp : a.structure_revision;
   }
   if (candidate.view.view != previous_.view.view || candidate.view.projection != previous_.view.projection) {
     candidate.view_revision = stamp;

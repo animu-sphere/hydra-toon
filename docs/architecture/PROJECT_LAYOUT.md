@@ -108,6 +108,16 @@ through the supplied C function table. No evaluator or runtime library is
 linked. The optional target is installed in a separate CMake export, loaded
 only by `find_package(Toon COMPONENTS AvatarState)`; this component requires
 the runtime headers at consumption time. Core-only consumers require none.
+
+MMD material bindings map complete diffuse/edge RGBA, specular/ambient RGB,
+power/edge size and independent sampled texture/sphere/toon multiply/add
+coefficients. These MMD fields require an MMD resident material; MToon fields
+retain their existing admission. A diffuse alpha below one promotes an opaque
+MMD material to Blend for that result, with a structural revision; release
+restores the baseline draw membership. Tint realization uses the existing
+per-frame MMD/full.fx switch. No stage attribute or format evaluator is added
+to the renderer.
+
 The runtime's evaluation Scene Index remains upstream, consumed through the
 Hydra adapter's data-source route. Both adapters normalize into renderer-private
 snapshot values and use the same extraction and backend paths.

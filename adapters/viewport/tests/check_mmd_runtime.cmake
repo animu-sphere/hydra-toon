@@ -34,12 +34,12 @@ if(errors MATCHES "MMD physics paused:|MMD physics control:|MMD physics close:")
   message(FATAL_ERROR "Live physics refused: ${errors}")
 endif()
 get_filename_component(vmd_directory "${VMD}" DIRECTORY)
-set(unsupported "${vmd_directory}/live-physics-material.vmd")
-if(EXISTS "${unsupported}")
+set(material_motion "${vmd_directory}/live-physics-material.vmd")
+if(EXISTS "${material_motion}")
   execute_process(COMMAND "${VIEWPORT}" --usd "${composed}" --mmd-physics --avatar-model "${PMX}"
-    --avatar-motion "${unsupported}" --play --hidden --frames 16 --width 320 --height 320 --vsync on
+    --avatar-motion "${material_motion}" --play --hidden --frames 16 --width 320 --height 320 --vsync on
     RESULT_VARIABLE refusal OUTPUT_VARIABLE refused_output ERROR_VARIABLE refused_errors TIMEOUT 30)
-  if(NOT refusal EQUAL 1 OR NOT refused_errors MATCHES "bounded MMD run contains refused physics evaluations")
-    message(FATAL_ERROR "Refused simulation was reported as success: ${refusal}\n${refused_output}\n${refused_errors}")
+  if(NOT refusal EQUAL 0 OR NOT refused_output MATCHES "refused=0")
+    message(FATAL_ERROR "Empty material declaration refused: ${refusal}\n${refused_output}\n${refused_errors}")
   endif()
 endif()

@@ -114,7 +114,7 @@ public:
       << " seconds=" << status_.evaluation_seconds << " generation=" << status_.generation
       << " published=" << status_.published << " refused=" << status_.refused << " resets=" << status_.resets
       << " skins=" << status_.skins << " morphs=" << status_.morphs << " uv_meshes=" << status_.uvs
-      << " mismatches=" << status_.mismatches.size() << '\n';
+      << " mismatches=" << status_.mismatches.size() << " material_inputs=" << status_.material_inputs << '\n';
     s << "MMD physics timing: runtime_ms_per_tick=" << (measured_ticks_ ? tick_ms_ / measured_ticks_ : 0)
       << " resident_ms_per_result=" << (converted_ ? apply_ms_ / converted_ : 0)
       << " converted=" << converted_ << " reused=" << reused_ << '\n';
@@ -145,6 +145,7 @@ private:
     }
     status_.skins = match.bindings.skins.size(); status_.morphs = match.bindings.morphs.size();
     status_.uvs = match.bindings.uvs.size();
+    status_.materials = match.bindings.materials.size(); status_.material_inputs = layout.material_count;
     std::string error;
     if (!adapter_.Bind(layout, baseline_, ++epoch_, std::move(match.bindings), error)) throw std::runtime_error(error);
     status_.instance = layout.instance; status_.generation = layout.generation;
