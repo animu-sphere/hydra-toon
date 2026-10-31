@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The `toon-renderer-core-boundary` check discovers every file under
+  `include/toon/` when it runs instead of enumerating headers, and now also covers
+  `webgpu_present.hpp` and `fast/avatar_state.hpp`, which the list had missed. Only
+  `include/toon/fast/` may include the runtime's headers, and `//` comments are not
+  scanned.
+
 - The Vulkan backend places vertex, index, skin and morph buffers in device-local
   host-visible memory when available, falling back to the prior memory when that
   allocation fails. A dense avatar's GPU frame no longer follows the PCIe link

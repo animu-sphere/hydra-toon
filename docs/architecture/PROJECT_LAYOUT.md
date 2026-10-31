@@ -444,8 +444,7 @@ optional features the host enabled — the factory of an offscreen renderer
 on it, and the handoff: the product ring's options, the descriptor of
 policy §6, `HandoffRenderer` with acquisition, release and capture, and its
 statistics. Handles and enumerations
-travel as integers, as in `vulkan_present.hpp`, and the header joins the
-core-boundary check's list in the change that adds it. Its code lives in
+travel as integers, as in `vulkan_present.hpp`. Its code lives in
 `backend/vulkan/vulkan_handoff.cpp` within `toon-render-vulkan`, with the
 product ring declared in the private `backend/vulkan/handoff_ring.hpp`; the
 offscreen renderer in `vulkan_backend.cpp` draws a handoff frame into a
@@ -548,9 +547,9 @@ backend/webgpu ──┘
    and Dawn appear only in `backend/webgpu/`'s `.cpp` files and its private
    `webgpu_internal.hpp`.
    `validation/check-core-boundary.cmake.in` enforces the boundary, WebGPU
-   and Dawn includes among the forbidden ones, for the core and backend
-   headers it lists; **a new public header is added to that list in the
-   same change.**
+   and Dawn includes among the forbidden ones, for every file it discovers
+   under `include/toon/` when the test runs, outside `//` comments. Only
+   `include/toon/fast/` may include the runtime's headers (rule 6).
 3. A backend depends on `core/` and `backend/shared/`, never on an adapter
    or on another backend. `backend/shared/` depends on `core/` alone and
    names no GPU API: its records are the bytes the shaders read (each says
