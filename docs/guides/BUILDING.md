@@ -941,6 +941,14 @@ the existing MMD test inputs. Run `toon-mmd-material-resident` and
 `toon-viewport-mmd-material`; scope and measured evidence are in
 [report 111](../reports/renderer/111-2026-10-29-live-mmd-materials.md).
 
+To compare generated canonical material delivery with runtime-published
+USD/Hydra, also configure `TOON_MMD_MATERIAL_PROVIDER_TEST=ON`, build
+`toon-hydra2-mmd-material-test`, and run CTest with
+`-R '^toon-renderer-mmd-material-(cpu|gpu)$'`. The same generated material
+inputs and installed plugin directories are required. Sampled tint realization
+is OFF; GPU comparison holds geometry at the imported baseline. See
+[report 113](../reports/renderer/113-2026-10-31-mmd-material-parity.md).
+
 **MMD live physics** and Space control Play/Pause. Reset pauses and reconstructs
 the frame-zero world; Stop closes it and restores authored output; another Play
 builds a new session. Closing/replacing the stage releases its old runtime

@@ -153,6 +153,42 @@ if(TOON_BUILD_TESTS)
     target_link_libraries(toon-hydra2-primvar-test PRIVATE toon-hydra2-avatar-binding)
     target_compile_definitions(toon-hydra2-primvar-test PRIVATE TOON_HAS_AVATAR_STATE=1)
   endif()
+  option(TOON_MMD_MATERIAL_PROVIDER_TEST "Compare native MMD material snapshots with USD/Hydra" OFF)
+  if(TOON_MMD_MATERIAL_PROVIDER_TEST)
+    if(NOT TARGET toon-hydra2-avatar-binding)
+      message(FATAL_ERROR "TOON_MMD_MATERIAL_PROVIDER_TEST requires TOON_ENABLE_AVATAR_STATE")
+    endif()
+    set(TOON_MMD_MATERIAL_TEST_PMX "" CACHE FILEPATH "Generated two-material physics PMX")
+    set(TOON_MMD_MATERIAL_TEST_VMD "" CACHE FILEPATH "Generated group/direct material VMD")
+    set(TOON_MMD_RUNTIME_PLUGINS "" CACHE STRING "MMD schema, imaging and file-format plugin directories for live tests")
+    if(NOT TOON_MMD_MATERIAL_TEST_PMX OR NOT TOON_MMD_MATERIAL_TEST_VMD OR NOT TOON_MMD_RUNTIME_PLUGINS)
+      message(FATAL_ERROR "MMD material parity requires generated PMX/VMD and MMD plugin resources")
+    endif()
+    find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS mmd_session)
+    add_executable(toon-hydra2-mmd-material-test tests/primvar_test.cpp)
+    toon_configure_warnings(toon-hydra2-mmd-material-test)
+    target_include_directories(toon-hydra2-mmd-material-test PRIVATE "${PROJECT_SOURCE_DIR}/core/render-world")
+    target_link_libraries(toon-hydra2-mmd-material-test PRIVATE toon-hydra2-avatar-binding
+      usdImaging usdShade usdGeom usd Toon::Vulkan AvatarRuntime::avatarMmdSession)
+    target_compile_features(toon-hydra2-mmd-material-test PRIVATE cxx_std_20)
+    target_compile_definitions(toon-hydra2-mmd-material-test PRIVATE TOON_HAS_AVATAR_STATE=1 TOON_TEST_MMD_MATERIAL=1
+      NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    foreach(mode IN ITEMS cpu gpu)
+      set(arguments "${TOON_MMD_MATERIAL_TEST_PMX}" "${TOON_MMD_MATERIAL_TEST_VMD}")
+      if(mode STREQUAL "gpu")
+        list(APPEND arguments "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+      endif()
+      string(JOIN "|" arguments ${arguments})
+      add_test(NAME toon-renderer-mmd-material-${mode} COMMAND ${CMAKE_COMMAND}
+        "-DPROGRAM=$<TARGET_FILE:toon-hydra2-mmd-material-test>"
+        "-DARGUMENTS=${arguments}"
+        "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-hydra2-mmd-material-test>,|>"
+        "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_avatar_providers.cmake")
+    endforeach()
+    set_tests_properties(toon-renderer-mmd-material-gpu PROPERTIES LABELS "gpu")
+  endif()
+
   if(TOON_MMD_UV_PROVIDER_TEST)
     if(NOT TARGET toon-hydra2-avatar-binding)
       message(FATAL_ERROR "TOON_MMD_UV_PROVIDER_TEST requires TOON_ENABLE_AVATAR_STATE")

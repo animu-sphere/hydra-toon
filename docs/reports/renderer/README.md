@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [113](113-2026-10-31-mmd-material-parity.md) | Generated direct-PMX canonical material snapshot/USD-Hydra value and 1x/4x pixel parity, diffuse-alpha structure correction and reset/lifetime checks |
 | [112](112-2026-10-31-mmd-admission.md) | Owner-returned damping/inert-joint viewport diagnostics, generated resident replay and an unmodified original private PMX/VMD Vulkan run |
 | [111](111-2026-10-29-live-mmd-materials.md) | Live MMD canonical material and affine tint delivery, automatic resident binding, reset/cache parity and sampled-texture Vulkan evidence |
 | [110](110-2026-10-29-live-vrm-springs.md) | Native VRM/clip fixed-tick session in the viewport, spring-driven resident skins, cached/reset parity, playback controls and AliciaSolid display |
