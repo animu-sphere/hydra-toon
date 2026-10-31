@@ -22,6 +22,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- Opt-in generated direct-PMX combined pose, vertex morph, primary UV, physics
+  feedback and canonical material comparison against USD/Hydra, including
+  1x/4x Vulkan pixels, reset replay and independent output omission controls.
+  Renderer report 114 records its scope.
+
 - MMD live viewport admission diagnostics: original/effective damping coefficients
   and inert joint paths in the runtime panel and final log, refreshed on Reset
   and cleared on Stop. Generated resident replay and unmodified private-input
