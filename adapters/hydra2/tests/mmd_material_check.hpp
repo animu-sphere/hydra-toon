@@ -10,14 +10,21 @@ Toon::ToonMaterial CanonicalMaterial(Toon::ToonMaterial value) {
   return value;
 }
 
-bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& shaders) {
+bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& shaders, bool combined = false) {
   const auto stage = UsdStage::Open(pmx);
   if (!Check(bool(stage), "open generated material PMX")) return false;
   std::string root, session_layer;
   stage->GetRootLayer()->ExportToString(&root);
   stage->GetSessionLayer()->ExportToString(&session_layer);
   Host host(stage);
-  const auto baseline = host.Sync();
+  const auto sync = [&] {
+    auto frame = host.Sync();
+    // UsdSkelImaging also supplies an animated skeleton diagnostic mesh. It
+    // has no runtime resident binding; compare the avatar's skinned surface.
+    if (combined) std::erase_if(frame.meshes, [](const auto& mesh) { return !Toon::IsSkinned(mesh); });
+    return frame;
+  };
+  const auto baseline = sync();
   avatarMmdSession::Session session(stage, pmx, vmd, false, false, true);
   const auto api = session.Api();
   const auto match = HdToonMatchAvatarTargets(session.Baseline(),
@@ -31,12 +38,15 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
           match.bindings.materials.size() == 24 &&
           adapter.Bind(session.Baseline(), baseline, 1, match.bindings, error),
           "two complete automatically matched material layouts required")) return false;
+  if (combined && !Check(baseline.meshes.size() == 1 && session.Baseline().joint_count == 2 &&
+          session.Baseline().blend_shape_count == 1 && session.Baseline().vertex_uv_count == 4 &&
+          match.bindings.skins.size() == 1 && match.bindings.morphs.size() == 1 &&
+          match.bindings.uvs.size() == 1, "combined automatic skin/morph/UV binding required")) return false;
 
-  // Hold geometry at the imported baseline in BOTH products: this is a material
-  // comparison, independent of pose/UV float rounding and moving physics bodies.
-  // Preserve each path's material slots and the baseline's two material subsets.
+  // Material-only mode holds both geometries at rest. Combined mode preserves
+  // each independent path's evaluated streams and original material subsets.
   auto materialFrame = [&](Toon::FrameSnapshot value) {
-    value.meshes = baseline.meshes;
+    if (!combined) value.meshes = baseline.meshes;
     Toon::Float3 low{1e9F,1e9F,1e9F}, high{-1e9F,-1e9F,-1e9F};
     for (const auto& mesh : value.meshes) for (const auto& p : *mesh.points) {
       low.x = std::min(low.x,p.x); low.y = std::min(low.y,p.y);
@@ -47,6 +57,30 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
     value.view.projection.m[12] = -(high.x+low.x)*.5F*value.view.projection.m[0];
     value.view.projection.m[13] = -(high.y+low.y)*.5F*value.view.projection.m[5];
     return value;
+  };
+  auto geometry = [&](const Toon::FrameSnapshot& a, const Toon::FrameSnapshot& b, float tolerance) {
+    if (!Check(a.meshes.size() == b.meshes.size(), "combined mesh count parity")) return false;
+    for (std::size_t i = 0; i < a.meshes.size(); ++i) {
+      const auto& x = a.meshes[i]; const auto& y = b.meshes[i];
+      const auto stream = [&](const char* name, const auto& left, const auto& right) {
+        if (left == right) return true;
+        std::cerr << "mesh " << i << " stream " << name << " differs\n";
+        return false;
+      };
+      if (!Check(x.id == y.id && x.transform == y.transform && x.geom_bind == y.geom_bind &&
+              x.skeleton_to_mesh == y.skeleton_to_mesh && x.visible == y.visible &&
+              x.material == y.material && *x.parts == *y.parts &&
+              stream("points",*x.points,*y.points) && stream("indices",*x.indices,*y.indices) &&
+              stream("normals",*x.normals,*y.normals) && stream("UV",*x.uvs,*y.uvs) && stream("tangents",*x.tangents,*y.tangents) &&
+              stream("skin",*x.influences,*y.influences) && stream("morph ranges",*x.morph_ranges,*y.morph_ranges) &&
+              stream("morph offsets",*x.morph_offsets,*y.morph_offsets) && stream("morph weights",*x.morph_weights,*y.morph_weights) &&
+              stream("edge scales",*x.edge_scales,*y.edge_scales) && stream("additional UV",*x.sub_texture_uvs,*y.sub_texture_uvs) &&
+              x.joints->size() == y.joints->size(), "combined geometry streams differ")) return false;
+      for (std::size_t j = 0; j < x.joints->size(); ++j) for (unsigned k = 0; k < 16; ++k)
+        if (!Check(std::abs((*x.joints)[j].m[k] - (*y.joints)[j].m[k]) <= tolerance,
+                "combined joint palette differs")) return false;
+    }
+    return true;
   };
   auto compare = [&](const Toon::FrameSnapshot& direct, const Toon::FrameSnapshot& hydra) {
     if (!Check(direct.materials.size() == hydra.materials.size(), "material slot count parity")) return false;
@@ -66,7 +100,7 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
               a == b,
               "canonical direct/USD-Hydra material mismatch")) return false;
     }
-    return true;
+    return !combined || geometry(direct,hydra,2e-6F);
   };
   // Separate image capture proves the equality check is sensitive to material
   // changes, including transparent draws that intentionally write no depth.
@@ -83,14 +117,30 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
     return color.payload;
   };
   std::vector<std::vector<Toon::ToonMaterial>> replay;
+  std::vector<Toon::FrameSnapshot> geometry_replay;
   std::vector<std::vector<std::uint8_t>> image_replay[2];
   std::vector<std::uint8_t> base_pixels[2];
   if (!shaders.empty()) {
     const auto frame = materialFrame(baseline);
     for (unsigned i = 0; i < 2; ++i) base_pixels[i] = pixels(frame,i ? 4 : 1);
   }
-  bool changed = false, changed_pixels[2]{};
+  bool changed = false, changed_pixels[2]{}, changed_skin = false, changed_morph = false, changed_uv = false;
   Toon::RetainedAvatarSnapshot first;
+  const auto stateValues = [](const ArStateView& state) {
+    std::vector<double> values;
+    for (uint32_t i = 0; i < state.joint_count; ++i) {
+      const auto& joint = state.joints[i].local;
+      values.insert(values.end(),joint.translation,joint.translation+3);
+      values.insert(values.end(),joint.rotation,joint.rotation+4);
+      values.insert(values.end(),joint.scale,joint.scale+3);
+    }
+    for (uint32_t i = 0; i < state.blend_shape_count; ++i) values.push_back(state.blend_shapes[i].weight);
+    for (uint32_t i = 0; i < state.vertex_uv_count; ++i)
+      values.insert(values.end(),state.vertex_uvs[i].value,state.vertex_uvs[i].value+2);
+    for (uint32_t i = 0; i < state.material_count; ++i)
+      values.insert(values.end(),state.materials[i].value,state.materials[i].value+4);
+    return values;
+  };
   std::vector<double> retained;
   for (unsigned generation = 0; generation < 3; ++generation) {
     session.Play();
@@ -104,8 +154,20 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
               "exactly one runtime physics tick per sample")) return false;
       Toon::FrameSnapshot direct;
       if (!checked(adapter.Apply(held,baseline,1,direct,error))) return false;
-      const auto hydra = host.Sync();
+      const auto hydra = sync();
       if (!compare(direct,hydra)) return false;
+      if (combined) {
+        if (!generation) geometry_replay.push_back(direct);
+        else if (!geometry(direct,geometry_replay[tick-1],0)) return false;
+        for (std::size_t i = 0; i < direct.meshes.size(); ++i) {
+          const auto& m = direct.meshes[i]; const auto& base = baseline.meshes[i];
+          changed_skin |= *m.joints != *base.joints;
+          changed_morph |= *m.morph_weights != *base.morph_weights;
+          changed_uv |= *m.uvs != *base.uvs;
+          if (tick == 240 && !Check(*m.morph_weights == *base.morph_weights && *m.uvs == *base.uvs &&
+                  *m.tangents == *base.tangents, "zero channels restore morph/UV/tangent bases")) return false;
+        }
+      }
       std::vector<Toon::ToonMaterial> current;
       for (std::size_t i = 0; i < direct.materials.size(); ++i) {
         current.push_back(direct.materials[i].material);
@@ -117,11 +179,10 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
       else if (!Check(current == replay[tick-1],"exact material reset replay")) return false;
       if (!generation && tick == 60) {
         if (!checked(first.Reset(api,session.Snapshot(),error))) return false;
-        for (uint32_t i = 0; i < state.material_count; ++i)
-          retained.insert(retained.end(),state.materials[i].value,state.materials[i].value+4);
+        retained = stateValues(state);
         session.Pause(); session.Advance(10);
         if (!Check(session.GetStats().steps == tick,"pause holds material/physics tick")) return false;
-        if (!compare(direct,host.Sync())) return false;
+        if (!compare(direct,sync())) return false;
         session.Play();
       }
       if (!shaders.empty() && (tick == 1 || tick == 60 || tick == 120 || tick == 240)) {
@@ -129,17 +190,32 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
         if (!Gpu(a,b,shaders)) return false; // exact colour and depth, 1x/4x
         for (unsigned i = 0; i < 2; ++i) {
           const auto image = pixels(a,i ? 4 : 1);
+          if (combined && !generation && tick == 60) {
+            // Each independently omitted output must change the rendered result.
+            for (unsigned omitted = 0; omitted < 4; ++omitted) {
+              auto control = a;
+              if (omitted == 3) control.materials = baseline.materials;
+              else for (std::size_t m = 0; m < control.meshes.size(); ++m) {
+                auto& mesh = control.meshes[m]; const auto& base = baseline.meshes[m];
+                if (omitted == 0) mesh.joints = base.joints;
+                if (omitted == 1) mesh.morph_weights = base.morph_weights;
+                if (omitted == 2) { mesh.uvs = base.uvs; mesh.tangents = base.tangents; }
+              }
+              if (!Check(pixels(control,i ? 4 : 1) != image,
+                      "omitting skin/morph/UV/material must change combined pixels")) return false;
+            }
+          }
           changed_pixels[i] |= image != base_pixels[i];
           if (!generation) image_replay[i].push_back(image);
           else if (!Check(image == image_replay[i][(tick == 1 ? 0 : tick == 60 ? 1 : tick == 120 ? 2 : 3)],
                   "exact reset material pixels")) return false;
-          if (tick == 240 && !Check(image == base_pixels[i],"zero material pixels restore baseline")) return false;
+          if (!combined && tick == 240 && !Check(image == base_pixels[i],"zero material pixels restore baseline")) return false;
         }
       }
     }
     session.Reset();
     Toon::FrameSnapshot released;
-    if (!checked(adapter.Release(baseline,1,released,error)) || !compare(released,host.Sync())) return false;
+    if (!checked(adapter.Release(baseline,1,released,error)) || !compare(released,sync())) return false;
     // Reset advances runtime generation; rebind the new immutable layout.
     if (!checked(adapter.Bind(session.Baseline(),baseline,1,match.bindings,error))) return false;
     std::string after;
@@ -152,13 +228,13 @@ bool RuntimeMmdMaterials(const char* pmx, const char* vmd, const std::string& sh
   if (!Check(after == root,"source material layer unchanged")) return false;
   stage->GetSessionLayer()->ExportToString(&after);
   if (!Check(after == session_layer,"close restores session layer")) return false;
-  std::vector<double> retained_after;
-  for (uint32_t i = 0; i < first.View()->material_count; ++i)
-    retained_after.insert(retained_after.end(),first.View()->materials[i].value,first.View()->materials[i].value+4);
-  if (!Check(retained_after == retained,"retained materials survive reset/close") ||
+  if (!Check(stateValues(*first.View()) == retained,"retained pose/morph/UV/material values survive reset/close") ||
+      !Check(!combined || (changed_skin && changed_morph && changed_uv),
+          "combined skin, vertex morph and UV must all change") ||
       !Check(changed && (shaders.empty() || (changed_pixels[0] && changed_pixels[1])),
           "canonical morphs must change material values and both sample-count images")) return false;
-  std::cout << "MMD canonical material direct/USD-Hydra parity: 720 ticks, 3 generations, "
+  std::cout << (combined ? "MMD combined pose/morph/UV/physics/material" : "MMD canonical material")
+            << " direct/USD-Hydra parity: 720 ticks, 3 generations, "
             << "pause/reset/close, immutable bases; "
             << (shaders.empty() ? "CPU values" : "exact 1x/4x colour/depth with visible morph changes") << '\n';
   return true;

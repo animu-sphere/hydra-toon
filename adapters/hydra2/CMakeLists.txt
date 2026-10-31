@@ -187,6 +187,23 @@ if(TOON_BUILD_TESTS)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_avatar_providers.cmake")
     endforeach()
     set_tests_properties(toon-renderer-mmd-material-gpu PROPERTIES LABELS "gpu")
+    set(TOON_MMD_COMBINED_TEST_VMD "" CACHE FILEPATH "Generated combined pose/morph/UV/material VMD")
+    if(TOON_MMD_COMBINED_TEST_VMD)
+      foreach(mode IN ITEMS cpu gpu)
+        set(arguments "${TOON_MMD_MATERIAL_TEST_PMX}" "${TOON_MMD_COMBINED_TEST_VMD}" "--combined")
+        if(mode STREQUAL "gpu")
+          list(APPEND arguments "${CMAKE_BINARY_DIR}/backend/vulkan/shaders")
+        endif()
+        string(JOIN "|" arguments ${arguments})
+        add_test(NAME toon-renderer-mmd-combined-${mode} COMMAND ${CMAKE_COMMAND}
+          "-DPROGRAM=$<TARGET_FILE:toon-hydra2-mmd-material-test>"
+          "-DARGUMENTS=${arguments}"
+          "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-hydra2-mmd-material-test>,|>"
+          "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_avatar_providers.cmake")
+      endforeach()
+      set_tests_properties(toon-renderer-mmd-combined-gpu PROPERTIES LABELS "gpu")
+    endif()
   endif()
 
   if(TOON_MMD_UV_PROVIDER_TEST)

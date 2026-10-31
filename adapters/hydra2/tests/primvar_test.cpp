@@ -1036,9 +1036,12 @@ bool Skin(const char* path, const std::string& shaders) {
 
 int main(int argc, char** argv) {
 #ifdef TOON_TEST_MMD_MATERIAL
-  if (argc < 3 || argc > 4) return 2;
+  if (argc < 3 || argc > 5) return 2;
+  TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   try {
-    const std::string shaders = argc == 4 ? argv[3] : "";
+    const bool combined = argc >= 4 && std::string(argv[3]) == "--combined";
+    if (argc == 5 && !combined) return 2;
+    const std::string shaders = combined ? (argc == 5 ? argv[4] : "") : (argc == 4 ? argv[3] : "");
     if (!shaders.empty()) {
       Toon::FrameStatus status;
       std::string error;
@@ -1049,7 +1052,7 @@ int main(int argc, char** argv) {
       }
       if (!Check(probe != nullptr, error.c_str())) return 1;
     }
-    return RuntimeMmdMaterials(argv[1], argv[2], shaders) ? 0 : 1;
+    return RuntimeMmdMaterials(argv[1], argv[2], shaders, combined) ? 0 : 1;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;
