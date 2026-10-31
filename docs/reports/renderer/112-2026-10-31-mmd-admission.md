@@ -76,6 +76,9 @@ inputs. It reports zero refusals/mismatches, 58 damping normalizations and 10
 inert joints; teardown reports zero bodies. Both input hashes are unchanged.
 Assets, machine-local paths and raw diagnostics remain ignored.
 
+[Report 116](116-2026-10-31-live-mmd-identity-cost.md) found this tree unoptimized
+and remeasures conversion at 2.67–2.86 ms/result.
+
 Measured runtime cost is 11.39 ms/tick and resident conversion 11.49 ms/result;
 119 conversions and 119 reuses. Mean GPU scene time is 6.71 ms. These are a
 single bounded run with retained catch-up backlog, not a controlled comparison

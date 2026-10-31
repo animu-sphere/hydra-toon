@@ -914,6 +914,30 @@ void DensePrimaryUvs() {
   std::swap(values.front(), values[1]);
   reject();
   std::swap(values.front(), values[1]);
+  // Identity is the bytes: a whole run renamed through one shared address
+  // refuses at Apply; an adjacent duplicate through a repeated address and one
+  // address standing for both bound owners refuse when retained.
+  const auto identified = values;
+  const std::string renamed = "dense.mesh.c.with.a.long.opaque.owner.identity";
+  for (auto& uv : values)
+    if (uv.mesh_id == copiedOwners[1].c_str()) uv.mesh_id = renamed.c_str();
+  reject();
+  values = identified;
+  auto duplicate = [&] {
+    bool refused = false;
+    try {
+      (void)Fake::Snapshot(view);
+    } catch (const std::runtime_error&) {
+      refused = true;
+    }
+    Check(refused, "dense UV duplicate identity was retained");
+  };
+  values[1].vertex_index = values[0].vertex_index;
+  duplicate();
+  values = identified;
+  for (auto& uv : values) uv.mesh_id = copiedOwners[0].c_str();
+  duplicate();
+  values = identified;
   // Restore through a new generation and check retained arrays independently.
   for (auto& uv : values) uv.value[0] = .25 + uv.vertex_index / 65536.;
   view.generation = 2; view.frame_id = 1;

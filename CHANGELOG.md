@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Dense resident avatar validation and conversion read each repeated mesh
+  identity once per run while keeping every identity, order, duplicate and value
+  check. With the runtime's matching change, the large private MMD avatar's
+  simulation holds wall time; display still varies. Renderer report 116 records
+  this and corrects report 112's unoptimized measurement.
+
 - The committed VRM host Formation pins the published `toon` 0.8.0 package,
   replacing 0.7.0. Renderer report 115 verifies release assets, the GHCR pull,
   Formation smoke and headless GPU checks, the handoff test built against the
