@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The Vulkan backend places vertex, index, skin and morph buffers in device-local
+  host-visible memory when available, falling back to the prior memory when that
+  allocation fails. A dense avatar's GPU frame no longer follows the PCIe link
+  generation, which caused the live MMD display variance. Renderer report 117
+  records the cause, cost and a small rise in occasional vsync misses.
+
 - Dense resident avatar validation and conversion read each repeated mesh
   identity once per run while keeping every identity, order, duplicate and value
   check. With the runtime's matching change, the large private MMD avatar's

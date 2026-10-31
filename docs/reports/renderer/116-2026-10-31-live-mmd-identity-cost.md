@@ -85,6 +85,8 @@ shared address, an adjacent duplicate through a repeated address, and one addres
 standing for both bound owners. Removing the repeated-address order check fails
 `toon-avatar-state`.
 
+[Report 117](117-2026-10-31-vulkan-device-local-meshes.md) traces the bimodal GPU and submit times to the PCIe link.
+
 Remaining measured cost is unassigned in the
 [roadmap](../../roadmap/later.md#not-yet-in-a-milestone). Each display millisecond
 now costs about two, since a longer frame owes proportionally more ticks.
