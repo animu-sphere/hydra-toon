@@ -62,6 +62,11 @@ struct AvatarRuntimeRow {
   std::string value;
 };
 
+struct MmdDampingNormalization {
+  std::string attribute;
+  float original = 0, coefficient = 0;
+};
+
 // What the overlay and the run's last lines show. The frame loop's thread
 // owns it; the producer's counts are copied in when a result is taken.
 struct AvatarRuntimeStatus {
@@ -70,6 +75,9 @@ struct AvatarRuntimeStatus {
   double pending_seconds = 0;
   std::uint64_t physics_steps = 0;
   std::size_t bodies = 0, uvs = 0;
+  // Owned admission records from the latest successful MMD world build.
+  std::vector<MmdDampingNormalization> damping_normalizations;
+  std::vector<std::string> inert_joints;
   std::string error;
   std::string avatar;
   std::string look_at;

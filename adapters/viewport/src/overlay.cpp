@@ -363,6 +363,14 @@ void AvatarRuntimePanel(const AvatarRuntimeStatus& avatar, float scale) {
     }
     ImGui::TreePop();
   }
+  if (avatar.physics && ImGui::TreeNode("MMD physics admission")) {
+    ImGui::Text("Normalized damping: %zu; inert joints: %zu",
+        avatar.damping_normalizations.size(), avatar.inert_joints.size());
+    for (const auto& record : avatar.damping_normalizations)
+      ImGui::TextWrapped("%s: %.9g -> %.9g", record.attribute.c_str(), record.original, record.coefficient);
+    for (const auto& path : avatar.inert_joints) ImGui::TextWrapped("Inert joint: %s", path.c_str());
+    ImGui::TreePop();
+  }
   ImGui::BeginChild("avatar-rows", ImVec2(520.0F * scale, 260.0F * scale));
   if (ImGui::TreeNode("Source inputs")) {
     RuntimeRows("inputs", "Channel", "Expression / LookAt", avatar.inputs);

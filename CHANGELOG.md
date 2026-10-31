@@ -17,6 +17,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Added
 
+- MMD live viewport admission diagnostics: original/effective damping coefficients
+  and inert joint paths in the runtime panel and final log, refreshed on Reset
+  and cleared on Stop. Generated resident replay and unmodified private-input
+  GPU checks are recorded in renderer report 112.
+
 - Native MMD material snapshot consumption with automatic resident matching,
   canonical colour/scalar fields and independent sampled texture/sphere/toon
   coefficients. Alpha changes update draw membership; generated runtime,

@@ -91,6 +91,7 @@ public:
         if (session_) session_->Close();
         current_.Clear(); adapter_.Clear(); cached_ = false; cached_output_ = {};
         session_.reset(); status_.playing = false; status_.stopped = true; status_.bodies = 0;
+        status_.damping_normalizations.clear(); status_.inert_joints.clear();
       } else {
         if (!session_) Start();
         if (action == Action::Play) { session_->Play(); status_.playing = true; }
@@ -118,6 +119,12 @@ public:
     s << "MMD physics timing: runtime_ms_per_tick=" << (measured_ticks_ ? tick_ms_ / measured_ticks_ : 0)
       << " resident_ms_per_result=" << (converted_ ? apply_ms_ / converted_ : 0)
       << " converted=" << converted_ << " reused=" << reused_ << '\n';
+    s << "MMD physics admission: normalized_damping=" << status_.damping_normalizations.size()
+      << " inert_joints=" << status_.inert_joints.size() << '\n';
+    for (const auto& record : status_.damping_normalizations)
+      s << "MMD physics damping: " << record.attribute << " original=" << record.original
+        << " coefficient=" << record.coefficient << '\n';
+    for (const auto& path : status_.inert_joints) s << "MMD physics inert joint: " << path << '\n';
     for (const auto& [subject, reason] : status_.mismatches) s << "MMD physics: mismatch " << subject << ": " << reason << '\n';
     return s.str();
   }
@@ -154,6 +161,10 @@ private:
     status_.bodies = session_->GetStats().bodies;
     status_.diagnostics.clear();
     for (const auto& warning : session_->UnappliedMetadata()) status_.diagnostics.emplace_back(warning, 1);
+    status_.damping_normalizations.clear();
+    for (const auto& record : session_->DampingNormalizations())
+      status_.damping_normalizations.push_back({record.attributePath, record.original, record.coefficient});
+    status_.inert_joints = session_->InertJoints();
   }
   UsdStageRefPtr stage_;
   HdToonRenderDelegate* delegate_;
