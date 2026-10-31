@@ -222,8 +222,8 @@ void Material(ToonMaterial& m, AvatarMaterialField f, const double* v, float sca
   case AvatarMaterialField::BaseColor:
     m.base_color = color;
     m.alpha = static_cast<float>(v[3]) * scale;
-    if (m.model == ToonShadingModel::MMD && m.alpha_mode == ToonAlphaMode::Opaque && m.alpha < 1.0F)
-      m.alpha_mode = ToonAlphaMode::Blend;
+    if (m.model == ToonShadingModel::MMD)
+      m.alpha_mode = m.alpha < 1.0F ? ToonAlphaMode::Blend : ToonAlphaMode::Opaque;
     break;
   case AvatarMaterialField::BaseColorRgb:
     m.base_color = color;

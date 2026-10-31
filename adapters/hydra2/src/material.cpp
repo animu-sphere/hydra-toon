@@ -343,6 +343,11 @@ void ReadMmd(const HdContainerDataSourceHandle& group,
     Toon::ToonMaterial& result) {
   Toon::ToonMaterial::MMD& mmd = result.mmd;
   Read(group, _tokens->diffuseColor, result.base_color, result.alpha);
+  // Match evaluated diffuse overrides: canonical USD alpha changes must carry
+  // the same material structure as the resident snapshot route. The backend
+  // additionally inspects texture alpha when classifying MMD draws.
+  result.alpha_mode = result.alpha < 1.0F ? Toon::ToonAlphaMode::Blend
+                                        : Toon::ToonAlphaMode::Opaque;
   Read(group, _tokens->doubleSided, result.double_sided);
   Read(group, _tokens->specularColor, mmd.specular_color);
   Read(group, _tokens->specularPower, mmd.specular_power);

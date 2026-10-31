@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- MMD diffuse alpha now gives the same Opaque/Blend material descriptor through
+  canonical USD/Hydra and resident snapshot overrides, including opaque results
+  from translucent bases. Generated material-only CPU and 1x/4x Vulkan parity
+  across reset generations is recorded in renderer report 113.
+
 - Dense resident avatar updates compare incoming identities without temporary
   owned strings and allocate primary UV arrays only when mapped values differ
   from the renderer baseline. Dense two-mesh regression and isolated conversion

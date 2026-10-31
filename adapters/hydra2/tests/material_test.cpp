@@ -469,6 +469,7 @@ int RunMmd() {
   expected.model = Toon::ToonShadingModel::MMD;
   expected.base_color = {0.8F, 0.6F, 0.4F};
   expected.alpha = 0.5F;
+  expected.alpha_mode = Toon::ToonAlphaMode::Blend;
   expected.double_sided = true;
   expected.outline = true;
   expected.outline_width = 1.5F;
@@ -542,6 +543,7 @@ int RunMmd() {
                  shared->GetToonMaterial().base_color ==
                      Toon::Float3{0.2F, 0.3F, 0.4F} &&
                  shared->GetToonMaterial().alpha == 1.0F &&
+                 shared->GetToonMaterial().alpha_mode == Toon::ToonAlphaMode::Opaque &&
                  shared->GetToonMaterial().base_texture.texture == texture,
           "an MMD value-only change must reach the material's values")) {
     return 1;

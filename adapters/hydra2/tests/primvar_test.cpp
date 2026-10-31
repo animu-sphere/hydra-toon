@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "adapter.hpp"
 #include "generated_tangents.hpp"
+#ifdef TOON_TEST_MMD_MATERIAL
+#include <avatarMmdSession/Session.h>
+#endif
 #ifdef TOON_HAS_AVATAR_STATE
 #include "avatar_binding.hpp"
 #endif
@@ -35,6 +38,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -186,6 +190,10 @@ bool Gpu(const Toon::FrameSnapshot& frame, const Toon::FrameSnapshot& expected,
   }
   return true;
 }
+
+#ifdef TOON_TEST_MMD_MATERIAL
+#include "mmd_material_check.hpp"
+#endif
 
 bool RuntimeUvTangents(const std::string& shaders) {
 #if defined(TOON_HAS_AVATAR_STATE) && AR_ABI_VERSION >= 5
@@ -1027,6 +1035,26 @@ bool Skin(const char* path, const std::string& shaders) {
 } // namespace
 
 int main(int argc, char** argv) {
+#ifdef TOON_TEST_MMD_MATERIAL
+  if (argc < 3 || argc > 4) return 2;
+  try {
+    const std::string shaders = argc == 4 ? argv[3] : "";
+    if (!shaders.empty()) {
+      Toon::FrameStatus status;
+      std::string error;
+      const auto probe = Toon::CreateOffscreenRenderer(Toon::SceneShadersIn(shaders), status, error, {1});
+      if (status == Toon::FrameStatus::Skip) {
+        std::cout << error << '\n';
+        return 77;
+      }
+      if (!Check(probe != nullptr, error.c_str())) return 1;
+    }
+    return RuntimeMmdMaterials(argv[1], argv[2], shaders) ? 0 : 1;
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << '\n';
+    return 1;
+  }
+#else
   if (argc < 2 || argc > 3) return 2;
   TfSetenv("USDSKELIMAGING_ENABLE_NORMAL_COMPUTATIONS", "1");
   const std::string shaders = argc == 3 ? argv[2] : "";
@@ -1052,4 +1080,5 @@ int main(int argc, char** argv) {
   std::cout << "corner primvars: indexed UVs, normals, subsets, holes, winding, edits and deformation passed\n";
 #endif
   return 0;
+#endif
 }

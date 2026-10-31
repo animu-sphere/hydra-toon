@@ -214,6 +214,23 @@ void MmdMaterials(const char* shaders = nullptr) {
   for (auto& m : materials) m.overridden = 0;
   ++view.frame_id; retained = Fake::Snapshot(view);
   Check(adapter.Apply(retained,base,1,output,error) && output.materials[0].material == scene.values,"MMD release did not restore baseline");
+  // A translucent authored base can also be made opaque by a negative morph.
+  auto translucent = base;
+  translucent.materials[0].material.alpha = .5F;
+  translucent.materials[0].material.alpha_mode = Toon::ToonAlphaMode::Blend;
+  materials[0].overridden = 1;
+  materials[0].value[3] = 1.25;
+  Check(adapter.Bind(view,translucent,2,bindings,error),error.c_str());
+  ++view.frame_id; retained = Fake::Snapshot(view);
+  Check(adapter.Apply(retained,translucent,2,output,error) &&
+      output.materials[0].material.alpha == 1.25F &&
+      output.materials[0].material.alpha_mode == Toon::ToonAlphaMode::Opaque,
+      "MMD diffuse override must classify an opaque result from a translucent base");
+  materials[0].overridden = 0;
+  ++view.frame_id; retained = Fake::Snapshot(view);
+  Check(adapter.Apply(retained,translucent,2,output,error) &&
+      output.materials[0].material == translucent.materials[0].material,
+      "MMD diffuse release must restore translucent authored membership");
   auto wrong = base; wrong.materials[0].material.model = Toon::ToonShadingModel::MToon;
   Check(!adapter.Bind(view,wrong,2,bindings,error),"MMD-only fields accepted on MToon");
 }
