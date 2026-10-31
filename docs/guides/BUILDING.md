@@ -931,6 +931,11 @@ and admits no unsupported morph outputs automatically. Bounded `--frames` runs
 return failure when runtime evaluation is refused, rather than counting window
 presentation alone as successful animation.
 
+Before comparing `MMD physics timing`, confirm the renderer and every dependency
+were compiled optimized: `CMAKE_BUILD_TYPE=Release` adds nothing when
+`CMAKE_CXX_FLAGS_RELEASE` is empty, and `build.ninja` then shows no `/O2`
+([report 116](../reports/renderer/116-2026-10-31-live-mmd-identity-cost.md)).
+
 Material morph delivery requires the runtime's material-capable session. Its
 six canonical inputs and independent sampled tint coefficients map to resident
 MMD materials. Add `--mmd-morph-tints on` to request full.fx tint realization;

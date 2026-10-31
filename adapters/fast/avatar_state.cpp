@@ -83,16 +83,27 @@ bool Valid(const ArStateView& s, std::string& error) {
 #if AR_ABI_VERSION >= 5
   if (!Array(s.vertex_uvs, s.vertex_uv_count))
     return Fail(error, "invalid runtime primary UV array");
+  // A repeated address is the same bytes already read in this view, so identity
+  // order then depends only on the vertex index.
   using UvIdentity = std::pair<std::string_view, std::uint32_t>;
   bool orderedUvs = true;
   UvIdentity previousUv;
+  const char* checkedMesh = nullptr;
   for (std::uint32_t i = 0; i < s.vertex_uv_count; ++i) {
     const auto& uv = s.vertex_uvs[i];
-    if (!Name(uv.mesh_id) || !Float(uv.value[0]) || !Float(uv.value[1]))
+    if (!Float(uv.value[0]) || !Float(uv.value[1]))
       return Fail(error, "invalid runtime primary UV identity or value");
-    const UvIdentity identity{uv.mesh_id, uv.vertex_index};
-    if (i && !(previousUv < identity)) orderedUvs = false;
-    previousUv = identity;
+    if (checkedMesh && uv.mesh_id == checkedMesh) {
+      if (uv.vertex_index <= previousUv.second) orderedUvs = false;
+      previousUv.second = uv.vertex_index;
+    } else {
+      if (!Name(uv.mesh_id))
+        return Fail(error, "invalid runtime primary UV identity or value");
+      const UvIdentity identity{uv.mesh_id, uv.vertex_index};
+      if (i && !(previousUv < identity)) orderedUvs = false;
+      previousUv = identity;
+      checkedMesh = uv.mesh_id;
+    }
   }
   if (!orderedUvs) {
     std::vector<UvIdentity> uvIds;
@@ -402,9 +413,14 @@ bool AvatarStateAdapter::Bind(const ArStateView& layout, const FrameSnapshot& sc
     next.visibility_.push_back({layout.visibility[i].target_id, ""});
 #if AR_ABI_VERSION >= 5
   std::map<std::string, std::set<std::uint32_t>> vertices;
+  next.uvs_.reserve(layout.vertex_uv_count);
+  std::string_view uvOwner;
   for (std::uint32_t i = 0; i < layout.vertex_uv_count; ++i) {
     const auto& uv = layout.vertex_uvs[i];
-    next.uvs_.push_back({uv.mesh_id, "", -1, uv.vertex_index});
+    // An empty owner repeats the previous slot's; Name() refuses empty identities.
+    const bool repeats = i && uvOwner == uv.mesh_id;
+    next.uvs_.push_back({repeats ? std::string{} : std::string{uv.mesh_id}, "", -1, uv.vertex_index});
+    uvOwner = uv.mesh_id;
     vertices[uv.mesh_id].insert(uv.vertex_index);
   }
   for (const auto& [id, indices] : vertices)
@@ -654,11 +670,23 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
 #if AR_ABI_VERSION >= 5
   if (s->vertex_uv_count != uvs_.size())
     return Fail(error, "runtime primary UV count changed; rebind required");
+  // Compare borrowed identity bytes against the owned binding directly, once
+  // per run of bound owner and incoming address; dense UV layouts must neither
+  // allocate nor re-read one identity per vertex.
+  const std::string* uvOwner = nullptr;
+  const char* matchedMesh = nullptr;
   for (std::uint32_t i = 0; i < s->vertex_uv_count; ++i) {
     const auto& uv = s->vertex_uvs[i];
-    // Compare borrowed identity bytes against the owned binding directly;
-    // dense UV layouts must not allocate one temporary string per vertex.
-    if (uvs_[i].owner != uv.mesh_id || uvs_[i].type != uv.vertex_index)
+    if (!uvs_[i].owner.empty()) {
+      uvOwner = &uvs_[i].owner;
+      matchedMesh = nullptr;
+    }
+    if (uv.mesh_id != matchedMesh) {
+      if (*uvOwner != uv.mesh_id)
+        return Fail(error, "runtime primary UV layout changed; rebind required");
+      matchedMesh = uv.mesh_id;
+    }
+    if (uvs_[i].type != uv.vertex_index)
       return Fail(error, "runtime primary UV layout changed; rebind required");
   }
 #endif
