@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [115](115-2026-10-31-published-v080.md) | v0.8.0 release assets and GHCR pull verified; committed Formation re-pinned from v0.7.0; published headless GPU checks 31 PASS; handoff test built against the package passes at 1x and 4x with validation silent; 8 MMD and 8 MToon captures, shadows on and off, byte-identical to published v0.7.0 |
 | [114](114-2026-10-31-mmd-combined-parity.md) | Generated direct-PMX simultaneous skin, vertex morph, primary UV, Jolt feedback and canonical material USD/Hydra parity, with independent omission controls and 1x/4x pixels across resets |
 | [113](113-2026-10-31-mmd-material-parity.md) | Generated direct-PMX canonical material snapshot/USD-Hydra value and 1x/4x pixel parity, diffuse-alpha structure correction and reset/lifetime checks |
 | [112](112-2026-10-31-mmd-admission.md) | Owner-returned damping/inert-joint viewport diagnostics, generated resident replay and an unmodified original private PMX/VMD Vulkan run |
