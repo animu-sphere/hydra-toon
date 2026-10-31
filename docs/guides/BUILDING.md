@@ -900,7 +900,10 @@ records AliciaSolid display and the remaining parity/admission limits.
 The optional `toon-viewport-mmd` consumes the installed runtime's
 [native MMD session](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/MMD_SESSION.md).
 Prepare that package with MMD, USD, Stage Runner, physics USD and Jolt enabled.
-The importer and renderer core remain physics-free.
+The importer and renderer core remain physics-free. Rebuild/install the native
+session and its complete physics dependency closure with source damping and
+inert-joint admission before building this host. The host reads the session's
+`DampingNormalizations()` and `InertJoints()` APIs; it does not repair source USD.
 
 Starting from a configured Vulkan/USD viewport build, set `$prefixes` to the
 installed runtime and its owner dependencies and `$avatar` to its prefix:
@@ -946,6 +949,13 @@ seek are unavailable. USD `--time`, `--time-step` and speed are rejected.
 Source edits require Stop/rebind. The Animation panel samples ordinary USD and
 does not control physics.
 
+The Avatar runtime panel's **MMD physics admission** section lists normalized
+damping attribute paths with original/effective coefficients and owner-classified
+inert joint paths. Records refresh after successful construction/Reset and clear
+on Stop. The final run log includes the same records and their counts. Admission
+semantics remain owned by the runtime/MMD packages; the renderer displays
+their returned values. See [report 112](../reports/renderer/112-2026-10-31-mmd-admission.md).
+
 Runtime owns 120 Hz ticks, bounded catch-up and retained backlog; slow models
 can fall behind wall time. The log separates runtime milliseconds per tick,
 resident conversion milliseconds per result and GPU timings. Unchanged results
@@ -954,11 +964,15 @@ over an unchanged scene reuse conversion at late reads and paused frames.
 For opt-in tests, set `TOON_MMD_RUNTIME_TEST_PMX` to the owner's generated
 `live-physics-morph.pmx`, `TOON_MMD_RUNTIME_TEST_VMD` to generated
 `live-physics-uv-mixed.vmd`, and `TOON_MMD_RUNTIME_PLUGINS` to the three MMD
-plugin resource directories. Also build `toon-mmd-runtime-test`, then run CTest
-with `-R 'toon-mmd-runtime-cache|toon-viewport-mmd-runtime'`. Tests compare
+plugin resource directories. Also build `toon-mmd-runtime-test` and
+`toon-mmd-admission-test`, then run CTest with
+`-R 'toon-mmd-runtime-(cache|admission)|toon-viewport-mmd-runtime'`. Tests compare
 cached/uncached joint/morph/UV/tangent streams and upload revisions through
 reset/baseline commits/restart, and check actual viewport playback, stage
-replacement, one Hydra sync and teardown. No third-party model is required.
+replacement, one Hydra sync and teardown. The admission check authors test-only
+anonymous-layer declarations, checks original/effective damping and inert paths,
+resident replay, Reset refresh, retained status, Stop/restart and unchanged USD.
+No third-party model is required.
 
 [Renderer report 107](../reports/renderer/107-2026-10-27-live-mmd-viewport.md)
 records private-input display and performance limits. Material morphs,

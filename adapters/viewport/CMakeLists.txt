@@ -179,6 +179,18 @@ if(TOON_MMD_RUNTIME_VIEWPORT)
       "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-mmd-runtime-test>,|>"
       "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
       -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
+    add_executable(toon-mmd-admission-test tests/mmd_admission_test.cpp src/mmd_runtime.cpp src/hydra_scene.cpp src/skeleton_debug.cpp src/telemetry.cpp)
+    target_include_directories(toon-mmd-admission-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(toon-mmd-admission-test PRIVATE toon-hydra2-avatar-binding
+      AvatarRuntime::avatarMmdSession usdImaging usdSkel usdGeom usd)
+    target_compile_features(toon-mmd-admission-test PRIVATE cxx_std_20)
+    target_compile_definitions(toon-mmd-admission-test PRIVATE NOMINMAX _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
+    add_test(NAME toon-mmd-runtime-admission COMMAND "${CMAKE_COMMAND}"
+      "-DPROGRAM=$<TARGET_FILE:toon-mmd-admission-test>"
+      "-DSTAGE=${TOON_MMD_RUNTIME_TEST_PMX}" "-DARGUMENTS=${TOON_MMD_RUNTIME_TEST_VMD}"
+      "-DDLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:toon-mmd-admission-test>,|>"
+      "-DPLUGINS=$<JOIN:${TOON_MMD_RUNTIME_PLUGINS},|>"
+      -P "${PROJECT_SOURCE_DIR}/adapters/hydra2/tests/run_avatar_providers.cmake")
     add_test(NAME toon-viewport-mmd-runtime COMMAND "${CMAKE_COMMAND}"
       "-DVIEWPORT=$<TARGET_FILE:toon-viewport-mmd>"
       "-DPMX=${TOON_MMD_RUNTIME_TEST_PMX}" "-DVMD=${TOON_MMD_RUNTIME_TEST_VMD}"
