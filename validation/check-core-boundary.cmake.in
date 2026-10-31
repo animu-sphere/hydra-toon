@@ -1,18 +1,23 @@
-set(public_headers
-  "@PROJECT_SOURCE_DIR@/include/toon/render_world.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/extraction.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/overlay.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/backend.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/vulkan_backend.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/vulkan_present.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/vulkan_handoff.hpp"
-  "@PROJECT_SOURCE_DIR@/include/toon/webgpu_backend.hpp")
+# Discovered when the test runs, so a new public header cannot evade the check.
+set(public_root "@PROJECT_SOURCE_DIR@/include/toon")
+file(GLOB_RECURSE public_headers LIST_DIRECTORIES false "${public_root}/*")
+if(NOT public_headers)
+  message(FATAL_ERROR "core boundary check found no public headers under ${public_root}")
+endif()
 set(forbidden_tokens "vulkan/" "pxr/" "Qt" "windows.h" "d3d" "Metal/" "webgpu/" "webgpu.h" "dawn/"
   "avatarRuntime/")
 
 foreach(header IN LISTS public_headers)
   file(READ "${header}" source)
-  foreach(token IN LISTS forbidden_tokens)
+  # A comment may name what its header keeps out.
+  string(REGEX REPLACE "//[^\n]*" "" source "${source}")
+  set(header_tokens ${forbidden_tokens})
+  # The optional evaluated-state consumer alone may see the runtime's public contract.
+  file(RELATIVE_PATH relative_header "${public_root}" "${header}")
+  if(relative_header MATCHES "^fast/")
+    list(REMOVE_ITEM header_tokens "avatarRuntime/")
+  endif()
+  foreach(token IN LISTS header_tokens)
     string(FIND "${source}" "${token}" found)
     if(NOT found EQUAL -1)
       message(FATAL_ERROR "core boundary violation: ${header} contains '${token}'")

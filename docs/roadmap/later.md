@@ -57,9 +57,6 @@ Project infrastructure, independent of renderer milestones:
 - Add a generated OpenStrata pull-request lane for implementation changes:
   `core` with capability-gated GPU skips and `hydra` against a digest-pinned
   runtime. Documentation-only changes use the lightweight docs lane.
-- Make the core boundary check discover all public core headers instead of
-  enumerating them, so newly added headers cannot evade the
-  [dependency check](../architecture/PROJECT_LAYOUT.md#4-dependency-directions).
 
 | Work | Start when / owner prerequisite |
 | --- | --- |
