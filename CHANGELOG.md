@@ -10,6 +10,12 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- The committed VRM host Formation pins the published `toon` 0.8.0 package,
+  replacing 0.7.0. Renderer report 115 verifies release assets, the GHCR pull,
+  Formation smoke and headless GPU checks, the handoff test built against the
+  package, and MMD and MToon avatar captures with shadows on and off matching
+  the published 0.7.0 package byte for byte.
+
 - MMD diffuse alpha now gives the same Opaque/Blend material descriptor through
   canonical USD/Hydra and resident snapshot overrides, including opaque results
   from translucent bases. Generated material-only CPU and 1x/4x Vulkan parity
