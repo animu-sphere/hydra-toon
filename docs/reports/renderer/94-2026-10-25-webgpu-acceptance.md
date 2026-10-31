@@ -193,6 +193,8 @@ it was not kept. The fixtures, a few hundred vertices, do not show it.
 Against design policy §23 both backends keep the CPU submit under 2 ms at
 p95 and the avatar's GPU work far below its 2 to 6 ms.
 
+[Report 117](117-2026-10-31-vulkan-device-local-meshes.md) keeps the device-local change.
+
 ## 5. The done-when condition
 
 | Condition | Evidence |

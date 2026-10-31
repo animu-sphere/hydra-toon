@@ -2056,10 +2056,19 @@ bool MeshCache::Upload(HostBuffer& buffer, VkBufferUsageFlags usage,
     const void* data, VkDeviceSize size, std::string& detail) {
   if (buffer.capacity < size) {
     DestroyHostBuffer(device_, buffer);
+    // Every pass reads these and the CPU only writes them. Over a discrete
+    // GPU's link the read cost follows its power state, so prefer the GPU's
+    // own memory while its host-visible heap has room.
     if (!CreateHostBuffer(physical_device_, device_, size, usage, buffer,
-            detail)) {
+            detail, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
       DestroyHostBuffer(device_, buffer);
-      return false;
+      detail.clear();
+      if (!CreateHostBuffer(physical_device_, device_, size, usage, buffer,
+              detail)) {
+        DestroyHostBuffer(device_, buffer);
+        return false;
+      }
     }
   }
   std::memcpy(buffer.mapped, data, static_cast<std::size_t>(size));

@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [117](117-2026-10-31-vulkan-device-local-meshes.md) | Live MMD display variance traced to mesh buffers read over a PCIe link that follows the GPU's power state; device-local mesh memory cuts Gen 4 scene time 1.20 to 0.15 ms and the worst GPU frame, with a fallback; visible full motion already held 60 fps and now misses vsync slightly more often |
 | [116](116-2026-10-31-live-mmd-identity-cost.md) | Report 112's tree was unoptimized; dense live MMD tick 11.8 to about 4.1 ms and conversion 2.8 to about 1.4 ms by no longer re-reading identities, with unchanged output hash; simulation holds wall time, display 38–60 fps and bimodal GPU scene time remain |
 | [115](115-2026-10-31-published-v080.md) | v0.8.0 release assets and GHCR pull verified; committed Formation re-pinned from v0.7.0; published headless GPU checks 31 PASS; handoff test built against the package passes at 1x and 4x with validation silent; 8 MMD and 8 MToon captures, shadows on and off, byte-identical to published v0.7.0 |
 | [114](114-2026-10-31-mmd-combined-parity.md) | Generated direct-PMX simultaneous skin, vertex morph, primary UV, Jolt feedback and canonical material USD/Hydra parity, with independent omission controls and 1x/4x pixels across resets |
