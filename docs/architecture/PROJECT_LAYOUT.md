@@ -141,6 +141,14 @@ adapter turns the shape's runtime weight into those slots' weights with
 usdSkelImaging's inbetween interpolation, so neither the host nor core
 evaluates inbetweens.
 
+The direct input to this boundary is a retained runtime snapshot under the
+runtime's [consumer contract](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/contracts/EVALUATED_STATE.md#4-consumer-contract),
+which owns identity, units, spaces, absent values and lifetime. The renderer adds
+the rest: matching refuses a target it cannot bind, parent-local metres become
+scene-unit palettes, `overridden = 0` leaves the resident material value, and an
+older instance, generation or frame is refused. Nothing here selects inputs or
+evaluates expressions, gaze, springs or motion.
+
 For runtime ABI 5, `AvatarUvBinding` maps each resident vertex to a runtime
 primary UV slot, including explicit duplication for split vertices. The fast
 adapter checks complete coverage, dense source identities and finite narrowing,

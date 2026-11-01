@@ -4,15 +4,43 @@
 #include "hydra_scene_parts.hpp"
 #include "avatar_binding.hpp"
 #include <avatarVrmSession/Session.h>
+#include <avatarVrmUsd/ExpressionBinding.h>
+#include <avatarVrmUsd/LookAtBinding.h>
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdSkel/skeleton.h>
+#include <algorithm>
+#include <cmath>
+#include <deque>
 #include <iostream>
+#include <numbers>
 #include <sstream>
 #include <stdexcept>
 
 namespace Toon::viewport {
 namespace {
 using namespace PXR_NS;
+// The host's input identity; the owner maps the channels to expressions.
+constexpr const char* kSource = "toon.viewport";
+constexpr const char* kActor = "avatar";
+constexpr const char* kGaze = "gaze:point";
+// The head's runtime-world position, composed from the baseline's joints.
+GfVec3d HeadPosition(const ArStateView& state, const std::string& skeleton, const std::string& head) {
+  std::vector<GfMatrix4d> world;
+  for (std::uint32_t i = 0; i < state.joint_count; ++i) {
+    const auto& joint = state.joints[i];
+    GfMatrix4d scale, rotation;
+    scale.SetScale(GfVec3d(joint.local.scale[0], joint.local.scale[1], joint.local.scale[2]));
+    rotation.SetRotate(GfQuatd(joint.local.rotation[3],
+        GfVec3d(joint.local.rotation[0], joint.local.rotation[1], joint.local.rotation[2])));
+    GfMatrix4d local = scale * rotation;
+    local.SetTranslateOnly(GfVec3d(joint.local.translation[0], joint.local.translation[1], joint.local.translation[2]));
+    if (joint.parent_index >= 0) local = local * world[static_cast<std::size_t>(joint.parent_index)];
+    world.push_back(local);
+    if (skeleton == joint.skeleton_id && head == joint.joint_id) return local.ExtractTranslation();
+  }
+  throw std::runtime_error("the avatar's head joint is not in its layout");
+}
 class VrmHost final : public AvatarRuntime {
 public:
   VrmHost(const HydraScene& scene, const FrameSnapshot& bound, std::uint64_t epoch,
@@ -47,7 +75,7 @@ public:
           session_->Stats().simulationSeconds >= status_.clip_end) {
         Reset(); session_->Play(); status_.playing = true;
       }
-      Check(session_->Advance(elapsed, &sink_));
+      Advance(elapsed);
       Adopt();
       if (options_.reset_every && status_.published % options_.reset_every == 0) {
         Reset(); session_->Play(); status_.playing = true;
@@ -93,6 +121,8 @@ public:
     s << "VRM session: ticks=" << status_.physics_steps << " frame=" << status_.frame
       << " seconds=" << status_.evaluation_seconds << " pending=" << status_.pending_seconds
       << " generation=" << status_.generation << " secondary=" << status_.secondary_motion
+      << " face=" << options_.face << " expressions=" << status_.expressions
+      << " morphs=" << status_.morphs << " materials=" << status_.materials
       << " published=" << status_.published << " refused=" << status_.refused << " resets=" << status_.resets
       << " skins=" << status_.skins << " joints=" << status_.joints
       << " mismatches=" << status_.mismatches.size() << " converted=" << converted_ << " reused=" << reused_ << '\n';
@@ -119,15 +149,63 @@ private:
     const auto root = stage_->GetDefaultPrim();
     if (!root) throw std::runtime_error("VRM avatar needs a default prim");
     status_.avatar = root.GetPath().GetString();
-    session_ = std::make_unique<avatarVrmSession::Session>(stage_, clip_, avatarVrmSession::SessionConfig{
-        {root.GetPath(), {}, "toon.viewport.vrm", 1}, {status_.clip_start, 1.0 / 60, 4}, options_.secondary_motion});
+    // Selecting the face adds morph and material outputs: a different layout.
+    avatarVrmSession::SessionConfig config{{root.GetPath(), {}, "toon.viewport.vrm", options_.face ? 2u : 1u},
+        {status_.clip_start, 1.0 / 60, 4}, options_.secondary_motion};
+    if (options_.face) {
+      const avatarVrmUsd::ExpressionBinding expressions(stage_, {config.avatar, {}});
+      const avatarVrmUsd::LookAtBinding look(stage_, {config.avatar, {}});
+      config.expressions = config.lookAt = true;
+      config.gaze = {kSource, kActor, kGaze};
+      channels_.clear();
+      for (const auto& expression : expressions.Rig().GetExpressions()) {
+        channels_.push_back("expr:" + expression.name);
+        config.expressionInputs.push_back({{kSource, kActor, channels_.back()}, expression.name});
+      }
+      const auto gaze = look.AdapterConfig("toon.viewport.vrm", config.gaze, {});
+      head_ = HeadPosition(expressions.Baseline(), gaze.headSkeleton, gaze.headJoint);
+      status_.look_at = look.LookAtId();
+      status_.expressions = channels_.size();
+    }
+    session_ = std::make_unique<avatarVrmSession::Session>(stage_, clip_, config);
     status_.stopped = status_.playing = false;
-    Check(session_->Advance(0, &sink_)); Adopt(); Bind();
+    Advance(0); Adopt(); Bind();
   }
   void Reset() {
     Check(session_->Reset(status_.clip_start));
-    Check(session_->Advance(0, &sink_)); Adopt(); Bind();
+    Advance(0); Adopt(); Bind();
     status_.playing = false; ++status_.resets;
+  }
+  // Without the face, nothing is selected. With it, a generated rolling wave of
+  // expression weights and a gaze point circling in front of the head. They follow
+  // the runtime's clock, so a reset replays them exactly, and are held across a
+  // catch-up request. The session resolves them; this host interprets nothing.
+  void Advance(double elapsed) {
+    if (!options_.face) { Check(session_->Advance(elapsed, &sink_)); return; }
+    const auto& stats = session_->Stats();
+    const double seconds = stats.simulationSeconds, t = seconds - status_.clip_start;
+    std::vector<ArScalarInput> scalars;
+    const double count = static_cast<double>(std::max<std::size_t>(channels_.size(), 1));
+    std::size_t index = 0;
+    for (const auto& channel : channels_) {
+      ArScalarInput scalar{};
+      scalar.source_id = kSource; scalar.actor_id = kActor; scalar.channel_id = channel.c_str();
+      scalar.value = std::max(0.0, std::sin(2.0 * std::numbers::pi * (0.5 * t + static_cast<double>(index++) / count)));
+      scalar.source_seconds = seconds; scalar.clock_scale = 1;
+      scalars.push_back(scalar);
+    }
+    const double angle = 0.5 * std::numbers::pi * t;
+    const GfVec3d point = head_ + GfVec3d(0.6 * std::cos(angle), 0.3 * std::sin(angle), 1.0);
+    ArGazeInput gaze{};
+    gaze.source_id = kSource; gaze.actor_id = kActor; gaze.channel_id = kGaze;
+    gaze.kind = AR_GAZE_POINT; gaze.space = AR_GAZE_RUNTIME_WORLD; gaze.validity = AR_OBSERVATION_VALID;
+    for (int k = 0; k < 3; ++k) gaze.value[k] = point[k];
+    gaze.source_seconds = seconds; gaze.clock_scale = 1;
+    ArInputFrame input{AR_HEADER(ArInputFrame)};
+    input.scalars = scalars.data(); input.scalar_count = static_cast<std::uint32_t>(scalars.size());
+    input.gazes = &gaze; input.gaze_count = 1;
+    input.input_revision = stats.tick + 1;
+    Check(session_->Advance(elapsed, input, &sink_));
   }
   void Adopt() {
     const auto handle = session_->Snapshot();
@@ -149,6 +227,8 @@ private:
     if (!match.mismatches.empty() || match.bindings.skins.empty())
       throw std::runtime_error("VRM output did not completely match resident skin targets");
     status_.skins = match.bindings.skins.size(); status_.joints = state.joint_count;
+    status_.shapes = state.blend_shape_count; status_.material_inputs = state.material_count;
+    status_.morphs = match.bindings.morphs.size(); status_.materials = match.bindings.materials.size();
     std::string error;
     if (!adapter_.Bind(state, baseline_, ++epoch_, std::move(match.bindings), error)) throw std::runtime_error(error);
     status_.binding_epoch = epoch_; status_.layout = state.layout_id; status_.layout_version = state.layout_version;
@@ -159,6 +239,8 @@ private:
   std::uint64_t epoch_;
   AvatarRuntimeOptions options_;
   openstrata::motion::MotionStageRead clip_;
+  std::deque<std::string> channels_; // stable c_str() for the inputs
+  GfVec3d head_{0.0};
   std::unique_ptr<avatarVrmSession::Session> session_;
   RetainedAvatarSnapshot current_;
   AvatarStateAdapter adapter_;

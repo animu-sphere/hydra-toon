@@ -228,6 +228,8 @@ Arguments ParseArguments(int argc, char** argv) {
       const auto value = next();
       if (value != "on" && value != "off") throw std::invalid_argument("--secondary-motion must be on or off");
       result.secondary_motion = value == "on";
+    } else if (option == "--vrm-face") {
+      result.vrm_face = true;
     } else if (option == "--avatar-runtime") {
       result.avatar_runtime = true;
     } else if (option == "--avatar-lookat") {
@@ -250,6 +252,7 @@ Arguments ParseArguments(int argc, char** argv) {
       std::cout << "Usage: toon-viewport [options]\n"
                    "  --vrm-springs            native VRM motion + spring session\n"
                    "  --secondary-motion on|off  springs in the native VRM session (on)\n"
+                   "  --vrm-face               generated expressions and gaze in that session\n"
                    "  --width N --height N     window size (default 1280x720)\n"
                    "  --frames N               exit after N presented frames\n"
                    "  --telemetry-output FILE  save latency/timing JSON on exit\n"
@@ -391,6 +394,8 @@ Arguments ParseArguments(int argc, char** argv) {
     throw std::invalid_argument("--switch-file needs --frames N, N >= 2");
   }
 #if TOON_VIEWPORT_HAS_AVATAR_RUNTIME
+  if (result.vrm_face && !result.vrm_springs)
+    throw std::invalid_argument("--vrm-face needs --vrm-springs");
   if (result.vrm_springs) {
 #if !TOON_VIEWPORT_HAS_VRM_RUNTIME
     throw std::invalid_argument("--vrm-springs needs toon-viewport-vrm");

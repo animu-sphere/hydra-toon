@@ -119,6 +119,11 @@ endif()
 
 if(TOON_VRM_RUNTIME_VIEWPORT)
   find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS vrm_session)
+  # The package version does not yet distinguish a session that selects the face.
+  file(READ "${TOON_AVATAR_RUNTIME_INCLUDE_DIR}/avatarVrmSession/Session.h" _vrm_session_header)
+  if(NOT _vrm_session_header MATCHES "expressionInputs")
+    message(FATAL_ERROR "TOON_VRM_RUNTIME_VIEWPORT needs a vrm_session that selects expressions and LookAt")
+  endif()
   add_executable(toon-viewport-vrm src/vrm_runtime.cpp src/hydra_scene.cpp ${_viewport_sources})
   toon_configure_warnings(toon-viewport-vrm)
   target_link_libraries(toon-viewport-vrm PRIVATE

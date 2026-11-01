@@ -62,6 +62,7 @@ struct Arguments {
   bool mmd_physics = false;
   bool vrm_springs = false;
   bool secondary_motion = true;
+  bool vrm_face = false;
   std::string avatar_look_at;
   double avatar_rate = 120.0;
   std::uint64_t avatar_reset_every = 0;
