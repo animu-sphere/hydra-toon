@@ -118,12 +118,10 @@ if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
 endif()
 
 if(TOON_VRM_RUNTIME_VIEWPORT)
-  find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS vrm_session)
-  # The package version does not yet distinguish a session that selects the face.
-  file(READ "${TOON_AVATAR_RUNTIME_INCLUDE_DIR}/avatarVrmSession/Session.h" _vrm_session_header)
-  if(NOT _vrm_session_header MATCHES "expressionInputs")
-    message(FATAL_ERROR "TOON_VRM_RUNTIME_VIEWPORT needs a vrm_session that selects expressions and LookAt")
-  endif()
+  # The host is built and checked against the release avatar-session-pins.json names.
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/avatar-session-pins.json" _avatar_session_pins)
+  string(JSON _vrm_session_version GET "${_avatar_session_pins}" vrm version)
+  find_package(AvatarRuntime ${_vrm_session_version} EXACT CONFIG REQUIRED COMPONENTS vrm_session)
   add_executable(toon-viewport-vrm src/vrm_runtime.cpp src/hydra_scene.cpp ${_viewport_sources})
   toon_configure_warnings(toon-viewport-vrm)
   target_link_libraries(toon-viewport-vrm PRIVATE
