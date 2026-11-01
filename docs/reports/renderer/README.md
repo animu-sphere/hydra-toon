@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [120](120-2026-11-01-mmd-session-from-published-pin.md) | `toon-viewport-mmd` from the published pin of `avatarMmdSession` 0.4.0: 24 private models with no refusals or mismatches |
 | [119](119-2026-11-01-avatar-sessions-from-packages.md) | `toon-viewport-vrm` from the published pin of `avatarVrmSession` 0.3.0, and `toon-viewport-mmd` from an `avatarMmdSession` package drawing 24 private models, both on the `usd` runtime |
 | [118](118-2026-11-01-live-vrm-face.md) | Expressions and gaze selected in the native VRM session reach resident morphs and eye palettes in `toon-viewport-vrm`, with exact replay; generated input on real avatars, and no real-avatar material bind measured |
 | [117](117-2026-10-31-vulkan-device-local-meshes.md) | Live MMD display variance traced to mesh buffers read over a PCIe link that follows the GPU's power state; device-local mesh memory cuts Gen 4 scene time 1.20 to 0.15 ms and the worst GPU frame, with a fallback; visible full motion already held 60 fps and now misses vsync slightly more often |
