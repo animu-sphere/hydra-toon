@@ -1,4 +1,220 @@
 {
+  "mmd": {
+    "package": "avatarMmdSession",
+    "version": "0.4.0",
+    "libraries": [
+      {
+        "id": "avatarMmdSession",
+        "version": ">=0.4,<0.5",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:43d07bc5569e0642202d1bcda59386db20ed4ab456da26343dec4fdaeef7b04e",
+            "source": "oci://ghcr.io/animu-sphere/usd-avatar-runtime@sha256:a32359cc30fbeb8a5704feb29f2fcfaacc89837ae71ea9e7674406da3271adb3"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:bd8b1b836bb719123484ac92b53f5dc59ae93bc74c4b02a2d855d8f306ed0634",
+            "source": "oci://ghcr.io/animu-sphere/usd-avatar-runtime@sha256:3a4e07f836726c29154bd572f585e41973037682f9fb27aae29a8b8365300d9c"
+          }
+        }
+      },
+      {
+        "id": "motionCore",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:8b18c442e74aed488bc7fb9a9aa1b0ec8759c9949de9099802237f7da365f5c6",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:5b525a4f2065022a87c0f940e9a4497b8edaaa0ba4dffedf81a65df0bc544f08"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:7c3472097fa7a75d28769a1f48c5c031294955b91b4663deed64534dd156124b",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:34495585c29c55a719d332b69482325e082b573eac7213a46113a2e02394b708"
+          }
+        }
+      },
+      {
+        "id": "motionSampling",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:684c993edc8cbd19ea95eabd8ffe561252d6cfca93a501f775adf635c2f6f88b",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:07f936ae66f361ed88cfc14613dbbc466ab52d74e46c96b33d70fa70eba89cc6"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:0046fd91446f4a1879102678bab0495d7c5e52daf96f5d250f2b9f8fafe223ca",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:108bd8871cdd7dffca822ab798cbf04abe64572cc52c2e300da4bbf985ffc1fd"
+          }
+        }
+      },
+      {
+        "id": "motionRetarget",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:a625f0318500f7017fdfd1d74feb2d5df256b0251b2d888971e1184b91f3a6ac",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:cf39ab69124c9fe1c8ae4fffa222dc016d35800922ce313d2d7853b2a53faf0f"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:29f6668298b9043ebf951516bd4d9f88dd9b40a605a06c71fe10e59982e4b35b",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:33b37864bf2f989e4a36586b9d381a38014bfec5066209b59111f617a10e8903"
+          }
+        }
+      },
+      {
+        "id": "motionUsd",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:c8bbe099dcf01181ac822a8ea215ae3e7031c8ac0df411a40c63428271c97822",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:58815581e7723f11eae40b0e092d05fd4891aee298ee1613e5e2f7977ec3856d"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:ce53baa0b692cf07a109f478d0a072f7819850ef13a67fa5658ff7b434e12da0",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:9e6a56054f5cf90b10c5c188e87ffcec3b0a9a34349b2727e90befb78221427c"
+          }
+        }
+      },
+      {
+        "id": "physicsCore",
+        "version": ">=0.1,<0.2",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:2b8aba4deb3f7bbe315e3b2252027122cf47bcd706318fd147645b7917907880",
+            "source": "oci://ghcr.io/animu-sphere/usd-physics-plugins@sha256:11f14667cae3b38ac55ca066885e26721e3ce079b748afee5128d94303a115f2"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:dc952791247aa9cfd70c85a1ecfb938f9ff4f62ccf7c9d8ad083267bb3e40a8e",
+            "source": "oci://ghcr.io/animu-sphere/usd-physics-plugins@sha256:4699dbc5950275d4ed8d0180b51b8498839e561c2e3c5212626e61750f544ead"
+          }
+        }
+      },
+      {
+        "id": "physicsJoltSixDof",
+        "version": ">=0.1,<0.2",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:5916803b55c50e8a60bc258105dd5f404d2ea5ec74ce52c83024a9780a35c5ac",
+            "source": "oci://ghcr.io/animu-sphere/usd-physics-plugins@sha256:d78492f8348d3926ba8b4a9bdcf849646621b3f2a3806536b4f983fdd153d881"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:f0f6bd95852f34227ee0bd25f7c56eed6b2cee9e903cd050b387ea9c89699c85",
+            "source": "oci://ghcr.io/animu-sphere/usd-physics-plugins@sha256:f7b77f9aeac32a327c0e2c4e96510ca4ffaaa64d70b2603d33caad46ef18b28a"
+          }
+        }
+      },
+      {
+        "id": "physicsUsd",
+        "version": ">=0.1,<0.2",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:86c252070eadc0d12a6c9f8a06cbbb2435ac2be27c4fe993355632b1c0ac91e7",
+            "source": "oci://ghcr.io/animu-sphere/usd-physics-plugins@sha256:20d390dc053ad3e5d03c1c77a95037ac282cb87345d1decee67f498eaa71a353"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:dbd523fc385d0948afa362677165fd44b691ae0d3010fc42a1b17b034d8652dc",
+            "source": "oci://ghcr.io/animu-sphere/usd-physics-plugins@sha256:0227d5253e2024687f06a49cab832dd04eef5a7bb133e33843bf41b9e00a46ff"
+          }
+        }
+      },
+      {
+        "id": "runtimeCore",
+        "version": ">=0.1,<0.2",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:45273476b5682fe3937deb1f899ba197e8a598ae754b24657f100e0d5ad91b76",
+            "source": "oci://ghcr.io/animu-sphere/usd-stage-runner@sha256:cde1a096b71f06b43726369c7a5388435cb72852c3407ea193d6fdfb72fbddb7"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:f647eae0623c359b156d1d0cf5556a5a08bf78a946f7adf47a91f08e26e64c95",
+            "source": "oci://ghcr.io/animu-sphere/usd-stage-runner@sha256:1d147c7a19829815d2be4cd264e526fc49aaee7f485af6791e8c4084e72affc2"
+          }
+        }
+      },
+      {
+        "id": "mmdPmx",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:463858cab0673afdffc7ca371b8ee9ac6fd8726bca1a2e6d5f3975aab4b2e44f",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:7d044efc8b3785bebd9475d347c751757e306fa5e5da9cb487cee3cc8ddfdd05"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:8758a1add035a742030a83c492d07a7c9279a8e1b19e00ef0a5ed71628f01eee",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:5f053fdfcf3919e6a32cceb64298197afdb81d373a1e2c3c7138051854621da1"
+          }
+        }
+      },
+      {
+        "id": "motionVmd",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:fb8a9d64231b551a256eb222b1d724bdeaf83cda2aee7e4792ef0273f3b0ecec",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:23a76f5866ee495c3fa8aee8d829548a4ca528ebed6474aa71f96a41a58d5f8c"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:f196d5e855c6579479625b3a94209b0ccecc09dbdb1f0586516c66a31178281c",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:a6fc380e3cf65b16fd062d995f471b03af40411df94619c916d2d2aefe7cbbae"
+          }
+        }
+      },
+      {
+        "id": "mmdModel",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:ff2f18462b6ef50cc87c6e9aad2a2c57a26cc7d2226df9786fc2bdd8938b6068",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:128964c10e88d780c7fad75c37fb8b9e72a78632f25a2b0a024b62dda3a8290f"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:3cf1366378392eee121c6ec98c5dbfe276b0f4f9cf1f146ff6fecda2702d86f2",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:86414534f75c12ce0c1d0be1139e5e6cf51975bc1e4949f428267f470db9408e"
+          }
+        }
+      },
+      {
+        "id": "mmdMotionBinding",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:8159f764fb418809b6639f413703fe7c6fd100e3a148b7bf45bcb4f04cd60994",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:a9aab2fe8a268c76b821972d4b41c1c95ff91a761c00e216be1e27709b93f116"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:c45fbe0dc3e71d113c508a12ba572a863504d77296df00fed096f30d00165711",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:8ac1e3bc7625c9c52b2680a7cda3f36179222ef4608687d65e4552c1954b5778"
+          }
+        }
+      },
+      {
+        "id": "mmdControl",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:45e3efe8d7935c57eacd0c018bb04345938801d77c995b81f34e340e129ddbbc",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:1345583c2725062127a73e12a5cdc6ffc49ec92227a3a5f4942d68096fdb34cc"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:1bbd0665f8792d7af1606ad7f2f33ecc230d600de37615754305d3af9e6e855c",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:17eb7f7136d64b0802fec9ccb9e6223314c6e51e1597029f78021437b070bd1d"
+          }
+        }
+      },
+      {
+        "id": "mmdPhysicsAdapter",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:a99574c684ddf9e78214c103b0ef6605792505558dfbb7f97f08f928421d06c0",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:eb9a0bc3ea175317a7488018052266cbf8656d89b6a3532a40724cadf37c6268"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:d513c99cdae3fa6a5d74152c0961d26737390f4ff1d5a86c5216d36f6ed10cda",
+            "source": "oci://ghcr.io/animu-sphere/usd-mmd-plugins@sha256:de50189e6e1f3efd02885981959ff84ebe842328f24e168b7676cd96c597b697"
+          }
+        }
+      }
+    ]
+  },
   "vrm": {
     "package": "avatarVrmSession",
     "version": "0.3.0",

@@ -117,10 +117,12 @@ if(TOON_ENABLE_HYDRA2 AND TOON_AVATAR_RUNTIME_PROVIDERS)
   toon_copy_shaders(toon-viewport-avatar)
 endif()
 
+# Each session host is built and checked against the release avatar-session-pins.json names.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/avatar-session-pins.json" _avatar_session_pins)
+string(JSON _vrm_session_version GET "${_avatar_session_pins}" vrm version)
+string(JSON _mmd_session_version GET "${_avatar_session_pins}" mmd version)
+
 if(TOON_VRM_RUNTIME_VIEWPORT)
-  # The host is built and checked against the release avatar-session-pins.json names.
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/avatar-session-pins.json" _avatar_session_pins)
-  string(JSON _vrm_session_version GET "${_avatar_session_pins}" vrm version)
   find_package(AvatarRuntime ${_vrm_session_version} EXACT CONFIG REQUIRED COMPONENTS vrm_session)
   add_executable(toon-viewport-vrm src/vrm_runtime.cpp src/hydra_scene.cpp ${_viewport_sources})
   toon_configure_warnings(toon-viewport-vrm)
@@ -155,7 +157,7 @@ if(TOON_MMD_RUNTIME_VIEWPORT)
   if(NOT TOON_ENABLE_HYDRA2 OR NOT TARGET toon-hydra2-avatar-binding)
     message(FATAL_ERROR "TOON_MMD_RUNTIME_VIEWPORT requires Hydra and TOON_ENABLE_AVATAR_STATE")
   endif()
-  find_package(AvatarRuntime CONFIG REQUIRED COMPONENTS mmd_session)
+  find_package(AvatarRuntime ${_mmd_session_version} EXACT CONFIG REQUIRED COMPONENTS mmd_session)
   add_executable(toon-viewport-mmd src/mmd_runtime.cpp src/hydra_scene.cpp ${_viewport_sources})
   toon_configure_warnings(toon-viewport-mmd)
   target_link_libraries(toon-viewport-mmd PRIVATE

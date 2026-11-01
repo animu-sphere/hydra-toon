@@ -913,15 +913,19 @@ display and the remaining parity/admission limits.
 The optional `toon-viewport-mmd` consumes the installed runtime's
 [native MMD session](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/MMD_SESSION.md).
 Use the `avatarMmdSession` package on the `usd` runtime: `physicsUsd` compares the OpenUSD
-headers it finds with its own and refuses `lookdev`. The package needs a
+headers it finds with its own and refuses `lookdev`.
+[`avatar-session-pins.json`](../../adapters/viewport/avatar-session-pins.json) pins the published package and its
+owners by digest, and configuration refuses another version. The package needs a
 [deterministic Jolt SDK](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/MMD_SESSION.md#package-boundary)
-as well. The importer and renderer core remain physics-free. The host reads the session's
+as well, which you build. The importer and renderer core remain physics-free. The host reads the session's
 `DampingNormalizations()` and `InertJoints()` APIs; it does not repair source USD.
 
-Starting from a configured Vulkan/USD viewport build, set `$prefixes` to the
-session's prefix, its owners and the Jolt SDK, and `$avatar` to the session's prefix:
+Pull the pinned libraries, and add the Jolt SDK to the prefixes:
 
 ```powershell
+$pulled = python scripts/pull_avatar_session.py mmd --target cy2026-windows-x86_64-py313-usd --out build/avatar-session
+$avatar = $pulled.Split(';')[0]
+$prefixes = "$pulled;<jolt-sdk>"
 cmake -S . -B build/mmd-viewport -DTOON_ENABLE_HYDRA2=ON -DTOON_ENABLE_VIEWPORT=ON `
   -DTOON_ENABLE_AVATAR_STATE=ON -DTOON_MMD_RUNTIME_VIEWPORT=ON `
   "-DCMAKE_PREFIX_PATH=$prefixes" "-DTOON_AVATAR_RUNTIME_INCLUDE_DIR=$avatar/include"

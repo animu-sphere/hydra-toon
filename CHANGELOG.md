@@ -10,6 +10,9 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- `toon-viewport-mmd` builds against the `avatarMmdSession` 0.4.0 release that
+  `adapters/viewport/avatar-session-pins.json` pins. Renderer report 120 records it.
+
 - `toon-viewport-vrm` builds against the `avatarVrmSession` release that
   `adapters/viewport/avatar-session-pins.json` pins, which `scripts/pull_avatar_session.py`
   pulls by digest, in place of checking a header for the face. Renderer report 119
