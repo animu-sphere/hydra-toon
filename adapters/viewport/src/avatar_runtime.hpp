@@ -53,6 +53,9 @@ struct AvatarRuntimeOptions {
   std::string model;
   bool secondary_motion = true;
   bool loop = true;
+  // The native VRM session also selects expressions and LookAt, with generated
+  // inputs from this host. The avatar must author them.
+  bool face = false;
 };
 
 // A runtime output and where it lands, with its value in the applied result.

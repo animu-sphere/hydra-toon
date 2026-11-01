@@ -22,6 +22,16 @@ bool different(const FrameSnapshot& a, const FrameSnapshot& b) {
     if (!same(a.meshes[i].joints,b.meshes[i].joints)) return true;
   return false;
 }
+bool morphsDiffer(const FrameSnapshot& a, const FrameSnapshot& b) {
+  for (std::size_t i = 0; i < a.meshes.size(); ++i)
+    if (!same(a.meshes[i].morph_weights,b.meshes[i].morph_weights)) return true;
+  return false;
+}
+bool materialsDiffer(const FrameSnapshot& a, const FrameSnapshot& b) {
+  for (std::size_t i = 0; i < a.materials.size(); ++i)
+    if (a.materials[i].material != b.materials[i].material) return true;
+  return false;
+}
 }
 int main(int argc, char** argv) {
   try {
@@ -70,6 +80,40 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 2000 && !looping->status().resets; ++i) looping->Tick(.1);
     require(looping->status().resets > 0 && looping->status().refused == 0, "loop reset");
     std::cout << "VRM resident skin: springs differ from motion-only; exact cached/uncached and reset replay; pause, late delivery, stop/restart and loop passed\n";
+    // Expressions and gaze selected in the session reach resident morphs, materials
+    // and eye palettes, with the same replay and without another evaluation.
+    options.loop = false; options.secondary_motion = true;
+    options.face = true; options.cache = true; auto face = AvatarRuntime::Start(*scene,base,3,options);
+    options.cache = false; auto faceOracle = AvatarRuntime::Start(*scene,base,3,options);
+    options.face = false; auto body = AvatarRuntime::Start(*scene,base,3,options);
+    require(face->status().expressions > 0 && face->status().morphs == face->status().shapes &&
+        face->status().materials == face->status().material_inputs && face->status().mismatches.empty(), "face binding");
+    bool morphed = false, coloured = false, gazed = false;
+    FrameSnapshot faceRun;
+    for (int generation = 0; generation < 2; ++generation) {
+      face->Control(AvatarRuntime::Action::Play); faceOracle->Control(AvatarRuntime::Action::Play); body->Control(AvatarRuntime::Action::Play);
+      for (int tick = 0; tick < 120; ++tick) {
+        face->Tick(1./60); faceOracle->Tick(1./60); body->Tick(1./60);
+        auto a = base, b = base, m = base;
+        require(face->Apply(a,false,error) && faceOracle->Apply(b,false,error) && body->Apply(m,false,error), error.c_str());
+        equal(a,b); require(!materialsDiffer(a,b), "cached/uncached materials");
+        require(!morphsDiffer(m,base), "morphs without the face");
+        morphed = morphed || morphsDiffer(a,base); coloured = coloured || materialsDiffer(a,base); gazed = gazed || different(a,m);
+        if (tick == 119) {
+          if (!generation) faceRun = a;
+          else { equal(faceRun,a); require(!materialsDiffer(faceRun,a), "face reset replay"); }
+        }
+      }
+      face->Control(AvatarRuntime::Action::Reset); faceOracle->Control(AvatarRuntime::Action::Reset); body->Control(AvatarRuntime::Action::Reset);
+    }
+    require(morphed, "expressions did not change resident morph weights");
+    require(gazed, "the face did not change resident skin palettes");
+    require(coloured || face->status().materials == 0, "expressions did not change resident materials");
+    require(face->status().refused == 0, "face refusal");
+    std::cout << "VRM resident face: expressions=" << face->status().expressions << " morphs=" << face->status().morphs
+              << " materials=" << face->status().materials << " coloured=" << coloured << "; exact cached/uncached and reset replay passed\n";
+    face->Control(AvatarRuntime::Action::Stop);
+    auto released = base; require(face->Apply(released,false,error) && !morphsDiffer(released,base) && !materialsDiffer(released,base), "stop restores the authored face");
     return 0;
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

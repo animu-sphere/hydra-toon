@@ -267,7 +267,7 @@ int RunViewport(int argc, char** argv) {
       started = Toon::viewport::AvatarRuntime::Start(scene, bound, ++avatar_epoch,
           {arguments.avatar_look_at, arguments.avatar_rate, arguments.avatar_reset_every,
               arguments.avatar_motion, arguments.play, true, arguments.avatar_model,
-              arguments.secondary_motion, arguments.loop});
+              arguments.secondary_motion, arguments.loop, arguments.vrm_face});
       std::string failure;
       if (!started->Apply(bound, false, failure)) {
         throw std::runtime_error("avatar runtime: " + failure);

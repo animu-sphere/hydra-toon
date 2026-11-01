@@ -871,7 +871,9 @@ Enable `TOON_ENABLE_HYDRA2`, `TOON_ENABLE_VIEWPORT`, `TOON_ENABLE_AVATAR_STATE`
 and `TOON_VRM_RUNTIME_VIEWPORT`. Supply an installed `AvatarRuntime` with the
 `vrm_session` component and its installed motion/VRM owner packages through
 `CMAKE_PREFIX_PATH`; set `TOON_AVATAR_RUNTIME_INCLUDE_DIR` to that runtime's
-installed include directory. Build `toon-viewport-vrm`.
+installed include directory. The session must select expressions and LookAt,
+which the published runtime 0.2.0 does not; configuration refuses it. Build
+`toon-viewport-vrm`.
 
 Register matching contract-v2 VRM schema, imaging, VRM/VRMA file-format and
 package-resolver resources, and put their DLLs plus OpenUSD/runtime on PATH:
@@ -884,7 +886,10 @@ The **VRM motion + springs** panel and Space control playback. Reset restarts
 the animated pose and spring history and pauses; Stop releases the session,
 and Play rebuilds it. Default `--loop on` explicitly resets at wrap;
 `--loop off` holds the final clip pose while springs continue. Start another
-session with `--secondary-motion off` for motion-only comparison. The runtime
+session with `--secondary-motion off` for motion-only comparison. `--vrm-face`
+also selects expressions and LookAt, with a generated wave of weights and a
+circling gaze point as this host's input; the avatar must author both, and a
+target that does not match a resident one refuses the session. The runtime
 owns 60 Hz ticks, up to four catch-up ticks and retained backlog. Late reads
 only deliver retained output. USD seek/step/speed options are refused.
 
@@ -892,8 +897,9 @@ For opt-in resident checks, configure `TOON_VRM_RUNTIME_TEST_STAGE`,
 `TOON_VRM_RUNTIME_TEST_MOTION` and `TOON_VRM_RUNTIME_PLUGINS` with local inputs
 and plugin resource directories. Build `toon-vrm-runtime-test` and run CTest
 with `-R '^toon-vrm-runtime-resident$'`. Assets are not copied or committed.
-[Renderer report 110](../reports/renderer/110-2026-10-29-live-vrm-springs.md)
-records AliciaSolid display and the remaining parity/admission limits.
+Renderer reports [110](../reports/renderer/110-2026-10-29-live-vrm-springs.md) and
+[118](../reports/renderer/118-2026-11-01-live-vrm-face.md) record AliciaSolid
+display and the remaining parity/admission limits.
 
 ### Live MMD physics in the dedicated viewport
 
