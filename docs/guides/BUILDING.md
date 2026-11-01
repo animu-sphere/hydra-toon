@@ -868,12 +868,18 @@ edges and texture transitions.
 ### Live VRM motion and springs in the dedicated viewport
 
 Enable `TOON_ENABLE_HYDRA2`, `TOON_ENABLE_VIEWPORT`, `TOON_ENABLE_AVATAR_STATE`
-and `TOON_VRM_RUNTIME_VIEWPORT`. Supply an installed `AvatarRuntime` with the
-`vrm_session` component and its installed motion/VRM owner packages through
-`CMAKE_PREFIX_PATH`; set `TOON_AVATAR_RUNTIME_INCLUDE_DIR` to that runtime's
-installed include directory. The session must select expressions and LookAt,
-which the published runtime 0.2.0 does not; configuration refuses it. Build
-`toon-viewport-vrm`.
+and `TOON_VRM_RUNTIME_VIEWPORT`, on the `usd` runtime the package is built for.
+[`avatar-session-pins.json`](../../adapters/viewport/avatar-session-pins.json) pins
+the published `avatarVrmSession` and its owners by digest, and configuration refuses
+another version. Pull them and pass the printed prefixes:
+
+```powershell
+$prefixes = python scripts/pull_avatar_session.py vrm --target cy2026-windows-x86_64-py313-usd --out build/avatar-session
+cmake -S . -B build/vrm-viewport -DTOON_ENABLE_HYDRA2=ON -DTOON_ENABLE_VIEWPORT=ON `
+  -DTOON_ENABLE_AVATAR_STATE=ON -DTOON_VRM_RUNTIME_VIEWPORT=ON "-DCMAKE_PREFIX_PATH=$prefixes" `
+  "-DTOON_AVATAR_RUNTIME_INCLUDE_DIR=$($prefixes.Split(';')[0])/include"
+cmake --build build/vrm-viewport --config Release --target toon-viewport-vrm
+```
 
 Register matching contract-v2 VRM schema, imaging, VRM/VRMA file-format and
 package-resolver resources, and put their DLLs plus OpenUSD/runtime on PATH:
@@ -897,22 +903,23 @@ For opt-in resident checks, configure `TOON_VRM_RUNTIME_TEST_STAGE`,
 `TOON_VRM_RUNTIME_TEST_MOTION` and `TOON_VRM_RUNTIME_PLUGINS` with local inputs
 and plugin resource directories. Build `toon-vrm-runtime-test` and run CTest
 with `-R '^toon-vrm-runtime-resident$'`. Assets are not copied or committed.
-Renderer reports [110](../reports/renderer/110-2026-10-29-live-vrm-springs.md) and
-[118](../reports/renderer/118-2026-11-01-live-vrm-face.md) record AliciaSolid
+Renderer reports [110](../reports/renderer/110-2026-10-29-live-vrm-springs.md),
+[118](../reports/renderer/118-2026-11-01-live-vrm-face.md) and
+[119](../reports/renderer/119-2026-11-01-avatar-sessions-from-packages.md) record AliciaSolid
 display and the remaining parity/admission limits.
 
 ### Live MMD physics in the dedicated viewport
 
 The optional `toon-viewport-mmd` consumes the installed runtime's
 [native MMD session](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/MMD_SESSION.md).
-Prepare that package with MMD, USD, Stage Runner, physics USD and Jolt enabled.
-The importer and renderer core remain physics-free. Rebuild/install the native
-session and its complete physics dependency closure with source damping and
-inert-joint admission before building this host. The host reads the session's
+Use the `avatarMmdSession` package on the `usd` runtime: `physicsUsd` compares the OpenUSD
+headers it finds with its own and refuses `lookdev`. The package needs a
+[deterministic Jolt SDK](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/MMD_SESSION.md#package-boundary)
+as well. The importer and renderer core remain physics-free. The host reads the session's
 `DampingNormalizations()` and `InertJoints()` APIs; it does not repair source USD.
 
 Starting from a configured Vulkan/USD viewport build, set `$prefixes` to the
-installed runtime and its owner dependencies and `$avatar` to its prefix:
+session's prefix, its owners and the Jolt SDK, and `$avatar` to the session's prefix:
 
 ```powershell
 cmake -S . -B build/mmd-viewport -DTOON_ENABLE_HYDRA2=ON -DTOON_ENABLE_VIEWPORT=ON `
@@ -993,7 +1000,8 @@ anonymous-layer declarations, checks original/effective damping and inert paths,
 resident replay, Reset refresh, retained status, Stop/restart and unchanged USD.
 No third-party model is required.
 
-[Renderer report 107](../reports/renderer/107-2026-10-27-live-mmd-viewport.md)
-records private-input display and performance limits. Material morphs,
+[Renderer reports 107](../reports/renderer/107-2026-10-27-live-mmd-viewport.md) and
+[119](../reports/renderer/119-2026-11-01-avatar-sessions-from-packages.md)
+record private-input display and performance limits. Material morphs,
 additional UV output, private Hydra/direct parity, multi-avatar lifecycle and
 representative L3 acceptance remain open.

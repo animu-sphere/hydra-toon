@@ -1,0 +1,106 @@
+{
+  "vrm": {
+    "package": "avatarVrmSession",
+    "version": "0.3.0",
+    "libraries": [
+      {
+        "id": "avatarVrmSession",
+        "version": ">=0.3,<0.4",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:7cc7f219557867df9d42d6ac48ca6aa2016d521a8e619d20b772ba0ec38af457",
+            "source": "oci://ghcr.io/animu-sphere/usd-avatar-runtime@sha256:0b8de5bbd5c7b61ffb9736f9851fbe46667903f31a96efc57ec3dfbab799f811"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:0871943a901f7b67b717151ac39891a10b66461807b2ed0cc3c57103b0bc7dc6",
+            "source": "oci://ghcr.io/animu-sphere/usd-avatar-runtime@sha256:ca72e22662865524962606d4c75cb669bb90c6859168c4474b7af1127424fbed"
+          }
+        }
+      },
+      {
+        "id": "motionCore",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:8b18c442e74aed488bc7fb9a9aa1b0ec8759c9949de9099802237f7da365f5c6",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:5b525a4f2065022a87c0f940e9a4497b8edaaa0ba4dffedf81a65df0bc544f08"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:7c3472097fa7a75d28769a1f48c5c031294955b91b4663deed64534dd156124b",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:34495585c29c55a719d332b69482325e082b573eac7213a46113a2e02394b708"
+          }
+        }
+      },
+      {
+        "id": "motionSampling",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:684c993edc8cbd19ea95eabd8ffe561252d6cfca93a501f775adf635c2f6f88b",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:07f936ae66f361ed88cfc14613dbbc466ab52d74e46c96b33d70fa70eba89cc6"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:0046fd91446f4a1879102678bab0495d7c5e52daf96f5d250f2b9f8fafe223ca",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:108bd8871cdd7dffca822ab798cbf04abe64572cc52c2e300da4bbf985ffc1fd"
+          }
+        }
+      },
+      {
+        "id": "motionRetarget",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:a625f0318500f7017fdfd1d74feb2d5df256b0251b2d888971e1184b91f3a6ac",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:cf39ab69124c9fe1c8ae4fffa222dc016d35800922ce313d2d7853b2a53faf0f"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:29f6668298b9043ebf951516bd4d9f88dd9b40a605a06c71fe10e59982e4b35b",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:33b37864bf2f989e4a36586b9d381a38014bfec5066209b59111f617a10e8903"
+          }
+        }
+      },
+      {
+        "id": "motionUsd",
+        "version": ">=0.5,<0.6",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:c8bbe099dcf01181ac822a8ea215ae3e7031c8ac0df411a40c63428271c97822",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:58815581e7723f11eae40b0e092d05fd4891aee298ee1613e5e2f7977ec3856d"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:ce53baa0b692cf07a109f478d0a072f7819850ef13a67fa5658ff7b434e12da0",
+            "source": "oci://ghcr.io/animu-sphere/usd-motion-plugins@sha256:9e6a56054f5cf90b10c5c188e87ffcec3b0a9a34349b2727e90befb78221427c"
+          }
+        }
+      },
+      {
+        "id": "vrmRig",
+        "version": ">=0.12,<0.13",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:78702e6027050e2c18c4d34455a14a6709959a3b06fdb04feb7409f4d5c2fd65",
+            "source": "oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:bd9fdb836542175e65b3c75819693649bb2cea764f4cab4da974e8c9909b831c"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:03813e669a0ae109d9aa6a53310af2d5078ebf42e210ad2a0cb4bda955941a2f",
+            "source": "oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:2dd0e26454c1f993e0ede51154b08c9de0f4ad8aa61ff30064c0b574f1148d9e"
+          }
+        }
+      },
+      {
+        "id": "vrmSchemaSdk",
+        "version": ">=0.12,<0.13",
+        "targets": {
+          "cy2026-linux-x86_64-py313-usd": {
+            "digest": "sha256:df42ee48d368fdebc1b13f29e18bb32e62bbc76797b54930228513bb2f16152e",
+            "source": "oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:ec92061624463af627fe01c69be5b6e2abfd568dad532ef71709f9d637d4d414"
+          },
+          "cy2026-windows-x86_64-py313-usd": {
+            "digest": "sha256:e63c632e9588aee23080415f2ad9834929ad13dfc756bff2d0111f659b2a6acc",
+            "source": "oci://ghcr.io/animu-sphere/usd-vrm-plugins@sha256:0cf0a0606fb3aec7a5eaa3f6106fb7f25990fe2bc28652d140e0cb75d40e9c2b"
+          }
+        }
+      }
+    ]
+  }
+}

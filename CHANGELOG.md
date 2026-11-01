@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- `toon-viewport-vrm` builds against the `avatarVrmSession` release that
+  `adapters/viewport/avatar-session-pins.json` pins, which `scripts/pull_avatar_session.py`
+  pulls by digest, in place of checking a header for the face. Renderer report 119
+  records it and `toon-viewport-mmd` from a package, both on the `usd` runtime.
+
 - The `toon-renderer-core-boundary` check discovers every file under
   `include/toon/` when it runs instead of enumerating headers, and now also covers
   `webgpu_present.hpp` and `fast/avatar_state.hpp`, which the list had missed. Only
