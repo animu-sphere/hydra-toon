@@ -10,6 +10,14 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- `toon-tessera-host` consumes Tessera v0.6.0 and adds a resizable, scrollable
+  Inspector, shared-column statistics and an overlaid camera toolbar through
+  public C++ composition. The renderer follows the scene pane's extent/aspect;
+  pointer/keyboard input, camera/UI isolation and capture cancellation are
+  covered by window-free and 1x/4x native Vulkan checks. The main ImGui viewport
+  and installed renderer are unchanged. Renderer report 121 records the pin,
+  validation and upstream pointer-capture/scrollbar follow-ups.
+
 - `toon-viewport-mmd` builds against the `avatarMmdSession` 0.4.0 release that
   `adapters/viewport/avatar-session-pins.json` pins. Renderer report 120 records it.
 

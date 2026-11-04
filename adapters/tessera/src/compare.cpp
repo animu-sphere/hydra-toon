@@ -25,21 +25,25 @@ std::uint32_t Quantize(double encoded) {
 Comparison CompareComposite(const std::vector<std::uint8_t>& presented,
     std::uint32_t width, std::uint32_t height, bool bgra,
     const Toon::ColorProduct& product, const Toon::Float3& background,
-    const PixelRect& excluded) {
-  if (product.width != width || product.height != height ||
-      product.payload.size() < static_cast<std::size_t>(product.row_pitch) * height ||
+    const PixelRect& region, const PixelRect& excluded) {
+  if (region.x0 >= region.x1 || region.y0 >= region.y1 ||
+      region.x1 > width || region.y1 > height ||
+      product.width != region.x1 - region.x0 || product.height != region.y1 - region.y0 ||
+      product.row_pitch < static_cast<std::uint64_t>(product.width) * 4 ||
+      product.payload.size() < static_cast<std::size_t>(product.row_pitch) * product.height ||
       presented.size() < static_cast<std::size_t>(width) * height * 4) {
     throw std::runtime_error("the presented image and the product differ in extent");
   }
   const float clear[3] = {background.x, background.y, background.z};
   Comparison result;
-  for (std::uint32_t y = 0; y < height; ++y) {
-    for (std::uint32_t x = 0; x < width; ++x) {
+  for (std::uint32_t y = region.y0; y < region.y1; ++y) {
+    for (std::uint32_t x = region.x0; x < region.x1; ++x) {
       if (x >= excluded.x0 && x < excluded.x1 && y >= excluded.y0 && y < excluded.y1) {
         continue;
       }
       const std::uint8_t* source =
-          product.payload.data() + static_cast<std::size_t>(y) * product.row_pitch + x * 4;
+          product.payload.data() + static_cast<std::size_t>(y - region.y0) * product.row_pitch +
+          (x - region.x0) * 4;
       const std::uint8_t* shown =
           presented.data() + (static_cast<std::size_t>(y) * width + x) * 4;
       const double alpha = source[3] / 255.0;

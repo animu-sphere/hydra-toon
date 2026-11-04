@@ -28,8 +28,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -265,7 +267,11 @@ public:
     return 0;
   }
 
-  LRESULT Message(UINT message, WPARAM wparam, LPARAM lparam) {
+  LRESULT Message(UINT message, WPARAM wparam, LPARAM lparam) try {
+    const auto point = [&] {
+      return tessera::Point{(static_cast<float>(GET_X_LPARAM(lparam)) + 0.5F) / scale_,
+          (static_cast<float>(GET_Y_LPARAM(lparam)) + 0.5F) / scale_};
+    };
     switch (message) {
     case WM_CLOSE:
       closed_ = true;
@@ -283,44 +289,159 @@ public:
       return 0;
     }
     case WM_KEYDOWN:
-      if (wparam == VK_SPACE) handoff_ = !handoff_;
-      if (wparam == VK_ESCAPE) closed_ = true;
+      if (wparam == VK_SPACE && (lparam & (1LL << 30)) == 0)
+        handoff_ = !handoff_;
+      else if (wparam == 'F' && camera_)
+        camera_->Reset();
+      else if (wparam == VK_ESCAPE) {
+        if (panel_.resizing()) {
+          DispatchUi(tessera::PointerCancel{{1}});
+          ReleaseCapture();
+        } else
+          closed_ = true;
+      } else if (wparam == VK_TAB) {
+        if (GetKeyState(VK_SHIFT) < 0)
+          DispatchUi(tessera::FocusPrevious{});
+        else
+          DispatchUi(tessera::FocusNext{});
+      } else if (wparam == VK_RETURN && (lparam & (1LL << 30)) == 0) {
+        DispatchUi(tessera::Activate{});
+      } else if (wparam == VK_LEFT)
+        DispatchUi(tessera::Navigate{tessera::Direction::left});
+      else if (wparam == VK_RIGHT)
+        DispatchUi(tessera::Navigate{tessera::Direction::right});
+      else if (wparam == VK_UP)
+        DispatchUi(tessera::Navigate{tessera::Direction::up});
+      else if (wparam == VK_DOWN)
+        DispatchUi(tessera::Navigate{tessera::Direction::down});
+      else if (wparam == VK_HOME)
+        DispatchUi(tessera::KeyDown{tessera::Key::home});
+      else if (wparam == VK_END)
+        DispatchUi(tessera::KeyDown{tessera::Key::end});
+      return 0;
+    case WM_LBUTTONDOWN:
+      DispatchUi(tessera::PointerDown{{1}, point()});
+      SetCapture(window_);
       return 0;
     case WM_LBUTTONUP: {
-      // Client pixel centres, as Tessera's pointer mapping takes them.
-      const float x = (static_cast<float>(GET_X_LPARAM(lparam)) + 0.5F) / scale_;
-      const float y = (static_cast<float>(GET_Y_LPARAM(lparam)) + 0.5F) / scale_;
-      if (panel_.HitsSwitch({x, y})) {
-        handoff_ = !handoff_;
-        ++switch_clicks_;
-      }
+      DispatchUi(tessera::PointerUp{{1}, point()}, true);
+      if (GetCapture() == window_)
+        ReleaseCapture();
       return 0;
     }
     case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+      if (!panel_.IsScenePoint(point()) || panel_.resizing())
+        return 0;
       dragging_ = true;
+      panning_ = message == WM_MBUTTONDOWN;
       drag_ = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
       SetCapture(window_);
       return 0;
     case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
       dragging_ = false;
-      ReleaseCapture();
+      if (GetCapture() == window_)
+        ReleaseCapture();
       return 0;
-    case WM_MOUSEMOVE:
+    case WM_MOUSEMOVE: {
+      TRACKMOUSEEVENT track{sizeof(TRACKMOUSEEVENT), TME_LEAVE, window_, 0};
+      TrackMouseEvent(&track);
+    }
       if (dragging_ && camera_) {
         const POINT now{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        camera_->Orbit(static_cast<float>(now.x - drag_.x), static_cast<float>(now.y - drag_.y));
+        const float dx = static_cast<float>(now.x - drag_.x);
+        const float dy = static_cast<float>(now.y - drag_.y);
+        if (panning_)
+          camera_->Pan(dx, dy,
+              static_cast<float>(scene_pixels_.y1 - scene_pixels_.y0));
+        else
+          camera_->Orbit(dx, dy);
         drag_ = now;
-      }
+      } else
+        DispatchUi(tessera::PointerMove{{1}, point()});
       return 0;
-    case WM_MOUSEWHEEL:
-      if (camera_) camera_->Dolly(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA);
+    case WM_MOUSELEAVE:
+      if (GetCapture() != window_)
+        DispatchUi(tessera::PointerCancel{{1}});
       return 0;
-    default:
-      return DefWindowProcW(window_, message, wparam, lparam);
+    case WM_MOUSEWHEEL: {
+      POINT client{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      ScreenToClient(window_, &client);
+      const tessera::Point position{(static_cast<float>(client.x) + 0.5F) / scale_,
+          (static_cast<float>(client.y) + 0.5F) / scale_};
+      const float steps = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA;
+      if (camera_ && panel_.IsScenePoint(position))
+        camera_->Dolly(steps);
+      else
+        DispatchUi(tessera::Scroll{position, {0, -steps * 40.0F}});
+      return 0;
     }
+    case WM_CAPTURECHANGED:
+    case WM_KILLFOCUS:
+      dragging_ = false;
+      DispatchUi(tessera::PointerCancel{{1}});
+      return 0;
+    case WM_SETCURSOR:
+      if (LOWORD(lparam) == HTCLIENT) {
+        POINT client{};
+        GetCursorPos(&client);
+        ScreenToClient(window_, &client);
+        const tessera::Point position{static_cast<float>(client.x) / scale_,
+            static_cast<float>(client.y) / scale_};
+        const bool resize = panel_.resizing() || panel_.HitsSplitter(position);
+        SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(resize ? 32644 : 32512)));
+        return TRUE;
+      }
+      break;
+    default:
+      break;
+    }
+    return DefWindowProcW(window_, message, wparam, lparam);
+  } catch (const std::exception&) {
+    input_error_ = std::current_exception();
+    closed_ = true;
+    return 0;
   }
 
 private:
+  template <class T>
+  void DispatchUi(T data, bool click = false) {
+    const tessera::InputEvent event{std::chrono::microseconds(Toon::SteadyNanoseconds() / 1000),
+        std::move(data)};
+    for (const auto action : panel_.Dispatch(event)) {
+      switch (action) {
+      case toon_tessera::PanelAction::SwitchPath:
+        handoff_ = !handoff_;
+        if (click)
+          ++switch_clicks_;
+        break;
+      case toon_tessera::PanelAction::ResetCamera:
+        if (camera_)
+          camera_->Reset();
+        break;
+      case toon_tessera::PanelAction::ZoomIn:
+        if (camera_)
+          camera_->Dolly(1);
+        break;
+      case toon_tessera::PanelAction::ZoomOut:
+        if (camera_)
+          camera_->Dolly(-1);
+        break;
+      }
+    }
+  }
+
+  toon_tessera::PixelRect Pixels(tessera::Rect rect) const {
+    const auto pixel = [&](float logical, std::uint32_t limit) {
+      return static_cast<std::uint32_t>(std::clamp(
+          std::round(static_cast<double>(logical) * scale_), 0.0, static_cast<double>(limit)));
+    };
+    return {pixel(rect.origin.x, extent_.width), pixel(rect.origin.y, extent_.height),
+        pixel(rect.origin.x + rect.size.width, extent_.width),
+        pixel(rect.origin.y + rect.size.height, extent_.height)};
+  }
+
   struct SlotHandle {
     std::uint64_t handle = 0;
     std::uint64_t generation = 0;
@@ -761,6 +882,8 @@ private:
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }
+    if (input_error_)
+      std::rethrow_exception(input_error_);
     return !closed_;
   }
 
@@ -810,6 +933,14 @@ private:
     const std::int64_t start = Toon::SteadyNanoseconds();
     if (resized_) RecreateSwapchain();
     if (swapchain_ == VK_NULL_HANDLE) return result;
+    const tessera::Size logical{
+        LogicalLength(extent_.width, scale_), LogicalLength(extent_.height, scale_)};
+    panel_.Update(panel_state_, logical);
+    scene_pixels_ = Pixels(panel_.viewport());
+    const std::uint32_t width = scene_pixels_.x1 - scene_pixels_.x0;
+    const std::uint32_t height = scene_pixels_.y1 - scene_pixels_.y0;
+    if (width == 0 || height == 0)
+      return result;
     WaitFrame();
     std::uint32_t index = 0;
     const VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
@@ -820,8 +951,6 @@ private:
     }
     if (acquired != VK_SUBOPTIMAL_KHR) Check(acquired, "vkAcquireNextImageKHR");
 
-    const std::uint32_t width = extent_.width;
-    const std::uint32_t height = extent_.height;
     draws_.view = camera_->View(static_cast<float>(width) / static_cast<float>(height));
     std::string error;
     Toon::HandoffImage held;
@@ -854,7 +983,6 @@ private:
     }
     result.render_ms = Milliseconds(render_start, Toon::SteadyNanoseconds());
 
-    const tessera::Size logical{LogicalLength(width, scale_), LogicalLength(height, scale_)};
     const auto& statistics = renderer_->statistics();
     panel_state_.handoff = handoff;
     panel_state_.frame = statistics.latency.frame;
@@ -864,8 +992,6 @@ private:
     panel_state_.generation = handoff ? generation_ : 0;
     panel_state_.readback_bytes = statistics.readback_bytes;
     if (statistics.gpu_timing) panel_state_.gpu_ms = statistics.gpu_frame_ms;
-    panel_.Update(panel_state_, logical);
-
     Check(vkResetCommandBuffer(commands_, 0), "vkResetCommandBuffer");
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -883,7 +1009,11 @@ private:
     tessera_->set_target({commands_, extent_});
     tessera::UiDrawList list;
     // The avatar first, as it is: a premultiplied image over the clear colour.
-    list.commands.push_back(tessera::DrawImage{{{0, 0}, logical}, {handle}});
+    const tessera::Rect scene_rect{
+        {static_cast<float>(scene_pixels_.x0) / scale_,
+            static_cast<float>(scene_pixels_.y0) / scale_},
+        {static_cast<float>(width) / scale_, static_cast<float>(height) / scale_}};
+    list.commands.push_back(tessera::DrawImage{scene_rect, {handle}});
     const auto& ui = panel_.paint().commands;
     list.commands.insert(list.commands.end(), ui.begin(), ui.end());
     Check(tessera_->submit({tessera_frame_ + 1, logical, scale_}, list), "Tessera submit");
@@ -985,8 +1115,8 @@ private:
       // Frames in flight settle before the captured frame.
       for (int i = 0; i < 4; ++i) (void)Drawn(false);
       FrameResult frame = Drawn(true);
-      const tessera::Rect bounds = panel_.bounds();
-      // The panel's pixels, one wider on each side for its edge coverage.
+      const tessera::Rect bounds = panel_.bounds("toolbar");
+      // The toolbar's pixels, one wider on each side for its edge coverage.
       const auto pixel = [&](float logical, std::uint32_t limit, float offset) {
         const double value = std::floor(static_cast<double>(logical) * scale_ + offset);
         return static_cast<std::uint32_t>(std::clamp(value, 0.0, static_cast<double>(limit)));
@@ -998,7 +1128,7 @@ private:
       excluded.y1 = pixel(bounds.origin.y + bounds.size.height, extent_.height, 2);
       const bool bgra = format_ == VK_FORMAT_B8G8R8A8_SRGB;
       const auto comparison = toon_tessera::CompareComposite(frame.presented, extent_.width,
-          extent_.height, bgra, frame.product, kBackground, excluded);
+          extent_.height, bgra, frame.product, kBackground, scene_pixels_, excluded);
       const std::string file = (std::filesystem::path(arguments_.smoke) /
           (std::to_string(++number) + "-" + name + ".ppm")).string();
       toon_tessera::WritePpm(file, frame.presented, extent_.width, extent_.height, bgra);
@@ -1017,30 +1147,72 @@ private:
              << ", \"generation\": " << generation_ << ", \"pixels\": " << comparison.pixels
              << ", \"exact\": " << comparison.exact
              << ", \"max_difference\": " << comparison.max_difference
+             << ", \"scene\": [" << scene_pixels_.x0 << ", " << scene_pixels_.y0
+             << ", " << scene_pixels_.x1 << ", " << scene_pixels_.y1 << "]"
              << ", \"excluded\": [" << excluded.x0 << ", " << excluded.y0 << ", "
              << excluded.x1 << ", " << excluded.y1 << "], \"image\": \""
              << Escape(file) << "\"}";
     };
+    const auto center = [&](const char* id) {
+      const auto box = panel_.bounds(id);
+      return POINT{static_cast<LONG>((box.origin.x + box.size.width / 2) * scale_),
+          static_cast<LONG>((box.origin.y + box.size.height / 2) * scale_)};
+    };
+    const auto click = [&](const char* id) {
+      const POINT point = center(id);
+      SendMessageW(window_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(point.x, point.y));
+      (void)Drawn(false);
+      SendMessageW(window_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
+      (void)Drawn(false);
+    };
     const auto click_switch = [&] {
-      // Finds a client pixel on the panel's switch and sends a click there
-      // through the window procedure, as input arrives.
       const auto clicks = switch_clicks_;
-      for (std::uint32_t y = 0; y < extent_.height && switch_clicks_ == clicks; y += 2) {
-        for (std::uint32_t x = 0; x < std::min<std::uint32_t>(extent_.width, 600) &&
-                                  switch_clicks_ == clicks;
-             x += 2) {
-          const float lx = (static_cast<float>(x) + 0.5F) / scale_;
-          const float ly = (static_cast<float>(y) + 0.5F) / scale_;
-          if (panel_.HitsSwitch({lx, ly})) {
-            SendMessageW(window_, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
-          }
-        }
-      }
+      click("switch");
       Require(switch_clicks_ == clicks + 1, "the panel's switch did not take a click");
     };
 
     handoff_ = true;
     compare("handoff");
+    const auto initial_camera = camera_->View(1).view;
+    click("zoom-in");
+    Require(camera_->View(1).view != initial_camera, "the toolbar did not zoom the camera");
+    compare("camera-zoomed");
+    // Reset shares the same ordinary command through pointer and keyboard input.
+    click("reset");
+    Require(camera_->View(1).view == initial_camera, "the toolbar did not reset the camera");
+    SendMessageW(window_, WM_KEYDOWN, VK_TAB, 0);
+    SendMessageW(window_, WM_KEYDOWN, VK_RETURN, 0);
+    Require(camera_->View(1).view != initial_camera, "keyboard activation did not zoom");
+    SendMessageW(window_, WM_KEYDOWN, 'F', 0);
+    Require(camera_->View(1).view == initial_camera, "F did not reset the camera");
+    compare("camera-reset");
+
+    SendMessageW(window_, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(20, 100));
+    SendMessageW(window_, WM_MOUSEMOVE, MK_RBUTTON, MAKELPARAM(50, 130));
+    SendMessageW(window_, WM_RBUTTONUP, 0, MAKELPARAM(50, 130));
+    Require(camera_->View(1).view == initial_camera, "inspector drag leaked to the camera");
+    POINT wheel{20, 100};
+    ClientToScreen(window_, &wheel);
+    SendMessageW(window_, WM_MOUSEWHEEL, MAKEWPARAM(0, -WHEEL_DELTA),
+        MAKELPARAM(wheel.x, wheel.y));
+    Require(camera_->View(1).view == initial_camera, "inspector wheel leaked to the camera");
+    SendMessageW(window_, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA),
+        MAKELPARAM(wheel.x, wheel.y));
+
+    const auto sidebar = panel_.sidebar_size();
+    const POINT separator = center("workspace-handle");
+    SendMessageW(window_, WM_LBUTTONDOWN, MK_LBUTTON,
+        MAKELPARAM(separator.x, separator.y));
+    SendMessageW(window_, WM_MOUSEMOVE, MK_LBUTTON,
+        MAKELPARAM(separator.x - 24, separator.y));
+    (void)Drawn(false);
+    SendMessageW(window_, WM_MOUSEMOVE, MK_LBUTTON,
+        MAKELPARAM(separator.x - 32, separator.y));
+    SendMessageW(window_, WM_LBUTTONUP, 0,
+        MAKELPARAM(separator.x - 32, separator.y));
+    Require(!panel_.resizing() && panel_.sidebar_size() < sidebar,
+        "native separator drag did not resize and release");
+    compare("sidebar-dragged");
     ResizeClient(arguments_.width * 3 / 4, arguments_.height * 3 / 4);
     const std::uint64_t before = generation_;
     compare("handoff-resized");
@@ -1050,6 +1222,12 @@ private:
     compare("readback");
     click_switch();
     compare("handoff-again");
+    const POINT canceled = center("switch");
+    const auto clicks = switch_clicks_;
+    SendMessageW(window_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(canceled.x, canceled.y));
+    ReleaseCapture();
+    SendMessageW(window_, WM_LBUTTONUP, 0, MAKELPARAM(canceled.x, canceled.y));
+    Require(switch_clicks_ == clicks, "capture loss activated a button");
 
     const auto& handoff = renderer_->handoff_statistics();
     const std::uint32_t validation = host_->messages().count;
@@ -1101,6 +1279,8 @@ private:
       const auto& statistics = renderer_->statistics();
       runs << (first ? "" : ",\n") << "    {\"path\": \"" << (handoff ? "handoff" : "readback")
            << "\", \"width\": " << extent_.width << ", \"height\": " << extent_.height
+           << ", \"render_width\": " << scene_pixels_.x1 - scene_pixels_.x0
+           << ", \"render_height\": " << scene_pixels_.y1 - scene_pixels_.y0
            << ", \"samples\": " << statistics.samples << ", \"frames\": " << arguments_.frames
            << ", \"readback_bytes_per_frame\": " << bytes << ",\n      ";
       frame.Write(runs, "host_frame_ms");
@@ -1160,7 +1340,10 @@ private:
   bool closed_ = false;
   bool handoff_ = true;
   bool dragging_ = false;
+  bool panning_ = false;
+  std::exception_ptr input_error_;
   POINT drag_{};
+  toon_tessera::PixelRect scene_pixels_;
   std::uint64_t switch_clicks_ = 0;
 
   std::unique_ptr<toon_stage::Scene> scene_;

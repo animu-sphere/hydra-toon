@@ -2,7 +2,8 @@
 // The Tessera host's smoke comparison (GPU handoff policy §10): a presented
 // swapchain image against the CPU composite of the same frame's product,
 // source-over in linear light onto the host's clear colour and encoded as
-// the sRGB swapchain encodes it. The panel's pixels are left out.
+// the sRGB swapchain encodes it. Only the scene region outside its toolbar
+// is compared; the inspector is not part of the renderer's product.
 #pragma once
 
 #include <toon/backend.hpp>
@@ -33,11 +34,12 @@ struct Comparison {
 };
 
 // `presented` is tightly packed 8-bit sRGB, BGRA when `bgra`, top row first.
-// `background` is the clear colour in linear RGB.
+// `background` is the clear colour in linear RGB. `region` places the
+// unscaled product in the swapchain; `excluded` masks the scene toolbar.
 [[nodiscard]] Comparison CompareComposite(const std::vector<std::uint8_t>& presented,
     std::uint32_t width, std::uint32_t height, bool bgra,
     const Toon::ColorProduct& product, const Toon::Float3& background,
-    const PixelRect& excluded);
+    const PixelRect& region, const PixelRect& excluded);
 
 // A binary PPM of the presented image, for inspection.
 void WritePpm(const std::string& path, const std::vector<std::uint8_t>& presented,
