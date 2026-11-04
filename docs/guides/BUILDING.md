@@ -719,28 +719,62 @@ and [98](../reports/renderer/98-2026-10-25-handoff-stage-2.md) record the
 baseline and the handoff beside it.
 
 The Tessera host of policy §9, `toon-tessera-host`, is built by its own
-intent, which fetches Tessera at a pinned commit:
+intent, which fetches Tessera v0.6.0 at the pinned release commit:
 
 ```sh
 ost build --profile lookdev --intent tessera-usd --jobs auto
 ost test --profile lookdev --intent tessera-usd
 ```
 
-It opens a window drawing a stage through the handoff under a Tessera
-panel; Space or the panel's switch changes to the readback path and back,
-right-drag orbits and the wheel dollies:
+It opens a dedicated scene pane beside a resizable, scrollable Inspector.
+Tessera's public C++ authoring API supplies the SplitPane, Grid statistics
+and Stack camera toolbar. The renderer produces the scene pane's physical
+extent and aspect ratio, not the whole window:
 
 ```sh
 toon-tessera-host --shaders <build>/backend/vulkan/shaders \
   --tessera-shaders <build>/adapters/tessera/tessera-shaders --stage <stage.usd>
 ```
 
+| Input | Operation |
+| --- | --- |
+| Inspector's Switch path, or Space | Toggle GPU handoff / CPU readback |
+| Reset toolbar button, or F | Reset the camera to the framed scene |
+| Toolbar + / - | Dolly in / out |
+| Right drag / middle drag in the scene | Orbit / pan |
+| Wheel in the scene / Inspector | Dolly / scroll; UI input does not move the camera |
+| Drag the divider | Resize the Inspector |
+| Tab / Shift+Tab, Enter | Focus controls / activate the focused control |
+| Arrows, Home / End with divider focused | Adjust the split / reach its limits |
+| Escape | Cancel a divider drag; otherwise close the window |
+
+Focus is visibly indicated and keyboard traversal reveals clipped Inspector
+controls. Normal button presses keep their accepted UI snapshot until release;
+telemetry labels pause during that press, while split dragging remains live.
+Viewport resize and native capture/focus loss cancel pending presses. Stationary
+hover is retargeted after UI replacement. The upstream follow-ups are
+[compatible pointer capture](https://github.com/animu-sphere/tessera/issues/153)
+and a [vertical scrollbar](https://github.com/animu-sphere/tessera/issues/154);
+the Inspector currently scrolls through wheel input and focus reveal.
+
+This remains an opt-in, non-installed GPU handoff host, not a replacement for
+`toon-viewport` or its ImGui controls. It uses Tessera's ASCII placeholder text
+shaper; scene editing, runtime playback, native fonts and localization are not
+part of this UI slice.
+
 `--smoke <dir>` instead runs a scripted check under validation, comparing
-presented frames with the CPU composite of their product through a resize
-and both paths, and `--measure <file> [--frames N] [--warmup N]` writes both
-paths' timings as JSON, presenting without vsync; `--width`, `--height` and
-`--samples` set the window and MSAA
-([report 99](../reports/renderer/99-2026-10-25-handoff-stage-3.md)).
+the presented scene region outside the toolbar with the CPU composite of its
+product through camera controls, divider dragging, window resize and both
+paths. It also checks native keyboard activation, UI/camera input isolation
+and capture cancellation. CTest registers 1x and 4x MSAA smokes plus the
+window-free `toon-tessera-panel` layout/input/comparison contract.
+
+`--measure <file> [--frames N] [--warmup N]` writes both paths' timings as JSON,
+presenting without vsync. Its `width`/`height` remain the window extent;
+`render_width`/`render_height` identify the scene product extent. Readback byte
+counts include both color and depth on the CPU path. `--width`, `--height` and
+`--samples` set the window and MSAA. The updated pin and checks are recorded in
+[report 121](../reports/renderer/121-2026-11-05-tessera-viewport-ui.md).
 
 ## Late evaluated input and latency
 

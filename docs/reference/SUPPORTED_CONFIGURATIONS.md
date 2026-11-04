@@ -50,6 +50,7 @@ runs on a tag or a manual dry run, never on a pull request.
 | Vulkan | 1.3 device, loader and headers | the device needs `dynamicRendering`, `synchronization2` and `timelineSemaphore`; transparent offscreen MSAA additionally needs `alphaToOne` (1x and opaque output do not). Without a suitable device the GPU checks report an explained `SKIP`, not a failure |
 | `slangc` | bundled with the Vulkan SDK from 1.3.296 | found through `VULKAN_SDK`, then `PATH` |
 | OpenUSD | 26.08 measured | Hydra adapter only; a real `lookdev` or `usd` runtime |
+| Tessera | v0.6.0 at `f264eba5cbb0ff7920ba8441e7761030d9a6df92` | opt-in Win32 `tessera-usd` host only; core and Vulkan, fonts/examples/tests disabled; [renderer 121](../reports/renderer/121-2026-11-05-tessera-viewport-ui.md) records native 1x/4x and window-free UI checks |
 | GLFW | 3.4 | standalone viewport only; `find_package`, else a pinned FetchContent |
 | Dear ImGui | 1.92.8 at `8936b58fe26e8c3da834b8f60b06511d537b4c63` | standalone viewport only, compiled into it by a pinned FetchContent, as `hydra-merlin`'s viewport pins it; MIT, its licence installed under `share/toon/licenses/imgui` |
 | Dawn | release `v20261008.181332`, Windows Release archive, SHA-256 `b3574efe…` | WebGPU backend only (`webgpu` intent): a pinned download providing the static `webgpu_dawn` and the `tint` that validates the generated WGSL; BSD-3-Clause, its licence and the notices of what its library carries installed under `share/toon/licenses/dawn` |

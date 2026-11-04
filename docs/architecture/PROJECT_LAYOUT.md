@@ -40,7 +40,7 @@ that moment every file is project-owned; the template is not re-applied.
 | `adapters/headless/` | `toon-headless` | — | headless runner; writes `renderer-report.json` |
 | `adapters/viewport/` | `toon-viewport`, `toon-viewport-imgui` | — | standalone GLFW window with a Dear ImGui overlay, the renderer's main evaluation host ([design policy §31](../design/DESIGN_POLICY.md#31-evaluation-hosts)); optional (`TOON_ENABLE_VIEWPORT`); with the Hydra adapter in the same build, it links `toon-hydra2-runtime` and hosts a USD stage (`--usd`) |
 | `adapters/hydra2/` | `hdToon`, `toon-hydra2-runtime` | — | the `HdRenderDelegate` adapter; optional (`TOON_ENABLE_HYDRA2`) |
-| `adapters/tessera/` | `toon-tessera-host` | — | Win32 example host: an avatar through the GPU handoff and Tessera UI in one swapchain ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)); optional (`TOON_ENABLE_TESSERA`), with the Hydra adapter; never installed |
+| `adapters/tessera/` | `toon-tessera-host` | — | Win32 example host: a GPU-handoff scene pane, resizable Inspector and Tessera camera toolbar in one swapchain ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)); optional (`TOON_ENABLE_TESSERA`), with the Hydra adapter; never installed |
 | `adapters/fast/` | `toon-avatar-state` | `Toon::AvatarState` | optional revision-4/5 runtime state consumer (`TOON_ENABLE_AVATAR_STATE`); only the runtime C headers are required, with snapshot calls supplied by the host |
 | `adapters/viewport/` | `toon-viewport-mmd` | — | optional native application host (`TOON_MMD_RUNTIME_VIEWPORT`) consuming installed runtime MMD/Jolt snapshots through resident resources; never installed; no physics evaluation in renderer core |
 | `validation/` | CTest only | — | core boundary, core unit, evidence and install-tree checks |
@@ -76,7 +76,7 @@ placement rule; it does not say the component exists.
 | The viewport's Hydra host: stage, scene indices, render index | `adapters/viewport/src/hydra_scene.cpp`, built only with the Hydra adapter | `toon-viewport` |
 | Public headers — core (`render_world.hpp`, `extraction.hpp`), the backend-neutral contract (`backend.hpp`, `overlay.hpp`) and each backend's factories (`vulkan_backend.hpp`, `vulkan_present.hpp`, `vulkan_handoff.hpp`, `webgpu_backend.hpp`, `webgpu_present.hpp`) | `include/toon/` | — |
 | The Vulkan GPU handoff: a lent device, the product ring and its descriptors ([GPU handoff policy](../design/GPU_HANDOFF_POLICY.md)) | `backend/vulkan/vulkan_handoff.cpp` | `toon-render-vulkan` |
-| The Tessera example host: window, swapchain, frame loop, Tessera panel ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)) | `adapters/tessera/src/` | `toon-tessera-host` |
+| The Tessera example host: window, swapchain, frame loop, dedicated scene layout and Inspector ([GPU handoff policy §9](../design/GPU_HANDOFF_POLICY.md#9-consumers)) | `adapters/tessera/src/` | `toon-tessera-host` |
 
 The viewport keeps private implementation and headers in `adapters/viewport/src/`;
 fixtures, test executables and CMake/Python check drivers live in `tests/`,
@@ -667,8 +667,12 @@ downloads the pinned Dawn and DXC releases at configure time and adds
 WebGPU CTests; `webgpu-usd` adds the Hydra adapter, so the WebGPU viewport
 opens USD stages, and the USD parity and cost CTests. No other intent and
 not the published package links Dawn. The `tessera-usd` intent fetches the
-pinned Tessera commit at configure time and adds `toon-tessera-host` and its
-CTest; no other intent and not the published package links Tessera. `ost renderer view` and `ost renderer viewport` request
+pinned Tessera v0.6.0 commit at configure time and adds `toon-tessera-host`,
+its window-free UI contract and 1x/4x native smokes. `panel.*` owns public C++
+authoring, accepted UI snapshots, logical layout and input; `main.cpp` owns
+Win32 capture, camera commands and pixel-aligned GPU product placement.
+No renderer-core or installed target depends on the UI. No other intent and
+not the published package links Tessera. `ost renderer view` and `ost renderer viewport` request
 their adapter through `OST_RENDERER_ADAPTERS` (`hydra2`, `viewport`); the
 project reads that list as adapters to add to what the intent's options
 enable, never as the whole set.

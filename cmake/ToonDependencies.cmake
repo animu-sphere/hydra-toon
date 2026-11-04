@@ -141,7 +141,7 @@ function(toon_configure_tessera_dependencies)
   set(TESSERA_SLANGC "${TOON_SLANGC_EXECUTABLE}" CACHE FILEPATH "" FORCE)
   FetchContent_Declare(tessera
     GIT_REPOSITORY https://github.com/animu-sphere/tessera.git
-    GIT_TAG c999a27a3a5c4ae28c5e68133a1460cc5c63fbdd) # main after #116
+    GIT_TAG f264eba5cbb0ff7920ba8441e7761030d9a6df92) # v0.6.0
   FetchContent_MakeAvailable(tessera)
   set(TOON_TESSERA_SHADERS "${tessera_BINARY_DIR}/backends/vulkan/shaders"
     PARENT_SCOPE)

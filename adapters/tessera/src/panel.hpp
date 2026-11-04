@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Tessera UI of the Tessera host (GPU handoff policy §9): a small panel
-// over the avatar that shows the frame's path and timings and switches the
-// path. JSON v1 document -> tree -> styles -> layout -> paint, all Tessera's;
-// the host owns the window, the device and the frame loop.
+// The dedicated Tessera host's inspector, resizable scene pane and toolbar.
 #pragma once
 
+#include <tessera/input/focus.hpp>
 #include <tessera/input/pointer.hpp>
+#include <tessera/input/split_pane.hpp>
 #include <tessera/layout/layout_box.hpp>
 #include <tessera/render/draw_list.hpp>
 #include <tessera/style/style_sheet.hpp>
 #include <tessera/text/text.hpp>
 #include <tessera/ui/document.hpp>
 #include <tessera/ui/tree.hpp>
+#include <tessera/ui/authoring.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,29 +36,57 @@ struct PanelState {
   std::uint64_t readback_bytes = 0;
 };
 
+enum class PanelAction { SwitchPath,
+  ResetCamera,
+  ZoomIn,
+  ZoomOut };
+
 class Panel {
 public:
   Panel();
 
-  // Rebuilds the panel's text, layout and paint for a logical viewport.
   void Update(const PanelState& state, tessera::Size viewport);
+  [[nodiscard]] std::vector<PanelAction> Dispatch(const tessera::InputEvent& event);
 
   [[nodiscard]] const tessera::UiDrawList& paint() const { return paint_; }
-  // The panel's border box, in logical units: what the smoke excludes from
-  // its comparison with the reference composite.
-  [[nodiscard]] tessera::Rect bounds() const;
-  // Whether a logical point lies on the path switch.
-  [[nodiscard]] bool HitsSwitch(tessera::Point position) const;
+  [[nodiscard]] tessera::Rect bounds(const char* id) const;
+  [[nodiscard]] tessera::Rect viewport() const {
+    return bounds("viewport");
+  }
+  [[nodiscard]] bool IsScenePoint(tessera::Point position) const;
+  [[nodiscard]] bool resizing() const {
+    return splitter_.dragging();
+  }
+  [[nodiscard]] bool HitsSplitter(tessera::Point position) const;
+  [[nodiscard]] float sidebar_size() const {
+    return sidebar_size_;
+  }
 
 private:
-  tessera::UiDocument document_;
+  [[nodiscard]] tessera::HitTestInput hit() const;
+  void Paint();
+  void RevealFocus();
+
+  tessera::authoring::Session session_;
   tessera::ValidationContext actions_;
   tessera::StyleSheet sheet_;
   std::unique_ptr<tessera::TextShaper> text_;
   std::unique_ptr<tessera::UiTree> tree_;
+  std::vector<tessera::StyleDeclarations> overrides_;
   std::vector<tessera::ResolvedStyle> styles_;
   tessera::LayoutResult layout_;
   tessera::UiDrawList paint_;
+  tessera::PointerDispatcher pointer_;
+  tessera::FocusDispatcher focus_;
+  tessera::SplitPaneDispatcher splitter_{"workspace"};
+  tessera::InteractionState interaction_;
+  std::optional<tessera::PointerMove> pointer_position_;
+  std::chrono::microseconds pointer_time_{0};
+  tessera::Point scroll_;
+  float sidebar_size_ = 280;
+  bool pointer_down_ = false;
+  PanelState state_;
+  tessera::Size size_{};
 };
 
 } // namespace toon_tessera
