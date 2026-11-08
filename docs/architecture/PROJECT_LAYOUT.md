@@ -116,6 +116,8 @@ Capture reads the actual retained input after all conversion checks succeed and
 reports its parent-local joints before palette mapping. Refused deliveries leave
 the prior capture unchanged. Passing no capture pointer does no serialization or
 capture storage. The host owns file I/O and collects objects in an array.
+The export preserves capability versions and every retained sample's source, actor,
+channel, evaluator and affine clock mapping, including runtime sample seconds.
 `toon-avatar-state-test --state-output <file>` exports a six-state generated
 headless probe covering reset, recreated instance, visibility and ABI-5 primary
 UVs. ABI-4 export omits UVs and must declare that channel unsupported in the

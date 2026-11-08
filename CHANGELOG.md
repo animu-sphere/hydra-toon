@@ -10,6 +10,11 @@ version has a record in [docs/releases/](docs/releases/README.md).
 
 ### Changed
 
+- Avatar-state diagnostic export retains capability versions and complete
+  source/actor/evaluator and clock provenance for the runtime owner's parity comparison.
+  The generated consumer probe includes shared channel names across sources/actors
+  and nonidentity clock mappings.
+
 - `toon-tessera-host` consumes Tessera v0.6.0 and adds a resizable, scrollable
   Inspector, shared-column statistics and an overlaid camera toolbar through
   public C++ composition. The renderer follows the scene pane's extent/aspect;

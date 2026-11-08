@@ -122,12 +122,14 @@ make full reference equivalence a release condition; see the
 | VRM reproduction comparison | ✅ | Local raw VRM 0.x/1.0 rest-pose full/close captures at 800×900/4x against pinned three-vrm 3.5.5 and matched-camera usdview. Foreground RGB MAE versus three-vrm is 1.01–4.28/255, versus usdview 0.11–0.32/255. Finite coverage; constraints/springs/expressions and universal material equivalence are not established. [Renderer report 32](../reports/renderer/32-2026-10-04-vrm-reproduction.md) |
 
 The optional `AvatarStateAdapter::Apply` diagnostic overload exports accepted
-input in the runtime owner's comparison format, with instance identity and
-visibility. A generated headless CLI probe and independent runtime-owned oracle
+input in the runtime owner's comparison format, with instance identity,
+visibility, capability versions and complete source-sample/clock provenance.
+A generated headless CLI probe and independent runtime-owned oracle
 cover all ABI-5 channels, reset and recreation; ordinary calls keep no capture
 buffers. This measures consumer receipt, not Hydra or pixel parity; resident
 VRM/MMD viewport export is not implemented.
-See [report 122](../reports/renderer/122-2026-11-08-avatar-state-export.md).
+See [report 122](../reports/renderer/122-2026-11-08-avatar-state-export.md) and
+[report 123](../reports/renderer/123-2026-11-08-avatar-state-provenance-export.md).
 
 Primary UV state transport has a scoped ABI-5 path through `Toon::AvatarState`
 with explicit resident vertex-to-slot bindings. Reordered slots and split
