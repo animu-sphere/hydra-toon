@@ -3,6 +3,8 @@
 #include <toon/vulkan_backend.hpp>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -562,6 +564,75 @@ void State() {
   Check(!adapter.Apply(cmState, cmBase, 2, output, error), "cleared binding remained active");
 }
 
+void StateOutput(const char* path = nullptr) {
+  Scene scene;
+  scene.world.SetMeshUVs(scene.mesh, {{0, 0}, {.25F, .5F}, {.5F, 1}});
+  const auto base = scene.world.Commit();
+  const auto firstInstance = std::numeric_limits<std::uint64_t>::max() - 1;
+  Values values;
+  values.joints[0].joint_id = "root\"\\";
+  auto bindings = scene.Bindings();
+#if AR_ABI_VERSION >= 5
+  ArVertexUv uvs[3]{{"face", 2, {.5, 1}}, {"face", 0, {0, 0}}, {"face", 1, {.25, .5}}};
+  bindings.uvs = {{scene.mesh, {1, 2, 0}}};
+#endif
+  ArSourceSample sample{"source", "actor", "pose:clip\"\\", "test.provider",
+      AR_SOURCE_POSE, AR_OBSERVATION_VALID, AR_SAMPLE_HELD, .25, 1, 0, .25};
+  Toon::AvatarStateAdapter adapter;
+  Toon::FrameSnapshot output;
+  std::vector<std::string> records;
+  std::string error, captured = "unmodified";
+  for (unsigned step = 0; step < 6; ++step) {
+    const bool animated = step == 1 || step == 4;
+    values = Values{};
+    values.joints[0].joint_id = "root\"\\";
+    if (animated) values.Sample(1);
+    values.visibility.visible = animated ? 0U : 1U;
+    auto view = values.View(step == 1 || step == 4 ? 2 : step == 5 ? 3 : 1, step == 2 ? 2 : 1);
+    view.instance = step < 3 ? firstInstance : firstInstance - 1;
+    view.layout_id = "capture.\"\\\xe6\x97\xa5";
+    view.evaluation_seconds = animated ? 1 : 0;
+    view.samples = &sample;
+    view.sample_count = 1;
+#if AR_ABI_VERSION >= 5
+    for (auto& uv : uvs) {
+      uv.value[0] = uv.vertex_index * .25 + (animated ? .125 : 0);
+      uv.value[1] = uv.vertex_index * .5;
+    }
+    view.vertex_uvs = uvs;
+    view.vertex_uv_count = 3;
+#endif
+    auto retained = Fake::Snapshot(view);
+    if (step == 0 || step == 3)
+      Check(adapter.Bind(view, base, 1, bindings, error), error.c_str());
+    Check(adapter.Apply(retained, base, 1, output, error, &captured), error.c_str());
+    Check(!captured.empty() && captured.front() == '{', "consumer capture missing");
+    records.push_back(captured);
+    const auto accepted = captured;
+    auto bad = view;
+    bad.instance = firstInstance - 2;
+    auto wrongInstance = Fake::Snapshot(bad);
+    Check(!adapter.Apply(wrongInstance, base, 1, output, error, &captured) && captured == accepted,
+        "refused instance replaced consumer capture");
+    if (step == 2) {
+      bad = view; bad.generation = 1;
+      auto stale = Fake::Snapshot(bad);
+      Check(!adapter.Apply(stale, base, 1, output, error, &captured) && captured == accepted,
+          "stale generation replaced consumer capture");
+    }
+    Check(adapter.Apply(retained, base, 1, output, error, &captured) && captured == accepted,
+        "duplicate delivery changed consumer capture");
+  }
+  if (path) {
+    const std::u8string utf8Path(path, path + std::char_traits<char>::length(path));
+    std::ofstream file(std::filesystem::path(utf8Path), std::ios::binary);
+    file << '[';
+    for (std::size_t i = 0; i < records.size(); ++i) file << (i ? ",\n" : "\n") << records[i];
+    file << "\n]\n";
+    Check(bool(file), "cannot write consumer state output");
+  }
+}
+
 ArStatus AR_CALL Evaluate(void*, void*, const ArEvaluationContext* c, const ArStateWriter* w) {
   Values values;
   values.Sample(c->input->evaluation_seconds);
@@ -627,7 +698,10 @@ void Runtime(const char* path) {
   auto base = scene.world.Commit();
   Toon::AvatarStateAdapter adapter;
   Toon::FrameSnapshot output;
-  Check(adapter.Bind(*old.View(), base, 1, scene.Bindings(), error) && adapter.Apply(old, base, 1, output, error), error.c_str());
+  std::string received;
+  Check(adapter.Bind(*old.View(), base, 1, scene.Bindings(), error) && adapter.Apply(old, base, 1, output, error, &received), error.c_str());
+  Check(received.find("\"instance\":" + std::to_string(instance) + ",") != std::string::npos,
+      "real runtime capture lost instance identity");
   Check(adapter.IdentityInfo().input_revision == 42 && std::abs((*output.meshes[0].morph_weights)[0] - .3F) < 1e-6F,
       "real runtime output mapping failed");
   Check(api.reset_instance(runtime, instance, 2) == AR_OK, "runtime reset failed");
@@ -638,12 +712,13 @@ void Runtime(const char* path) {
   Toon::RetainedAvatarSnapshot current;
   Check(current.Reset(api, handle, error), error.c_str());
   api.release_snapshot(handle);
-  Check(adapter.Apply(current, base, 1, output, error), error.c_str());
-  Check(!adapter.Apply(old, base, 1, output, error), "old retained generation accepted");
+  Check(adapter.Apply(current, base, 1, output, error, &received), error.c_str());
+  const auto accepted = received;
+  Check(!adapter.Apply(old, base, 1, output, error, &received) && received == accepted, "old retained generation accepted or captured");
   Check(api.destroy_instance(runtime, instance) == AR_OK && api.destroy_runtime(runtime) == AR_OK, "runtime teardown failed");
   Check(old.View()->input_revision == 42 && current.View()->input_revision == 43 && old.View()->joints[0].local.translation[0] == .05,
       "snapshot lifetime depended on runtime or reset");
-  Check(adapter.Apply(current, base, 1, output, error), error.c_str());
+  Check(adapter.Apply(current, base, 1, output, error, &received) && received == accepted, "retained unload capture changed");
   current.Clear();
   old.Clear();
 #ifdef _WIN32
@@ -1244,6 +1319,7 @@ int main(int argc, char** argv) {
     ScaledEmissive();
     Inbetweens();
     State();
+    StateOutput(argc == 3 && std::string(argv[1]) == "--state-output" ? argv[2] : nullptr);
 #if AR_ABI_VERSION >= 5
     DensePrimaryUvs();
     PrimaryUvs();

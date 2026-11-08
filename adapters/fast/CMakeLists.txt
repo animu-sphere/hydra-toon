@@ -4,7 +4,7 @@ find_path(TOON_AVATAR_RUNTIME_INCLUDE_DIR avatarRuntime/api.h
 if(NOT TOON_AVATAR_RUNTIME_INCLUDE_DIR)
   message(FATAL_ERROR "TOON_ENABLE_AVATAR_STATE requires TOON_AVATAR_RUNTIME_INCLUDE_DIR")
 endif()
-add_library(toon-avatar-state STATIC avatar_state.cpp)
+add_library(toon-avatar-state STATIC avatar_state.cpp avatar_state_json.cpp)
 target_include_directories(toon-avatar-state PRIVATE "${PROJECT_SOURCE_DIR}/core/render-world")
 add_library(Toon::AvatarState ALIAS toon-avatar-state)
 set_target_properties(toon-avatar-state PROPERTIES EXPORT_NAME AvatarState)
@@ -26,6 +26,8 @@ if(TOON_BUILD_TESTS)
   target_link_libraries(toon-avatar-state-test PRIVATE Toon::AvatarState Toon::Vulkan)
   target_link_libraries(toon-avatar-state-test PRIVATE ${CMAKE_DL_LIBS})
   add_test(NAME toon-avatar-state COMMAND toon-avatar-state-test)
+  add_test(NAME toon-avatar-state-output COMMAND toon-avatar-state-test
+    --state-output "${CMAKE_CURRENT_BINARY_DIR}/received-state.json")
   configure_file(check-installed.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/check-installed.cmake" @ONLY)
   add_test(NAME toon-avatar-state-installed COMMAND "${CMAKE_COMMAND}"
     "-DCONFIG=$<CONFIG>" -P "${CMAKE_CURRENT_BINARY_DIR}/check-installed.cmake")

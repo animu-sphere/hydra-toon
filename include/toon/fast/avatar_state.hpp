@@ -136,6 +136,13 @@ public:
   // timestamp. This API copies records and allocates changed dynamic arrays.
   bool Apply(const RetainedAvatarSnapshot& state, const FrameSnapshot& scene,
       std::uint64_t epoch, FrameSnapshot& output, std::string& error);
+  // Opt-in diagnostic export in usd-avatar-runtime's --state-output format:
+  // the accepted input values before palette/subshape/material/UV conversion.
+  // On success replaces *received_state with one JSON object; on failure leaves
+  // it unchanged. nullptr performs no serialization or capture allocations.
+  bool Apply(const RetainedAvatarSnapshot& state, const FrameSnapshot& scene,
+      std::uint64_t epoch, FrameSnapshot& output, std::string& error,
+      std::string* received_state);
   // Release uses the same baseline route, with fresh revisions when needed.
   bool Release(const FrameSnapshot& scene, std::uint64_t epoch,
       FrameSnapshot& output, std::string& error);

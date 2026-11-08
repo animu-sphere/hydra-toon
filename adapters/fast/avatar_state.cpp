@@ -10,6 +10,9 @@
 #include <utility>
 
 namespace Toon {
+namespace detail {
+std::string AvatarStateJson(const ArStateView& state);
+}
 namespace {
 bool Fail(std::string& error, const char* reason) {
   error = reason;
@@ -628,6 +631,10 @@ void AvatarStateAdapter::Publish(FrameSnapshot candidate, FrameSnapshot& output)
 
 bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameSnapshot& scene,
     std::uint64_t epoch, FrameSnapshot& output, std::string& error) {
+  return Apply(state, scene, epoch, output, error, nullptr);
+}
+bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameSnapshot& scene,
+    std::uint64_t epoch, FrameSnapshot& output, std::string& error, std::string* received_state) {
   const auto* s = state.View();
   if (!s)
     return Fail(error, "no retained runtime snapshot");
@@ -758,6 +765,13 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
     }
   }
 #endif
+  // Capture only after every conversion has succeeded, using the actual
+  // consumer input rather than reconstructing it from renderer palettes.
+  // Construct before publishing, so allocation failure cannot publish half a
+  // diagnostic result. The ordinary Apply path creates no capture buffers.
+  std::string captured;
+  if (received_state)
+    captured = detail::AvatarStateJson(*s);
   Publish(std::move(candidate), output);
   identity_.frame = s->frame_id;
   identity_.generation = s->generation;
@@ -765,6 +779,8 @@ bool AvatarStateAdapter::Apply(const RetainedAvatarSnapshot& state, const FrameS
   identity_.active = true;
   generation_ = s->generation;
   frame_ = s->frame_id;
+  if (received_state)
+    received_state->swap(captured);
   error.clear();
   return true;
 }
