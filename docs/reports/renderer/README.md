@@ -6,6 +6,7 @@ finding gets a new report and a one-line forward note on the old one.
 
 | Report | Subject |
 | --- | --- |
+| [123](123-2026-11-08-avatar-state-provenance-export.md) | Versioned capabilities and complete source/actor/evaluator/clock export; shared sample channel identities, independent oracle and retained runtime capture |
 | [122](122-2026-11-08-avatar-state-export.md) | Opt-in accepted-input JSON export; six-state headless Direct consumer comparison with an independent runtime-owned oracle, identity/visibility omission controls and retained native-runtime capture |
 | [121](121-2026-11-05-tessera-viewport-ui.md) | Tessera v0.6.0 dedicated scene pane, resizable Inspector and camera toolbar; window-free input/layout contracts, 1x/4x native Vulkan comparisons and upstream capture/scrollbar requests |
 | [120](120-2026-11-01-mmd-session-from-published-pin.md) | `toon-viewport-mmd` from the published pin of `avatarMmdSession` 0.4.0: 24 private models with no refusals or mismatches |

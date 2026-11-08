@@ -12,7 +12,7 @@ std::string AvatarStateJson(const ArStateView& s) {
   out.precision(17);
   const auto text = [&](const char* value) {
     out << '"';
-    for (const unsigned char c : std::string(value)) {
+    for (const unsigned char c : std::string(value ? value : "")) {
       if (c == '"' || c == '\\')
         out << '\\' << static_cast<char>(c);
       else if (c < 32)
@@ -35,8 +35,9 @@ std::string AvatarStateJson(const ArStateView& s) {
       << ",\"seconds\":" << s.evaluation_seconds
       << ",\"capabilities\":[";
   for (std::uint32_t i = 0; i < s.capability_count; ++i) {
-    out << (i ? "," : "");
+    out << (i ? "," : "") << "{\"id\":";
     text(s.capabilities[i].id);
+    out << ",\"version\":" << s.capabilities[i].version << '}';
   }
   out << "],\"joints\":[";
   for (std::uint32_t i = 0; i < s.joint_count; ++i) {
@@ -93,10 +94,18 @@ std::string AvatarStateJson(const ArStateView& s) {
   out << "],\"samples\":[";
   for (std::uint32_t i = 0; i < s.sample_count; ++i) {
     const auto& sample = s.samples[i];
-    out << (i ? "," : "") << "{\"channel\":";
+    out << (i ? "," : "") << "{\"source\":";
+    text(sample.source_id);
+    out << ",\"actor\":";
+    text(sample.actor_id);
+    out << ",\"channel\":";
     text(sample.channel_id);
+    out << ",\"evaluator\":";
+    text(sample.evaluator_id);
     out << ",\"kind\":" << sample.kind << ",\"validity\":" << sample.validity
-        << ",\"resolution\":" << sample.resolution << ",\"source_seconds\":" << sample.source_seconds << '}';
+        << ",\"resolution\":" << sample.resolution << ",\"source_seconds\":" << sample.source_seconds
+        << ",\"clock_scale\":" << sample.clock_scale << ",\"clock_offset\":" << sample.clock_offset
+        << ",\"runtime_seconds\":" << sample.runtime_seconds << '}';
   }
   out << "]}";
   return out.str();

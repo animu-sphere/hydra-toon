@@ -576,8 +576,15 @@ void StateOutput(const char* path = nullptr) {
   ArVertexUv uvs[3]{{"face", 2, {.5, 1}}, {"face", 0, {0, 0}}, {"face", 1, {.25, .5}}};
   bindings.uvs = {{scene.mesh, {1, 2, 0}}};
 #endif
-  ArSourceSample sample{"source", "actor", "pose:clip\"\\", "test.provider",
-      AR_SOURCE_POSE, AR_OBSERVATION_VALID, AR_SAMPLE_HELD, .25, 1, 0, .25};
+  const ArCapability capability{"test.resolved", 7};
+  ArSourceSample samples[]{
+      {"source\"\\", "actor", "pose:clip\"\\", "test.provider\"\\\xe6\x97\xa5",
+          AR_SOURCE_POSE, AR_OBSERVATION_VALID, AR_SAMPLE_HELD, .25, 2, -.125, .375},
+      {"other", "actor", "pose:clip\"\\", "test.other",
+          AR_SOURCE_POSE, AR_OBSERVATION_VALID, AR_SAMPLE_INTERPOLATED, .5, .5, -2, -1.75},
+      {"source\"\\", "other actor", "pose:clip\"\\", "",
+          AR_SOURCE_SCALAR, AR_OBSERVATION_VALID, AR_SAMPLE_SELECTED, 0, 1, 0, 0},
+  };
   Toon::AvatarStateAdapter adapter;
   Toon::FrameSnapshot output;
   std::vector<std::string> records;
@@ -592,8 +599,9 @@ void StateOutput(const char* path = nullptr) {
     view.instance = step < 3 ? firstInstance : firstInstance - 1;
     view.layout_id = "capture.\"\\\xe6\x97\xa5";
     view.evaluation_seconds = animated ? 1 : 0;
-    view.samples = &sample;
-    view.sample_count = 1;
+    view.capabilities = &capability;
+    view.samples = samples;
+    view.sample_count = 3;
 #if AR_ABI_VERSION >= 5
     for (auto& uv : uvs) {
       uv.value[0] = uv.vertex_index * .25 + (animated ? .125 : 0);
