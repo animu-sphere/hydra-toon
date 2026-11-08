@@ -109,6 +109,18 @@ linked. The optional target is installed in a separate CMake export, loaded
 only by `find_package(Toon COMPONENTS AvatarState)`; this component requires
 the runtime headers at consumption time. Core-only consumers require none.
 
+`AvatarStateAdapter::Apply` also has an opt-in diagnostic overload taking a
+`std::string*` for one accepted-input JSON object in the runtime owner's
+[state comparison format](https://github.com/animu-sphere/usd-avatar-runtime/blob/main/docs/architecture/OUTPUT_PATHS.md#4-parity-evidence).
+Capture reads the actual retained input after all conversion checks succeed and
+reports its parent-local joints before palette mapping. Refused deliveries leave
+the prior capture unchanged. Passing no capture pointer does no serialization or
+capture storage. The host owns file I/O and collects objects in an array.
+`toon-avatar-state-test --state-output <file>` exports a six-state generated
+headless probe covering reset, recreated instance, visibility and ABI-5 primary
+UVs. ABI-4 export omits UVs and must declare that channel unsupported in the
+comparison. This API does not add viewport or Hydra exports.
+
 MMD material bindings map complete diffuse/edge RGBA, specular/ambient RGB,
 power/edge size and independent sampled texture/sphere/toon multiply/add
 coefficients. These MMD fields require an MMD resident material; MToon fields
